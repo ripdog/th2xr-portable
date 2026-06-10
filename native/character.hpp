@@ -23,6 +23,7 @@ public:
     CharacterState& set(int number, int pose, int locate, int layer,
                         int brightness, int alpha);
     void remove(int number);
+    void clear();
     CharacterState* find(int number);
     const CharacterState* find(int number) const;
     std::vector<CharacterState> ordered() const;

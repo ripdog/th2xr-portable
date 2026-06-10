@@ -47,6 +47,11 @@ void Characters::remove(int number)
     });
 }
 
+void Characters::clear()
+{
+    characters_.clear();
+}
+
 CharacterState* Characters::find(int number)
 {
     const auto found = std::find_if(

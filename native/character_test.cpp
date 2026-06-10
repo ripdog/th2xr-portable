@@ -27,4 +27,8 @@ int main()
     if (characters.find(1) || !characters.find(2)) {
         return 4;
     }
+    characters.clear();
+    if (!characters.ordered().empty()) {
+        return 5;
+    }
 }

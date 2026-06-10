@@ -567,6 +567,11 @@ private:
         bg_is_visual_ = true;
         background_ = load_texture(
             renderer_, graphics_, std::format("v{:06d}.tga", visual));
+        const bool keep_characters = number(event, 4) > 0;
+        if (!keep_characters) {
+            characters_.clear();
+            character_textures_ = {};
+        }
     }
 
     void restore_background()
