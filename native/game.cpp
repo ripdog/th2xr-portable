@@ -161,8 +161,20 @@ public:
         ui_confirm_buttons_ = try_load("sys0251.tga");
         ui_save_controls_ = try_load("sys0203.tga");
         title_background_ = try_load("t0000.tga");
-        title_foreground_ = try_load("t0001.tga");
         title_menu_ = try_load("t0010.tga");
+        if (const auto* entry = graphics_.find("t0001.tga")) {
+            Surface loaded(th2::load_image(graphics_.read(*entry), entry->name));
+            title_foreground_pixels_.reset(
+                SDL_ConvertSurface(loaded.get(), SDL_PIXELFORMAT_RGBA32));
+        }
+        title_mask_ = load_transition_mask(
+            0x80 + 52, title_mask_width_, title_mask_height_);
+        title_masked_ = Texture(SDL_CreateTexture(
+            renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
+            800, 600));
+        if (title_masked_) {
+            SDL_SetTextureBlendMode(title_masked_.get(), SDL_BLENDMODE_BLEND);
+        }
         title_started_ = std::chrono::steady_clock::now();
     }
 
@@ -311,6 +323,7 @@ public:
                 advance();
             }
             update_audio();
+            update_title();
             draw();
             update_transition();
             update_background_fade();
@@ -410,8 +423,12 @@ private:
     Texture ui_confirm_buttons_;
     Texture ui_save_controls_;
     Texture title_background_;
-    Texture title_foreground_;
     Texture title_menu_;
+    Surface title_foreground_pixels_;
+    Texture title_masked_;
+    std::vector<std::uint8_t> title_mask_;
+    int title_mask_width_ = 0;
+    int title_mask_height_ = 0;
     th2::Message message_;
     bool message_ends_block_ = true;
     int tone_ = 0;
@@ -444,6 +461,8 @@ private:
     UiMode save_return_mode_ = UiMode::game;
     int title_highlight_ = 0;
     std::chrono::steady_clock::time_point title_started_{};
+    std::optional<std::chrono::steady_clock::time_point> title_exit_started_;
+    bool title_exit_game_ = false;
     int menu_highlight_ = 0;
     struct BacklogEntry { std::string text; };
     std::vector<BacklogEntry> backlog_;
@@ -1721,7 +1740,6 @@ private:
 
     void start_new_game()
     {
-        begin_transition(0, 32, 128, true);
         runtime_.load("EV_0301MORNING.SDT");
         ui_mode_ = UiMode::game;
         message_ = th2::Message{};
@@ -1731,6 +1749,34 @@ private:
         background_.reset();
         bg_scene_ = -1;
         advance();
+    }
+
+    void begin_title_exit(bool start_game)
+    {
+        if (title_exit_started_) {
+            return;
+        }
+        title_exit_game_ = start_game;
+        title_exit_started_ = std::chrono::steady_clock::now();
+    }
+
+    void update_title()
+    {
+        if (!title_exit_started_) {
+            return;
+        }
+        const auto elapsed =
+            std::chrono::steady_clock::now() - *title_exit_started_;
+        if (elapsed < std::chrono::milliseconds(32 * 1000 / 60)) {
+            return;
+        }
+        const bool start_game = title_exit_game_;
+        title_exit_started_.reset();
+        if (start_game) {
+            start_new_game();
+        } else {
+            running_ = false;
+        }
     }
 
     void close_system_menu()
@@ -1858,38 +1904,95 @@ private:
 
     void draw_title()
     {
-        const float elapsed = std::chrono::duration<float>(
-            std::chrono::steady_clock::now() - title_started_).count();
+        const auto now = std::chrono::steady_clock::now();
+        const int frame = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - title_started_).count() * 60 / 1000);
+        float brightness = 1.0f;
+        if (title_exit_started_) {
+            const int exit_frame = static_cast<int>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - *title_exit_started_).count() * 60 / 1000);
+            brightness = std::clamp(
+                1.0f - static_cast<float>(exit_frame) / 16.0f, 0.0f, 1.0f);
+        }
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
         SDL_RenderClear(renderer_);
         if (title_background_) {
-            SDL_SetTextureAlphaModFloat(
-                title_background_.get(), std::clamp(elapsed / 1.0f, 0.0f, 1.0f));
+            SDL_SetTextureColorModFloat(
+                title_background_.get(), brightness, brightness, brightness);
+            SDL_SetTextureAlphaModFloat(title_background_.get(),
+                std::clamp(static_cast<float>(frame) / 16.0f, 0.0f, 1.0f));
             SDL_RenderTexture(renderer_, title_background_.get(), nullptr, nullptr);
         }
-        if (title_foreground_) {
-            SDL_SetTextureAlphaModFloat(
-                title_foreground_.get(),
-                std::clamp((elapsed - 0.55f) / 1.25f, 0.0f, 1.0f));
-            SDL_RenderTexture(renderer_, title_foreground_.get(), nullptr, nullptr);
+        if (title_foreground_pixels_ && title_masked_ && frame >= 16) {
+            const int vague = 32;
+            const int rate = std::clamp((frame - 16) * 8, 0, 256);
+            const int blend_offset = rate * (256 + vague) / 256;
+            std::vector<std::uint8_t> pixels(800 * 600 * 4);
+            const auto* source = static_cast<const std::uint8_t*>(
+                title_foreground_pixels_->pixels);
+            for (int y = 0; y < 600; ++y) {
+                const int mask_y = y * title_mask_height_ / 600;
+                for (int x = 0; x < 800; ++x) {
+                    const int mask_x = x * title_mask_width_ / 800;
+                    const int mask = title_mask_[
+                        static_cast<std::size_t>(mask_y) * title_mask_width_
+                        + mask_x];
+                    const int alpha = std::clamp(
+                        (mask + blend_offset - 256) * 256 / vague, 0, 255);
+                    const auto source_offset =
+                        static_cast<std::size_t>(y)
+                            * title_foreground_pixels_->pitch
+                        + static_cast<std::size_t>(x) * 4;
+                    const auto output_offset =
+                        (static_cast<std::size_t>(y) * 800 + x) * 4;
+                    for (int channel = 0; channel < 3; ++channel) {
+                        pixels[output_offset + channel] =
+                            source[source_offset + channel];
+                    }
+                    pixels[output_offset + 3] =
+                        static_cast<std::uint8_t>(alpha);
+                }
+            }
+            SDL_UpdateTexture(
+                title_masked_.get(), nullptr, pixels.data(), 800 * 4);
+            SDL_SetTextureColorModFloat(
+                title_masked_.get(), brightness, brightness, brightness);
+            SDL_RenderTexture(renderer_, title_masked_.get(), nullptr, nullptr);
         }
-        if (!title_menu_) {
+        if (!title_menu_ || frame < 48) {
             return;
         }
 
-        const float logo_alpha =
-            std::clamp((elapsed - 1.4f) / 0.5f, 0.0f, 1.0f);
-        SDL_SetTextureAlphaModFloat(title_menu_.get(), logo_alpha);
+        SDL_SetTextureColorModFloat(
+            title_menu_.get(), brightness, brightness, brightness);
+        SDL_SetTextureAlphaModFloat(title_menu_.get(), 1.0f);
         const SDL_FRect logo_src{564.0f, 0.0f, 177.0f, 38.0f};
         const SDL_FRect logo_dst{477.0f, 304.0f, 177.0f, 38.0f};
         SDL_RenderTexture(renderer_, title_menu_.get(), &logo_src, &logo_dst);
+        if (frame >= 80 && frame < 88) {
+            const float flare = 1.0f - static_cast<float>(frame - 80) / 8.0f;
+            const float zoom = static_cast<float>(frame - 80) * 8.0f / 256.0f;
+            SDL_SetTextureBlendMode(title_menu_.get(), SDL_BLENDMODE_ADD);
+            SDL_SetTextureAlphaModFloat(title_menu_.get(), flare);
+            const SDL_FRect flare_dst{
+                logo_dst.x - logo_dst.w * zoom / 2.0f,
+                logo_dst.y - logo_dst.h * zoom / 2.0f,
+                logo_dst.w * (1.0f + zoom),
+                logo_dst.h * (1.0f + zoom)};
+            SDL_RenderTexture(
+                renderer_, title_menu_.get(), &logo_src, &flare_dst);
+            SDL_SetTextureBlendMode(title_menu_.get(), SDL_BLENDMODE_BLEND);
+        }
 
         for (int i = 0; i < 5; ++i) {
             if (i == 3) {
                 continue;
             }
             const float alpha = std::clamp(
-                (elapsed - 1.8f - i * 0.07f) / 0.28f, 0.0f, 1.0f);
+                static_cast<float>(frame - 48 - 40 - i * 4) / 16.0f,
+                0.0f, 1.0f);
             SDL_SetTextureAlphaModFloat(title_menu_.get(), alpha);
             const float source_x = i == title_highlight_ ? 188.0f : 0.0f;
             const SDL_FRect src{
@@ -1905,14 +2008,14 @@ private:
     {
         switch (title_highlight_) {
         case 0:
-            start_new_game();
+            begin_title_exit(true);
             break;
         case 1:
             save_snapshot_ = capture_frame_pixels();
             open_save_load(UiMode::load);
             break;
         case 4:
-            running_ = false;
+            begin_title_exit(false);
             break;
         default:
             break;
@@ -1921,6 +2024,13 @@ private:
 
     void handle_title_input(const SDL_Event& event)
     {
+        const int frame = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - title_started_).count()
+            * 60 / 1000);
+        if (frame < 120 || title_exit_started_) {
+            return;
+        }
         if (event.type == SDL_EVENT_KEY_DOWN) {
             if (event.key.key == SDLK_UP) {
                 do {
