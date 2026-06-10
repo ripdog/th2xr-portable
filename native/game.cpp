@@ -160,7 +160,12 @@ public:
                     advance();
                 }
             }
-            if (wake_time_ && std::chrono::steady_clock::now() >= *wake_time_) {
+            const bool control_held =
+                (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
+            if (control_held) {
+                skip();
+            } else if (wake_time_
+                       && std::chrono::steady_clock::now() >= *wake_time_) {
                 wake_time_.reset();
                 advance();
             }
@@ -213,6 +218,22 @@ private:
     bool waiting_for_input_ = false;
     std::optional<std::chrono::steady_clock::time_point> wake_time_;
     std::optional<AudioWait> audio_wait_;
+
+    void skip()
+    {
+        wake_time_.reset();
+        if (audio_wait_) {
+            auto& channel = audio_wait_->kind == AudioWaitKind::sound_effect
+                ? se_channels_.at(audio_wait_->channel)
+                : voice_channels_.at(audio_wait_->channel);
+            channel.stop();
+            audio_wait_.reset();
+        }
+        while (waiting_for_input_ && message_.reveal_next()) {
+        }
+        waiting_for_input_ = false;
+        advance(true);
+    }
 
     CharacterTexture& character_texture(int number)
     {
@@ -488,7 +509,7 @@ private:
         }
     }
 
-    void advance()
+    void advance(bool skipping = false)
     {
         if (wake_time_ || audio_wait_) {
             return;
@@ -505,6 +526,9 @@ private:
             }
             if (step.reason == th2::VmYield::wait_frames
                 || step.reason == th2::VmYield::wait_time) {
+                if (skipping) {
+                    continue;
+                }
                 const auto milliseconds = step.reason == th2::VmYield::wait_frames
                     ? step.wait_value * 1000 / 60
                     : step.wait_value;
@@ -524,7 +548,21 @@ private:
                               << error.what() << '\n';
                 }
                 if (audio_wait_) {
+                    if (skipping) {
+                        auto& channel =
+                            audio_wait_->kind == AudioWaitKind::sound_effect
+                            ? se_channels_.at(audio_wait_->channel)
+                            : voice_channels_.at(audio_wait_->channel);
+                        channel.stop();
+                        audio_wait_.reset();
+                        continue;
+                    }
                     break;
+                }
+                if (skipping && waiting_for_input_) {
+                    while (message_.reveal_next()) {
+                    }
+                    waiting_for_input_ = false;
                 }
             }
         }
