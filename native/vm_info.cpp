@@ -1,9 +1,11 @@
 #include "archive.hpp"
+#include "event.hpp"
 #include "scenario.hpp"
 #include "vm.hpp"
 
 #include <exception>
 #include <iostream>
+#include <string>
 
 int main(int argc, char** argv)
 {
@@ -24,7 +26,19 @@ int main(int argc, char** argv)
         for (std::size_t count = 0; count < 10000; ++count) {
             const auto result = vm.run();
             std::cout << result.instruction.offset << ": "
-                      << result.instruction.name << '\n';
+                      << result.instruction.name;
+            if (result.reason == th2::VmYield::event) {
+                const auto event = th2::decode_event(
+                    result.instruction, result.bytes, vm.registers());
+                for (const auto& argument : event.arguments) {
+                    if (const auto* text = std::get_if<std::string>(&argument)) {
+                        std::cout << " \"" << *text << '"';
+                    } else if (const auto* number = std::get_if<std::int32_t>(&argument)) {
+                        std::cout << ' ' << *number;
+                    }
+                }
+            }
+            std::cout << '\n';
             if (result.reason == th2::VmYield::ended
                 || result.reason == th2::VmYield::load_script) {
                 return 0;

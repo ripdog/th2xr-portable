@@ -37,6 +37,7 @@ public:
 
     std::int32_t reg(std::size_t index) const;
     void set_reg(std::size_t index, std::int32_t value);
+    std::span<const std::int32_t> registers() const { return registers_; }
     std::size_t pc() const { return pc_; }
 
 private:
