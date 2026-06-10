@@ -134,8 +134,6 @@ public:
         }
         SDL_SetRenderLogicalPresentation(
             renderer_, 800, 600, SDL_LOGICAL_PRESENTATION_LETTERBOX);
-        runtime_.load("EV_0301MORNING.SDT");
-
         auto try_load = [&](std::string_view name) -> Texture {
             const auto* entry = graphics_.find(name);
             if (!entry) return {};
@@ -162,6 +160,10 @@ public:
         ui_load_prompt_ = try_load("sys0350.tga");
         ui_confirm_buttons_ = try_load("sys0251.tga");
         ui_save_controls_ = try_load("sys0203.tga");
+        title_background_ = try_load("t0000.tga");
+        title_foreground_ = try_load("t0001.tga");
+        title_menu_ = try_load("t0010.tga");
+        title_started_ = std::chrono::steady_clock::now();
     }
 
     ~Game()
@@ -177,7 +179,6 @@ public:
 
     int run()
     {
-        advance();
         while (running_) {
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
@@ -191,6 +192,10 @@ public:
                 }
 
                 // UI mode routing
+                if (ui_mode_ == UiMode::title) {
+                    handle_title_input(event);
+                    continue;
+                }
                 if (ui_mode_ == UiMode::system_menu) {
                     handle_system_menu_input(event);
                     continue;
@@ -404,6 +409,9 @@ private:
     Texture ui_load_prompt_;
     Texture ui_confirm_buttons_;
     Texture ui_save_controls_;
+    Texture title_background_;
+    Texture title_foreground_;
+    Texture title_menu_;
     th2::Message message_;
     bool message_ends_block_ = true;
     int tone_ = 0;
@@ -431,8 +439,11 @@ private:
     bool choice_ex_ = false;
 
     // --- UI State ---
-    enum class UiMode { game, system_menu, backlog, save, load };
-    UiMode ui_mode_ = UiMode::game;
+    enum class UiMode { title, game, system_menu, backlog, save, load };
+    UiMode ui_mode_ = UiMode::title;
+    UiMode save_return_mode_ = UiMode::game;
+    int title_highlight_ = 0;
+    std::chrono::steady_clock::time_point title_started_{};
     int menu_highlight_ = 0;
     struct BacklogEntry { std::string text; };
     std::vector<BacklogEntry> backlog_;
@@ -1708,6 +1719,20 @@ private:
         menu_highlight_ = 4;
     }
 
+    void start_new_game()
+    {
+        begin_transition(0, 32, 128, true);
+        runtime_.load("EV_0301MORNING.SDT");
+        ui_mode_ = UiMode::game;
+        message_ = th2::Message{};
+        backlog_.clear();
+        characters_.clear();
+        character_textures_ = {};
+        background_.reset();
+        bg_scene_ = -1;
+        advance();
+    }
+
     void close_system_menu()
     {
         begin_transition(1, 12, 128, false);
@@ -1744,6 +1769,8 @@ private:
         if (!save_snapshot_) {
             save_snapshot_ = capture_frame_pixels();
         }
+        save_return_mode_ =
+            ui_mode_ == UiMode::title ? UiMode::title : UiMode::game;
         ui_mode_ = mode;
         save_confirm_slot_ = -1;
         save_hover_ = -1;
@@ -1758,7 +1785,7 @@ private:
     {
         save_confirm_slot_ = -1;
         begin_transition(1, 12, 128, false);
-        ui_mode_ = UiMode::game;
+        ui_mode_ = save_return_mode_;
     }
 
     void draw_system_menu()
@@ -1826,6 +1853,117 @@ private:
                        menu_highlight_ == 4 ? 255 : 128,
                        menu_highlight_ == 4 ? 255 : 128,
                        menu_highlight_ == 4 ? 255 : 128);
+        }
+    }
+
+    void draw_title()
+    {
+        const float elapsed = std::chrono::duration<float>(
+            std::chrono::steady_clock::now() - title_started_).count();
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+        SDL_RenderClear(renderer_);
+        if (title_background_) {
+            SDL_SetTextureAlphaModFloat(
+                title_background_.get(), std::clamp(elapsed / 1.0f, 0.0f, 1.0f));
+            SDL_RenderTexture(renderer_, title_background_.get(), nullptr, nullptr);
+        }
+        if (title_foreground_) {
+            SDL_SetTextureAlphaModFloat(
+                title_foreground_.get(),
+                std::clamp((elapsed - 0.55f) / 1.25f, 0.0f, 1.0f));
+            SDL_RenderTexture(renderer_, title_foreground_.get(), nullptr, nullptr);
+        }
+        if (!title_menu_) {
+            return;
+        }
+
+        const float logo_alpha =
+            std::clamp((elapsed - 1.4f) / 0.5f, 0.0f, 1.0f);
+        SDL_SetTextureAlphaModFloat(title_menu_.get(), logo_alpha);
+        const SDL_FRect logo_src{564.0f, 0.0f, 177.0f, 38.0f};
+        const SDL_FRect logo_dst{477.0f, 304.0f, 177.0f, 38.0f};
+        SDL_RenderTexture(renderer_, title_menu_.get(), &logo_src, &logo_dst);
+
+        for (int i = 0; i < 5; ++i) {
+            if (i == 3) {
+                continue;
+            }
+            const float alpha = std::clamp(
+                (elapsed - 1.8f - i * 0.07f) / 0.28f, 0.0f, 1.0f);
+            SDL_SetTextureAlphaModFloat(title_menu_.get(), alpha);
+            const float source_x = i == title_highlight_ ? 188.0f : 0.0f;
+            const SDL_FRect src{
+                source_x, static_cast<float>(32 * i), 188.0f, 32.0f};
+            const SDL_FRect dst{
+                306.0f, static_cast<float>(385 + 40 * i), 188.0f, 32.0f};
+            SDL_RenderTexture(renderer_, title_menu_.get(), &src, &dst);
+        }
+        SDL_SetTextureAlphaModFloat(title_menu_.get(), 1.0f);
+    }
+
+    void activate_title_item()
+    {
+        switch (title_highlight_) {
+        case 0:
+            start_new_game();
+            break;
+        case 1:
+            save_snapshot_ = capture_frame_pixels();
+            open_save_load(UiMode::load);
+            break;
+        case 4:
+            running_ = false;
+            break;
+        default:
+            break;
+        }
+    }
+
+    void handle_title_input(const SDL_Event& event)
+    {
+        if (event.type == SDL_EVENT_KEY_DOWN) {
+            if (event.key.key == SDLK_UP) {
+                do {
+                    title_highlight_ = (title_highlight_ + 4) % 5;
+                } while (title_highlight_ == 3);
+            } else if (event.key.key == SDLK_DOWN) {
+                do {
+                    title_highlight_ = (title_highlight_ + 1) % 5;
+                } while (title_highlight_ == 3);
+            } else if (event.key.key == SDLK_RETURN
+                       || event.key.key == SDLK_SPACE) {
+                activate_title_item();
+            } else if (event.key.key == SDLK_ESCAPE) {
+                title_highlight_ = 4;
+            }
+        } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            const float x = event.motion.x;
+            const float y = event.motion.y;
+            if (x >= 306.0f && x < 494.0f) {
+                for (int i = 0; i < 5; ++i) {
+                    if (i == 3) continue;
+                    const float top = static_cast<float>(385 + 40 * i);
+                    if (y >= top && y < top + 32.0f) {
+                        title_highlight_ = i;
+                        break;
+                    }
+                }
+            }
+        } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                   && event.button.button == SDL_BUTTON_LEFT) {
+            const float x = event.button.x;
+            const float y = event.button.y;
+            if (x >= 306.0f && x < 494.0f) {
+                for (int i = 0; i < 5; ++i) {
+                    if (i == 3) continue;
+                    const float top = static_cast<float>(385 + 40 * i);
+                    if (y >= top && y < top + 32.0f) {
+                        title_highlight_ = i;
+                        activate_title_item();
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -2331,6 +2469,13 @@ private:
     {
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
         SDL_RenderClear(renderer_);
+        if (ui_mode_ == UiMode::title) {
+            draw_title();
+            if (!transition_) {
+                SDL_RenderPresent(renderer_);
+                return;
+            }
+        }
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
             if (overlays_[i] && overlay_layers_[i] <= 0) {
                 SDL_RenderTexture(renderer_, overlays_[i].get(), nullptr, nullptr);
