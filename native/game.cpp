@@ -146,21 +146,64 @@ public:
                 if (event.type == SDL_EVENT_QUIT) {
                     running_ = false;
                 } else if (event.type == SDL_EVENT_KEY_DOWN) {
-                    if (event.key.key == SDLK_ESCAPE) {
-                        running_ = false;
-                    } else if (event.key.key == SDLK_F11) {
-                        SDL_SetWindowFullscreen(
-                            window_, !(SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN));
-                    } else if (event.key.key == SDLK_RETURN
-                               || event.key.key == SDLK_SPACE) {
-                        advance();
+                    if (choosing_) {
+                        if (event.key.key == SDLK_RETURN
+                            || event.key.key == SDLK_SPACE) {
+                            choice_selected_ = choice_highlight_;
+                            advance();
+                        } else if (event.key.key == SDLK_UP) {
+                            if (choice_highlight_ > 0) {
+                                --choice_highlight_;
+                            }
+                        } else if (event.key.key == SDLK_DOWN) {
+                            if (choice_highlight_ + 1
+                                < static_cast<int>(choices_.size())) {
+                                ++choice_highlight_;
+                            }
+                        }
+                    } else {
+                        if (event.key.key == SDLK_ESCAPE) {
+                            running_ = false;
+                        } else if (event.key.key == SDLK_F11) {
+                            SDL_SetWindowFullscreen(
+                                window_, !(SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN));
+                        } else if (event.key.key == SDLK_RETURN
+                                   || event.key.key == SDLK_SPACE) {
+                            advance();
+                        }
                     }
                 } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
                            && event.button.button == SDL_BUTTON_LEFT) {
-                    advance();
+                    if (choosing_) {
+                        const float mouse_y = event.button.y;
+                        float y = choice_y_start();
+                        for (int i = 0;
+                             i < static_cast<int>(choices_.size()); ++i) {
+                            if (mouse_y >= y && mouse_y < y + 31.0f) {
+                                choice_selected_ = i;
+                                advance();
+                                break;
+                            }
+                            y += 31.0f;
+                        }
+                    } else {
+                        advance();
+                    }
                 } else if (event.type == SDL_EVENT_MOUSE_WHEEL
                            && event.wheel.y < 0) {
                     advance();
+                } else if (choosing_
+                           && event.type == SDL_EVENT_MOUSE_MOTION) {
+                    const float mouse_y = event.motion.y;
+                    float y = choice_y_start();
+                    for (int i = 0;
+                         i < static_cast<int>(choices_.size()); ++i) {
+                        if (mouse_y >= y && mouse_y < y + 31.0f) {
+                            choice_highlight_ = i;
+                            break;
+                        }
+                        y += 31.0f;
+                    }
                 }
             }
             const bool control_held =
@@ -227,8 +270,32 @@ private:
     std::optional<AudioWait> audio_wait_;
     std::chrono::steady_clock::time_point skip_next_time_{};
 
+    struct Choice {
+        std::string text;
+        int flag_no = -1;
+        int flag_value = 0;
+        std::string sno;
+    };
+    bool choosing_ = false;
+    std::vector<Choice> choices_;
+    int choice_highlight_ = 0;
+    int choice_selected_ = -1;
+    int choice_result_register_ = -1;
+    bool choice_ex_ = false;
+
+    float choice_y_start() const
+    {
+        if (!message_.empty()) {
+            return 104.0f;
+        }
+        return 468.0f;
+    }
+
     void skip()
     {
+        if (choosing_) {
+            return;
+        }
         wake_time_.reset();
         if (audio_wait_) {
             auto& channel = audio_wait_->kind == AudioWaitKind::sound_effect
@@ -517,6 +584,32 @@ private:
                 audio_wait_ = AudioWait{
                     AudioWaitKind::voice, static_cast<std::size_t>(channel)};
             }
+        } else if (name == "SetSelectMes") {
+            choices_.push_back(Choice{
+                text(event, 0),
+                number(event, 1),
+                number(event, 2),
+            });
+        } else if (name == "SetSelectMesEx") {
+            choices_.push_back(Choice{
+                text(event, 0),
+                number(event, 2),
+                number(event, 3),
+                text(event, 1),
+            });
+            choice_ex_ = true;
+        } else if (name == "SetSelect") {
+            choice_result_register_ =
+                std::get<th2::RegisterTarget>(event.arguments.at(0)).index;
+            choosing_ = true;
+            choice_highlight_ = 0;
+            choice_selected_ = -1;
+        } else if (name == "SetSelectEx") {
+            choice_result_register_ = -1;
+            choice_ex_ = true;
+            choosing_ = true;
+            choice_highlight_ = 0;
+            choice_selected_ = -1;
         }
     }
 
@@ -529,7 +622,25 @@ private:
             return;
         }
         waiting_for_input_ = false;
-        while (running_ && !waiting_for_input_) {
+        if (choosing_) {
+            if (choice_selected_ < 0) {
+                return;
+            }
+            if (choice_ex_) {
+                runtime_.load(choices_.at(choice_selected_).sno);
+            } else if (choice_result_register_ >= 0) {
+                runtime_.set_reg(
+                    static_cast<std::size_t>(choice_result_register_),
+                    choice_selected_);
+            }
+            choices_.clear();
+            choosing_ = false;
+            choice_highlight_ = 0;
+            choice_selected_ = -1;
+            choice_result_register_ = -1;
+            choice_ex_ = false;
+        }
+        while (running_ && !waiting_for_input_ && !choosing_) {
             const auto step = runtime_.run();
             if (step.reason == th2::VmYield::ended) {
                 running_ = false;
@@ -571,6 +682,9 @@ private:
                     break;
                 }
                 if (skipping && waiting_for_input_) {
+                    break;
+                }
+                if (choosing_) {
                     break;
                 }
             }
@@ -619,6 +733,26 @@ private:
                 if (y > 535.0f) {
                     break;
                 }
+            }
+        }
+        if (choosing_ && !choices_.empty()) {
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+            const float top = choice_y_start() - 8.0f;
+            const float height = choices_.size() * 31.0f + 16.0f;
+            SDL_FRect choice_bg{0.0f, top, 800.0f, height};
+            SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 180);
+            SDL_RenderFillRect(renderer_, &choice_bg);
+            float y = choice_y_start();
+            for (int i = 0; i < static_cast<int>(choices_.size()); ++i) {
+                const auto highlighted = i == choice_highlight_;
+                font_.draw(
+                    renderer_, 54.0f, y + 2.0f, choices_[i].text, 0, 0, 0);
+                font_.draw(
+                    renderer_, 52.0f, y, choices_[i].text,
+                    highlighted ? 255 : 128,
+                    highlighted ? 255 : 128,
+                    highlighted ? 255 : 128);
+                y += 31.0f;
             }
         }
         SDL_RenderPresent(renderer_);

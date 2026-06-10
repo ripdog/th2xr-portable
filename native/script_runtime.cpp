@@ -61,6 +61,16 @@ std::int32_t ScriptRuntime::flag(std::size_t index) const
     return flags_.at(index);
 }
 
+void ScriptRuntime::set_reg(std::size_t index, std::int32_t value)
+{
+    vm_->set_reg(index, value);
+}
+
+std::int32_t ScriptRuntime::reg(std::size_t index) const
+{
+    return vm_->reg(index);
+}
+
 bool ScriptRuntime::handle(const Event& event)
 {
     if (event.instruction.name == "SetFlag") {

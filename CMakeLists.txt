@@ -151,4 +151,10 @@ if(BUILD_TESTING)
     )
     target_link_libraries(th2-audio-test PRIVATE th2_audio th2_archive)
     add_test(NAME audio-decoder COMMAND th2-audio-test)
+
+    add_executable(th2-choice-test
+        native/choice_test.cpp
+    )
+    target_link_libraries(th2-choice-test PRIVATE th2_runtime)
+    add_test(NAME choice-events COMMAND th2-choice-test)
 endif()

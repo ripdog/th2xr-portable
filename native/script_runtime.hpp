@@ -27,6 +27,8 @@ public:
     ScriptStep run();
 
     std::int32_t flag(std::size_t index) const;
+    void set_reg(std::size_t index, std::int32_t value);
+    std::int32_t reg(std::size_t index) const;
     const std::string& script_name() const { return script_name_; }
 
 private:
