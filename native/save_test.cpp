@@ -5,6 +5,7 @@
 #include "script_runtime.hpp"
 
 #include <cstdint>
+#include <cmath>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -230,6 +231,56 @@ int test_flag_serialization()
     return 0;
 }
 
+int test_backlog_serialization()
+{
+    std::stringstream stream;
+    const std::vector<std::string> history{
+        "oldest block", "middle\nblock", "newest block",
+    };
+    const auto write_u32 = [](std::ostream& out, std::uint32_t value) {
+        for (int shift = 0; shift < 32; shift += 8) {
+            out.put(static_cast<char>(value >> shift));
+        }
+    };
+    const auto read_u32 = [](std::istream& in) {
+        std::uint32_t value = 0;
+        for (int shift = 0; shift < 32; shift += 8) {
+            value |= static_cast<std::uint32_t>(
+                static_cast<unsigned char>(in.get())) << shift;
+        }
+        return value;
+    };
+
+    write_u32(stream, history.size());
+    for (const auto& entry : history) {
+        write_u32(stream, entry.size());
+        stream.write(entry.data(), static_cast<std::streamsize>(entry.size()));
+    }
+    write_u32(stream, 2);
+
+    const auto count = read_u32(stream);
+    std::vector<std::string> restored;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        std::string entry(read_u32(stream), '\0');
+        stream.read(entry.data(), static_cast<std::streamsize>(entry.size()));
+        restored.push_back(std::move(entry));
+    }
+    const auto depth = read_u32(stream);
+    if (restored != history || depth != 2) return 1048;
+
+    const auto position = [](int history_size, int history_depth) {
+        return history_size == 0 ? 1.0f
+            : 1.0f - static_cast<float>(history_depth)
+                / static_cast<float>(history_size);
+    };
+    if (std::abs(position(3, 0) - 1.0f) > 0.0001f
+        || std::abs(position(3, 1) - 2.0f / 3.0f) > 0.0001f
+        || std::abs(position(3, 3)) > 0.0001f) {
+        return 1049;
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main()
@@ -240,5 +291,6 @@ int main()
     if ((result = test_choice_serialization()) != 0) return result;
     if ((result = test_save_header_format()) != 0) return result;
     if ((result = test_flag_serialization()) != 0) return result;
+    if ((result = test_backlog_serialization()) != 0) return result;
     return 0;
 }

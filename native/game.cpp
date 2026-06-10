@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -370,7 +371,7 @@ private:
     int menu_highlight_ = 0;
     struct BacklogEntry { std::string text; };
     std::vector<BacklogEntry> backlog_;
-    int backlog_scroll_ = 0;
+    int backlog_depth_ = 0;
     int sidebar_hover_ = -1;
     bool message_visible_ = true;
 
@@ -850,7 +851,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 1);  // native version
+        write_u32(out, 2);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -995,6 +996,16 @@ private:
         write_i32(out, choice_selected_);
         write_i32(out, choice_result_register_);
         write_i32(out, choice_ex_ ? 1 : 0);
+
+        // Backlog state. Depth 0 is the current message; 1 is newest history.
+        write_u32(out, static_cast<std::uint32_t>(backlog_.size()));
+        for (const auto& entry : backlog_) {
+            write_u32(out, static_cast<std::uint32_t>(entry.text.size()));
+            out.write(entry.text.data(),
+                      static_cast<std::streamsize>(entry.text.size()));
+        }
+        write_i32(out, backlog_depth_);
+        write_i32(out, ui_mode_ == UiMode::backlog ? 1 : 0);
     }
 
     void load_body(std::istream& in)
@@ -1177,6 +1188,27 @@ private:
         choice_selected_ = read_i32(in);
         choice_result_register_ = read_i32(in);
         choice_ex_ = read_i32(in) != 0;
+
+        backlog_.clear();
+        backlog_depth_ = 0;
+        if (version >= 2) {
+            const auto backlog_count = read_u32(in);
+            backlog_.reserve(backlog_count);
+            for (std::uint32_t i = 0; i < backlog_count; ++i) {
+                const auto size = read_u32(in);
+                std::string history_text(size, '\0');
+                if (size > 0) {
+                    in.read(history_text.data(),
+                            static_cast<std::streamsize>(size));
+                }
+                backlog_.push_back({std::move(history_text)});
+            }
+            backlog_depth_ = std::clamp(
+                read_i32(in), 0, static_cast<int>(backlog_.size()));
+            if (read_i32(in) != 0) {
+                ui_mode_ = UiMode::backlog;
+            }
+        }
     }
 
     void write_u32(std::ostream& out, std::uint32_t value) const
@@ -1263,12 +1295,17 @@ private:
 
     void open_backlog()
     {
-        if (backlog_.empty() || choosing_) return;
+        if (choosing_) return;
         ui_mode_ = UiMode::backlog;
-        backlog_scroll_ = static_cast<int>(backlog_.size()) - 1;
+        backlog_depth_ = std::min(
+            1, static_cast<int>(backlog_.size()));
     }
 
-    void close_backlog() { ui_mode_ = UiMode::game; }
+    void close_backlog()
+    {
+        backlog_depth_ = 0;
+        ui_mode_ = UiMode::game;
+    }
 
     void execute_menu_item(int index)
     {
@@ -1396,36 +1433,19 @@ private:
 
     void draw_backlog()
     {
-        // Darken background
-        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 190);
-        SDL_RenderFillRect(renderer_, nullptr);
-
-        // Text: show from start_entry to backlog_scroll_ (newest at bottom)
-        constexpr float line_h = 31.0f;
-        constexpr float start_y = 34.0f;
-        constexpr float max_y = 566.0f;
-
-        int start_entry = backlog_scroll_;
-        float remaining = max_y - start_y;
-        for (int i = backlog_scroll_; i >= 0; --i) {
-            const auto lines = display_lines(backlog_[i].text);
-            const float height = lines.size() * line_h;
-            if (height > remaining) {
-                break;
-            }
-            start_entry = i;
-            remaining -= height;
+        std::string_view selected = message_.visible();
+        if (backlog_depth_ > 0 && backlog_depth_ <= static_cast<int>(backlog_.size())) {
+            selected = backlog_[
+                backlog_.size() - static_cast<std::size_t>(backlog_depth_)].text;
         }
 
-        float y = start_y;
-        for (int i = start_entry; i <= backlog_scroll_; ++i) {
-            const auto& entry = backlog_[i];
-            const auto lines = display_lines(entry.text);
-            for (const auto& line : lines) {
-                font_.draw(renderer_, 54.0f, y + 2.0f, line, 0, 0, 0);
-                font_.draw(renderer_, 52.0f, y, line, 160, 160, 160);
-                y += line_h;
+        float y = 72.0f;
+        for (const auto& line : display_lines(selected)) {
+            font_.draw(renderer_, 54.0f, y + 2.0f, line, 0, 0, 0);
+            font_.draw(renderer_, 52.0f, y, line, 255, 144, 32);
+            y += 31.0f;
+            if (y > 535.0f) {
+                break;
             }
         }
     }
@@ -1441,9 +1461,10 @@ private:
 
         // sys0001.tga stores disabled, normal, hover and pressed states
         // in four 22-pixel-wide columns.
-        if (!backlog_.empty()) {
-            const float ratio = static_cast<float>(backlog_scroll_)
-                / std::max(1, static_cast<int>(backlog_.size()) - 1);
+        {
+            const float ratio = backlog_.empty() ? 1.0f
+                : 1.0f - static_cast<float>(backlog_depth_)
+                    / static_cast<float>(backlog_.size());
             const float handle_y = 10.0f + ratio * (255.0f - 31.0f);
             const SDL_FRect hdl_src{22.0f, 0.0f, 22.0f, 30.0f};
             const SDL_FRect hdl_dst{776.0f, handle_y, 22.0f, 30.0f};
@@ -1504,9 +1525,11 @@ private:
         }
         if (y >= 10.0f && y < 265.0f && !backlog_.empty()) {
             const float ratio = std::clamp((y - 10.0f) / 255.0f, 0.0f, 1.0f);
-            backlog_scroll_ = static_cast<int>(
-                ratio * static_cast<float>(backlog_.size() - 1));
-            ui_mode_ = UiMode::backlog;
+            backlog_depth_ = std::clamp(
+                static_cast<int>(std::lround(
+                    (1.0f - ratio) * static_cast<float>(backlog_.size()))),
+                0, static_cast<int>(backlog_.size()));
+            ui_mode_ = backlog_depth_ == 0 ? UiMode::game : UiMode::backlog;
             return true;
         }
 
@@ -1521,16 +1544,15 @@ private:
             }
             switch (i) {
             case 0:
-                open_backlog();
-                if (ui_mode_ == UiMode::backlog && backlog_scroll_ > 0) {
-                    --backlog_scroll_;
+                if (backlog_depth_ < static_cast<int>(backlog_.size())) {
+                    ++backlog_depth_;
+                    ui_mode_ = UiMode::backlog;
                 }
                 break;
             case 1:
-                if (ui_mode_ == UiMode::backlog
-                    && backlog_scroll_ < static_cast<int>(backlog_.size()) - 1) {
-                    ++backlog_scroll_;
-                } else if (ui_mode_ == UiMode::backlog) {
+                if (backlog_depth_ > 1) {
+                    --backlog_depth_;
+                } else if (backlog_depth_ == 1) {
                     close_backlog();
                 } else {
                     advance();
@@ -1554,21 +1576,21 @@ private:
             if (event.key.key == SDLK_ESCAPE) {
                 close_backlog();
             } else if (event.key.key == SDLK_UP) {
-                if (backlog_scroll_ > 0) --backlog_scroll_;
+                if (backlog_depth_ < static_cast<int>(backlog_.size()))
+                    ++backlog_depth_;
             } else if (event.key.key == SDLK_DOWN) {
-                if (backlog_scroll_ < static_cast<int>(backlog_.size()) - 1)
-                    ++backlog_scroll_;
+                if (backlog_depth_ > 1) --backlog_depth_;
                 else close_backlog();
             } else if (event.key.key == SDLK_PAGEUP) {
-                backlog_scroll_ = std::max(0, backlog_scroll_ - 1);
+                if (backlog_depth_ < static_cast<int>(backlog_.size()))
+                    ++backlog_depth_;
             } else if (event.key.key == SDLK_PAGEDOWN) {
-                backlog_scroll_ = std::min(
-                    static_cast<int>(backlog_.size()) - 1,
-                    backlog_scroll_ + 1);
+                if (backlog_depth_ > 1) --backlog_depth_;
+                else close_backlog();
             } else if (event.key.key == SDLK_HOME) {
-                backlog_scroll_ = 0;
+                backlog_depth_ = static_cast<int>(backlog_.size());
             } else if (event.key.key == SDLK_END) {
-                backlog_scroll_ = static_cast<int>(backlog_.size()) - 1;
+                close_backlog();
             }
         } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
             if (event.button.button == SDL_BUTTON_RIGHT) {
@@ -1581,10 +1603,10 @@ private:
             close_backlog();
         } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
             if (event.wheel.y > 0) {
-                if (backlog_scroll_ > 0) --backlog_scroll_;
+                if (backlog_depth_ < static_cast<int>(backlog_.size()))
+                    ++backlog_depth_;
             } else {
-                if (backlog_scroll_ < static_cast<int>(backlog_.size()) - 1)
-                    ++backlog_scroll_;
+                if (backlog_depth_ > 1) --backlog_depth_;
                 else close_backlog();
             }
         } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
@@ -1651,7 +1673,7 @@ private:
                 SDL_RenderTexture(renderer_, overlay.get(), nullptr, nullptr);
             }
         }
-        if (message_visible_ && !message_.empty()) {
+        if (ui_mode_ != UiMode::backlog && message_visible_ && !message_.empty()) {
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 150);
             SDL_RenderFillRect(renderer_, nullptr);
@@ -1666,7 +1688,8 @@ private:
                 }
             }
         }
-        if (message_visible_ && choosing_ && !choices_.empty()) {
+        if (ui_mode_ != UiMode::backlog
+            && message_visible_ && choosing_ && !choices_.empty()) {
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             const float top = choice_y_start() - 8.0f;
             const float height = choices_.size() * 31.0f + 16.0f;
