@@ -163,7 +163,11 @@ public:
             const bool control_held =
                 (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
             if (control_held) {
-                skip();
+                const auto now = std::chrono::steady_clock::now();
+                if (now >= skip_next_time_) {
+                    skip();
+                    skip_next_time_ = now + std::chrono::milliseconds(40);
+                }
             } else if (wake_time_
                        && std::chrono::steady_clock::now() >= *wake_time_) {
                 wake_time_.reset();
@@ -218,6 +222,7 @@ private:
     bool waiting_for_input_ = false;
     std::optional<std::chrono::steady_clock::time_point> wake_time_;
     std::optional<AudioWait> audio_wait_;
+    std::chrono::steady_clock::time_point skip_next_time_{};
 
     void skip()
     {
@@ -229,9 +234,12 @@ private:
             channel.stop();
             audio_wait_.reset();
         }
-        while (waiting_for_input_ && message_.reveal_next()) {
+        if (waiting_for_input_) {
+            if (message_.reveal_next()) {
+                return;
+            }
+            waiting_for_input_ = false;
         }
-        waiting_for_input_ = false;
         advance(true);
     }
 
@@ -560,9 +568,7 @@ private:
                     break;
                 }
                 if (skipping && waiting_for_input_) {
-                    while (message_.reveal_next()) {
-                    }
-                    waiting_for_input_ = false;
+                    break;
                 }
             }
         }
