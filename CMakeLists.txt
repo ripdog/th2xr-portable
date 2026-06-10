@@ -24,6 +24,7 @@ target_compile_options(th2_scenario PRIVATE -Wall -Wextra -Wpedantic)
 add_library(th2_bytecode
     native/bytecode.cpp
     native/event_metadata.c
+    native/vm.cpp
 )
 target_include_directories(th2_bytecode PUBLIC native)
 target_compile_options(th2_bytecode PRIVATE -Wall -Wextra -Wpedantic)
@@ -43,6 +44,11 @@ add_executable(th2-bytecode-info
 )
 target_link_libraries(th2-bytecode-info PRIVATE th2_archive th2_scenario th2_bytecode)
 
+add_executable(th2-vm-info
+    native/vm_info.cpp
+)
+target_link_libraries(th2-vm-info PRIVATE th2_archive th2_scenario th2_bytecode)
+
 if(BUILD_TESTING)
     add_executable(th2-scenario-test
         native/scenario_test.cpp
@@ -55,6 +61,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(th2-bytecode-test PRIVATE th2_bytecode)
     add_test(NAME bytecode-decoder COMMAND th2-bytecode-test)
+
+    add_executable(th2-vm-test
+        native/vm_test.cpp
+    )
+    target_link_libraries(th2-vm-test PRIVATE th2_bytecode th2_scenario)
+    add_test(NAME scenario-vm COMMAND th2-vm-test)
 endif()
 
 add_executable(th2-sdl-smoke
