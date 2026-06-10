@@ -158,6 +158,9 @@ public:
                 } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
                            && event.button.button == SDL_BUTTON_LEFT) {
                     advance();
+                } else if (event.type == SDL_EVENT_MOUSE_WHEEL
+                           && event.wheel.y < 0) {
+                    advance();
                 }
             }
             const bool control_held =
