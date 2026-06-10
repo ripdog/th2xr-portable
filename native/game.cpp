@@ -1208,7 +1208,7 @@ private:
         if (metadata) {
             auto excerpt = message_.visible();
             std::replace(excerpt.begin(), excerpt.end(), '\n', ' ');
-            metadata << std::time(nullptr) << '\n' << excerpt.substr(0, 80) << '\n';
+            metadata << std::time(nullptr) << '\n' << excerpt.substr(0, 18) << '\n';
         }
     }
 
@@ -1852,7 +1852,7 @@ private:
                     renderer_, ui_save_rows_hover_.get(), &src, &dst);
             }
             if (save_thumbnails_[i]) {
-                const SDL_FRect thumb{x, y + 6.0f, 80.0f, 60.0f};
+                const SDL_FRect thumb{x + 16.0f, y + 6.0f, 80.0f, 60.0f};
                 SDL_RenderTexture(
                     renderer_, save_thumbnails_[i].get(), nullptr, &thumb);
             }
@@ -1877,8 +1877,8 @@ private:
             font_.draw(
                 renderer_, x + 100.0f, y + 44.0f, date, 210, 110, 120);
             font_.draw(
-                renderer_, x + 154.0f, y + 9.0f,
-                visible_saves_[i].message, 255, 245, 225);
+                renderer_, x + 224.0f, y + 9.0f,
+                visible_saves_[i].message.substr(0, 18), 255, 245, 225);
             if (slot == newest_save_slot_ && ui_save_new_) {
                 const SDL_FRect badge{x + 302.0f, y + 37.0f, 56.0f, 29.0f};
                 SDL_RenderTexture(
