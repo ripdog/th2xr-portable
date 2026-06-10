@@ -101,3 +101,26 @@ add_executable(th2-sdl-smoke
     native/image.cpp
 )
 target_link_libraries(th2-sdl-smoke PRIVATE SDL3::SDL3 th2_archive)
+
+add_executable(th2-image-info
+    native/image_info.cpp
+    native/image.cpp
+)
+target_link_libraries(th2-image-info PRIVATE SDL3::SDL3 th2_archive)
+
+add_executable(toheart2
+    native/font.cpp
+    native/game.cpp
+    native/image.cpp
+    native/message.cpp
+)
+target_link_libraries(toheart2 PRIVATE SDL3::SDL3 th2_runtime)
+
+if(BUILD_TESTING)
+    add_executable(th2-message-test
+        native/message.cpp
+        native/message_test.cpp
+    )
+    target_include_directories(th2-message-test PRIVATE native)
+    add_test(NAME message-pages COMMAND th2-message-test)
+endif()

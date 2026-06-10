@@ -4,10 +4,12 @@
 
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 namespace th2 {
 
+SDL_Surface* load_image(
+    std::span<const std::uint8_t> bytes, std::string_view name);
 SDL_Surface* load_tga(std::span<const std::uint8_t> bytes);
 
 }  // namespace th2
-

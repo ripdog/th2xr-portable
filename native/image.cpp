@@ -1,7 +1,9 @@
 #include "image.hpp"
 
 #include <array>
+#include <cctype>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace th2 {
@@ -14,6 +16,33 @@ std::uint16_t read_u16(const std::uint8_t* bytes)
 }
 
 }  // namespace
+
+SDL_Surface* load_image(
+    std::span<const std::uint8_t> bytes, std::string_view name)
+{
+    std::string extension;
+    if (const auto dot = name.find_last_of('.'); dot != std::string_view::npos) {
+        extension.assign(name.substr(dot));
+        for (char& byte : extension) {
+            byte = static_cast<char>(std::tolower(static_cast<unsigned char>(byte)));
+        }
+    }
+    if (extension == ".tga") {
+        return load_tga(bytes);
+    }
+    if (extension == ".bmp") {
+        SDL_IOStream* input = SDL_IOFromConstMem(bytes.data(), bytes.size());
+        if (!input) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        SDL_Surface* surface = SDL_LoadBMP_IO(input, true);
+        if (!surface) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        return surface;
+    }
+    throw std::runtime_error("unsupported image extension: " + extension);
+}
 
 SDL_Surface* load_tga(std::span<const std::uint8_t> bytes)
 {
