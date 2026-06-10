@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <ctime>
 #include <cstring>
 #include <exception>
 #include <fstream>
@@ -20,6 +21,7 @@
 #include <filesystem>
 #include <format>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -150,6 +152,16 @@ public:
         ui_sidebar_btns_ = try_load("sys0001.tga");
         ui_keywait_ = try_load("sys0011.tga");
         ui_pageend_ = try_load("sys0010.tga");
+        ui_save_bg_ = try_load("sys0200.tga");
+        ui_load_bg_ = try_load("sys0300.tga");
+        ui_save_rows_ = try_load("sys0201.tga");
+        ui_save_rows_hover_ = try_load("sys0202.tga");
+        ui_save_new_ = try_load("sys0210.tga");
+        ui_save_digits_ = try_load("sys0230.tga");
+        ui_save_prompt_ = try_load("sys0250.tga");
+        ui_load_prompt_ = try_load("sys0350.tga");
+        ui_confirm_buttons_ = try_load("sys0251.tga");
+        ui_save_controls_ = try_load("sys0203.tga");
     }
 
     ~Game()
@@ -181,6 +193,10 @@ public:
                 // UI mode routing
                 if (ui_mode_ == UiMode::system_menu) {
                     handle_system_menu_input(event);
+                    continue;
+                }
+                if (ui_mode_ == UiMode::save || ui_mode_ == UiMode::load) {
+                    handle_save_load_input(event);
                     continue;
                 }
                 if (ui_mode_ == UiMode::backlog) {
@@ -219,9 +235,11 @@ public:
                         if (event.key.key == SDLK_ESCAPE) {
                             open_system_menu();
                         } else if (event.key.key == SDLK_F5) {
+                            save_snapshot_ = capture_frame_pixels();
                             save(0);
                         } else if (event.key.key == SDLK_F7) {
-                            load(0);
+                            save_snapshot_ = capture_frame_pixels();
+                            open_save_load(UiMode::load);
                         } else if (event.key.key == SDLK_F11) {
                             SDL_SetWindowFullscreen(
                                 window_, !(SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN));
@@ -376,6 +394,16 @@ private:
     Texture ui_sidebar_btns_;      // sys0001.tga
     Texture ui_keywait_;           // sys0011.tga (mid-page cursor)
     Texture ui_pageend_;           // sys0010.tga (end-of-page cursor)
+    Texture ui_save_bg_;
+    Texture ui_load_bg_;
+    Texture ui_save_rows_;
+    Texture ui_save_rows_hover_;
+    Texture ui_save_new_;
+    Texture ui_save_digits_;
+    Texture ui_save_prompt_;
+    Texture ui_load_prompt_;
+    Texture ui_confirm_buttons_;
+    Texture ui_save_controls_;
     th2::Message message_;
     bool message_ends_block_ = true;
     int tone_ = 0;
@@ -403,7 +431,7 @@ private:
     bool choice_ex_ = false;
 
     // --- UI State ---
-    enum class UiMode { game, system_menu, backlog };
+    enum class UiMode { game, system_menu, backlog, save, load };
     UiMode ui_mode_ = UiMode::game;
     int menu_highlight_ = 0;
     struct BacklogEntry { std::string text; };
@@ -411,6 +439,19 @@ private:
     int backlog_depth_ = 0;
     int sidebar_hover_ = -1;
     bool message_visible_ = true;
+    int save_page_ = 0;
+    int save_hover_ = -1;
+    int save_confirm_slot_ = -1;
+    int newest_save_slot_ = -1;
+    Surface save_snapshot_;
+    std::array<Texture, 10> save_thumbnails_{};
+
+    struct SaveMetadata {
+        bool exists = false;
+        std::time_t timestamp = 0;
+        std::string message;
+    };
+    std::array<SaveMetadata, 10> visible_saves_{};
 
     float choice_y_start() const
     {
@@ -1123,6 +1164,8 @@ private:
             return;
         }
         save_body(file);
+        file.close();
+        save_preview(slot);
     }
 
     void load(int slot)
@@ -1138,6 +1181,85 @@ private:
     std::filesystem::path save_path(int slot) const
     {
         return std::format("save_{:02d}.sav", slot);
+    }
+
+    std::filesystem::path thumbnail_path(int slot) const
+    {
+        return std::format("save_{:02d}.bmp", slot);
+    }
+
+    std::filesystem::path metadata_path(int slot) const
+    {
+        return std::format("save_{:02d}.meta", slot);
+    }
+
+    void save_preview(int slot)
+    {
+        if (save_snapshot_) {
+            Surface thumbnail(SDL_CreateSurface(80, 60, SDL_PIXELFORMAT_RGBA32));
+            if (thumbnail
+                && SDL_BlitSurfaceScaled(
+                    save_snapshot_.get(), nullptr, thumbnail.get(), nullptr,
+                    SDL_SCALEMODE_LINEAR)) {
+                SDL_SaveBMP(thumbnail.get(), thumbnail_path(slot).string().c_str());
+            }
+        }
+        std::ofstream metadata(metadata_path(slot));
+        if (metadata) {
+            auto excerpt = message_.visible();
+            std::replace(excerpt.begin(), excerpt.end(), '\n', ' ');
+            metadata << std::time(nullptr) << '\n' << excerpt.substr(0, 80) << '\n';
+        }
+    }
+
+    SaveMetadata read_save_metadata(int slot) const
+    {
+        SaveMetadata result;
+        result.exists = std::filesystem::exists(save_path(slot));
+        if (!result.exists) {
+            return result;
+        }
+        std::ifstream metadata(metadata_path(slot));
+        if (metadata) {
+            long long timestamp = 0;
+            metadata >> timestamp;
+            metadata.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            std::getline(metadata, result.message);
+            result.timestamp = static_cast<std::time_t>(timestamp);
+        }
+        if (result.timestamp == 0) {
+            const auto written = std::filesystem::last_write_time(save_path(slot));
+            result.timestamp = std::chrono::system_clock::to_time_t(
+                std::chrono::file_clock::to_sys(written));
+        }
+        return result;
+    }
+
+    void refresh_save_page()
+    {
+        newest_save_slot_ = -1;
+        std::time_t newest_time = 0;
+        for (int slot = 0; slot < 100; ++slot) {
+            const auto metadata = read_save_metadata(slot);
+            if (metadata.exists && metadata.timestamp >= newest_time) {
+                newest_time = metadata.timestamp;
+                newest_save_slot_ = slot;
+            }
+        }
+        for (int i = 0; i < 10; ++i) {
+            const int slot = save_page_ * 10 + i;
+            visible_saves_[i] = read_save_metadata(slot);
+            save_thumbnails_[i].reset();
+            if (!visible_saves_[i].exists) {
+                continue;
+            }
+            SDL_Surface* surface =
+                SDL_LoadBMP(thumbnail_path(slot).string().c_str());
+            if (surface) {
+                save_thumbnails_[i] = texture_from_surface(surface);
+                SDL_DestroySurface(surface);
+            }
+        }
     }
 
     void save_body(std::ostream& out) const
@@ -1580,6 +1702,7 @@ private:
     void open_system_menu()
     {
         if (choosing_) return;
+        save_snapshot_ = capture_frame_pixels();
         begin_transition(1, 12, 128, false);
         ui_mode_ = UiMode::system_menu;
         menu_highlight_ = 4;
@@ -1608,12 +1731,34 @@ private:
     void execute_menu_item(int index)
     {
         switch (index) {
-        case 0: save(0); break;
-        case 1: load(0); break;
+        case 0: open_save_load(UiMode::save); break;
+        case 1: open_save_load(UiMode::load); break;
         case 2: message_visible_ = !message_visible_; break;
         case 3: break;
         case 4: break;
         }
+    }
+
+    void open_save_load(UiMode mode)
+    {
+        if (!save_snapshot_) {
+            save_snapshot_ = capture_frame_pixels();
+        }
+        ui_mode_ = mode;
+        save_confirm_slot_ = -1;
+        save_hover_ = -1;
+        refresh_save_page();
+        if (newest_save_slot_ >= 0) {
+            save_page_ = newest_save_slot_ / 10;
+            refresh_save_page();
+        }
+    }
+
+    void close_save_load()
+    {
+        save_confirm_slot_ = -1;
+        begin_transition(1, 12, 128, false);
+        ui_mode_ = UiMode::game;
     }
 
     void draw_system_menu()
@@ -1681,6 +1826,201 @@ private:
                        menu_highlight_ == 4 ? 255 : 128,
                        menu_highlight_ == 4 ? 255 : 128,
                        menu_highlight_ == 4 ? 255 : 128);
+        }
+    }
+
+    void draw_save_load()
+    {
+        auto& background = ui_mode_ == UiMode::save ? ui_save_bg_ : ui_load_bg_;
+        if (background) {
+            SDL_RenderTexture(renderer_, background.get(), nullptr, nullptr);
+        }
+        const SDL_FRect rows_dst{15.0f, 111.0f, 770.0f, 378.0f};
+        if (ui_save_rows_) {
+            SDL_RenderTexture(
+                renderer_, ui_save_rows_.get(), nullptr, &rows_dst);
+        }
+
+        for (int i = 0; i < 10; ++i) {
+            const float x = 16.0f + 390.0f * (i / 5);
+            const float y = 112.0f + 76.0f * (i % 5);
+            if (i == save_hover_ && ui_save_rows_hover_) {
+                const SDL_FRect src{
+                    390.0f * (i / 5), 76.0f * (i % 5), 380.0f, 74.0f};
+                const SDL_FRect dst{x, y, 380.0f, 74.0f};
+                SDL_RenderTexture(
+                    renderer_, ui_save_rows_hover_.get(), &src, &dst);
+            }
+            if (save_thumbnails_[i]) {
+                const SDL_FRect thumb{x, y + 6.0f, 80.0f, 60.0f};
+                SDL_RenderTexture(
+                    renderer_, save_thumbnails_[i].get(), nullptr, &thumb);
+            }
+
+            const int slot = save_page_ * 10 + i;
+            const auto slot_text = std::format("{:03d}", slot + 1);
+            font_.draw(renderer_, x + 102.0f, y + 8.0f, slot_text, 0, 0, 0);
+            font_.draw(
+                renderer_, x + 100.0f, y + 6.0f, slot_text, 245, 220, 190);
+            if (!visible_saves_[i].exists) {
+                continue;
+            }
+
+            std::tm local{};
+            localtime_r(&visible_saves_[i].timestamp, &local);
+            const auto date = std::format(
+                "{:04d}/{:02d}/{:02d}  {:02d}:{:02d}",
+                local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
+                local.tm_hour, local.tm_min);
+            font_.draw(
+                renderer_, x + 101.0f, y + 45.0f, date, 70, 25, 34);
+            font_.draw(
+                renderer_, x + 100.0f, y + 44.0f, date, 210, 110, 120);
+            font_.draw(
+                renderer_, x + 154.0f, y + 9.0f,
+                visible_saves_[i].message, 255, 245, 225);
+            if (slot == newest_save_slot_ && ui_save_new_) {
+                const SDL_FRect badge{x + 302.0f, y + 37.0f, 56.0f, 29.0f};
+                SDL_RenderTexture(
+                    renderer_, ui_save_new_.get(), nullptr, &badge);
+            }
+        }
+
+        font_.draw(
+            renderer_, 366.0f, 80.0f,
+            std::format("{:02d}/10", save_page_ + 1), 255, 245, 225);
+        if (ui_save_controls_) {
+            const SDL_FRect prev_src{
+                0.0f, save_hover_ == 10 ? 64.0f : 0.0f, 130.0f, 32.0f};
+            const SDL_FRect next_src{
+                0.0f, 32.0f + (save_hover_ == 11 ? 64.0f : 0.0f),
+                130.0f, 32.0f};
+            const SDL_FRect prev_dst{190.0f, 72.0f, 130.0f, 32.0f};
+            const SDL_FRect next_dst{482.0f, 72.0f, 130.0f, 32.0f};
+            SDL_RenderTexture(
+                renderer_, ui_save_controls_.get(), &prev_src,
+                &prev_dst);
+            SDL_RenderTexture(
+                renderer_, ui_save_controls_.get(), &next_src,
+                &next_dst);
+        }
+        if (ui_sys_cancel_) {
+            const SDL_FRect src{
+                save_hover_ == 12 ? 188.0f : 0.0f, 0.0f, 188.0f, 32.0f};
+            const SDL_FRect dst{306.0f, 496.0f, 188.0f, 32.0f};
+            SDL_RenderTexture(renderer_, ui_sys_cancel_.get(), &src, &dst);
+        }
+
+        if (save_confirm_slot_ >= 0) {
+            auto& prompt =
+                ui_mode_ == UiMode::save ? ui_save_prompt_ : ui_load_prompt_;
+            if (prompt) {
+                const SDL_FRect dst{0.0f, 246.0f, 800.0f, 142.0f};
+                SDL_RenderTexture(renderer_, prompt.get(), nullptr, &dst);
+            }
+            if (ui_confirm_buttons_) {
+                const SDL_FRect yes_src{
+                    0.0f, save_hover_ == 13 ? 32.0f : 0.0f, 130.0f, 32.0f};
+                const SDL_FRect no_src{
+                    130.0f, save_hover_ == 14 ? 32.0f : 0.0f,
+                    130.0f, 32.0f};
+                const SDL_FRect yes_dst{461.0f, 320.0f, 130.0f, 32.0f};
+                const SDL_FRect no_dst{606.0f, 320.0f, 130.0f, 32.0f};
+                SDL_RenderTexture(
+                    renderer_, ui_confirm_buttons_.get(), &yes_src,
+                    &yes_dst);
+                SDL_RenderTexture(
+                    renderer_, ui_confirm_buttons_.get(), &no_src,
+                    &no_dst);
+            }
+        }
+    }
+
+    int save_load_hit(float x, float y) const
+    {
+        if (save_confirm_slot_ >= 0) {
+            if (x >= 461 && x < 591 && y >= 320 && y < 352) return 13;
+            if (x >= 606 && x < 736 && y >= 320 && y < 352) return 14;
+            return -1;
+        }
+        for (int i = 0; i < 10; ++i) {
+            const float left = 16.0f + 390.0f * (i / 5);
+            const float top = 112.0f + 76.0f * (i % 5);
+            if (x >= left && x < left + 380 && y >= top && y < top + 74) {
+                return i;
+            }
+        }
+        if (x >= 190 && x < 320 && y >= 72 && y < 104) return 10;
+        if (x >= 482 && x < 612 && y >= 72 && y < 104) return 11;
+        if (x >= 306 && x < 494 && y >= 496 && y < 528) return 12;
+        return -1;
+    }
+
+    void activate_save_load_item(int item)
+    {
+        if (item >= 0 && item < 10) {
+            const int slot = save_page_ * 10 + item;
+            if (ui_mode_ == UiMode::load && !visible_saves_[item].exists) {
+                return;
+            }
+            if (ui_mode_ == UiMode::save && !visible_saves_[item].exists) {
+                save(slot);
+                close_save_load();
+            } else {
+                save_confirm_slot_ = slot;
+                save_hover_ = 14;
+            }
+        } else if (item == 10 || item == 11) {
+            save_page_ = (save_page_ + (item == 10 ? 9 : 1)) % 10;
+            refresh_save_page();
+        } else if (item == 12) {
+            close_save_load();
+        } else if (item == 13 && save_confirm_slot_ >= 0) {
+            const int slot = save_confirm_slot_;
+            if (ui_mode_ == UiMode::save) {
+                save(slot);
+                close_save_load();
+            } else {
+                load(slot);
+                save_confirm_slot_ = -1;
+                ui_mode_ = UiMode::game;
+            }
+        } else if (item == 14) {
+            save_confirm_slot_ = -1;
+            save_hover_ = -1;
+        }
+    }
+
+    void handle_save_load_input(const SDL_Event& event)
+    {
+        if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            save_hover_ = save_load_hit(event.motion.x, event.motion.y);
+        } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            if (event.button.button == SDL_BUTTON_RIGHT) {
+                if (save_confirm_slot_ >= 0) {
+                    save_confirm_slot_ = -1;
+                } else {
+                    close_save_load();
+                }
+            } else if (event.button.button == SDL_BUTTON_LEFT) {
+                activate_save_load_item(
+                    save_load_hit(event.button.x, event.button.y));
+            }
+        } else if (event.type == SDL_EVENT_KEY_DOWN) {
+            if (event.key.key == SDLK_ESCAPE) {
+                if (save_confirm_slot_ >= 0) {
+                    save_confirm_slot_ = -1;
+                } else {
+                    close_save_load();
+                }
+            } else if (event.key.key == SDLK_PAGEUP) {
+                activate_save_load_item(10);
+            } else if (event.key.key == SDLK_PAGEDOWN) {
+                activate_save_load_item(11);
+            } else if (event.key.key == SDLK_RETURN
+                       || event.key.key == SDLK_SPACE) {
+                activate_save_load_item(save_hover_);
+            }
         }
     }
 
@@ -1861,12 +2201,21 @@ private:
                     advance();
                 }
                 break;
-            case 2: save(0); break;
-            case 3: load(0); break;
+            case 2:
+                save_snapshot_ = capture_frame_pixels();
+                open_save_load(UiMode::save);
+                break;
+            case 3:
+                save_snapshot_ = capture_frame_pixels();
+                open_save_load(UiMode::load);
+                break;
             case 4: break;
             case 5: break;
             case 6: open_system_menu(); break;
-            case 7: save(0); break;
+            case 7:
+                save_snapshot_ = capture_frame_pixels();
+                save(0);
+                break;
             }
             return true;
         }
@@ -2032,8 +2381,12 @@ private:
             draw_system_menu();
         } else if (ui_mode_ == UiMode::backlog) {
             draw_backlog();
+        } else if (ui_mode_ == UiMode::save || ui_mode_ == UiMode::load) {
+            draw_save_load();
         }
-        draw_sidebar();
+        if (ui_mode_ == UiMode::game || ui_mode_ == UiMode::backlog) {
+            draw_sidebar();
+        }
         if (transition_) {
             const auto elapsed = std::chrono::steady_clock::now()
                 - transition_->started;
