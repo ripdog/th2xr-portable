@@ -400,7 +400,6 @@ private:
             if (message_.reveal_next()) {
                 return;
             }
-            push_backlog();
             waiting_for_input_ = false;
         }
         advance(true);
@@ -650,6 +649,7 @@ private:
                 character->alpha = number(event, 1);
             }
         } else if (name == "SetMessage2") {
+            push_backlog();
             message_.set(text(event, 0));
             waiting_for_input_ = true;
         } else if (name == "AddMessage2") {
@@ -750,9 +750,6 @@ private:
         }
         if (waiting_for_input_ && message_.reveal_next()) {
             return;
-        }
-        if (waiting_for_input_) {
-            push_backlog();
         }
         waiting_for_input_ = false;
         if (choosing_) {
@@ -1433,6 +1430,11 @@ private:
 
     void draw_backlog()
     {
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 128);
+        const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
+        SDL_RenderFillRect(renderer_, &game_area);
+
         std::string_view selected = message_.visible();
         if (backlog_depth_ > 0 && backlog_depth_ <= static_cast<int>(backlog_.size())) {
             selected = backlog_[
