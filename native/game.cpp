@@ -397,7 +397,7 @@ private:
             audio_wait_.reset();
         }
         if (waiting_for_input_) {
-            if (message_.reveal_next()) {
+            if (message_.reveal_next() && message_.has_hidden_segments()) {
                 return;
             }
             waiting_for_input_ = false;
@@ -749,7 +749,9 @@ private:
             return;
         }
         if (waiting_for_input_ && message_.reveal_next()) {
-            return;
+            if (message_.has_hidden_segments()) {
+                return;
+            }
         }
         waiting_for_input_ = false;
         if (choosing_) {

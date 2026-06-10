@@ -30,4 +30,12 @@ int main()
         || message.visible() != "...n...nn W...hat? It's already morning?...") {
         return 5;
     }
+
+    message.set("first\\ksecond");
+    if (!message.has_hidden_segments()
+        || !message.reveal_next()
+        || message.has_hidden_segments()
+        || message.visible() != "firstsecond") {
+        return 6;
+    }
 }

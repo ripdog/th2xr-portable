@@ -13,6 +13,7 @@ public:
     void append(std::string_view source);
 
     bool reveal_next();
+    bool has_hidden_segments() const { return revealed_ < segments_.size(); }
     bool empty() const { return segments_.empty(); }
     const std::string& visible() const { return visible_; }
     std::size_t revealed_count() const { return revealed_; }
