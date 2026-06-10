@@ -1549,8 +1549,11 @@ private:
     {
         if (!waiting_for_input_ || !message_visible_ || message_.empty()) return;
 
-        // Use sys0010.tga (end-of-page cursor) or sys0011.tga (mid-page)
-        auto& tex = ui_pageend_;
+        // Use sys0010.tga for mid-block (more text to reveal),
+        // sys0011.tga for end-of-block (screen about to clear)
+        const bool end_of_block =
+            message_.revealed_count() >= message_.segments().size();
+        auto& tex = end_of_block ? ui_keywait_ : ui_pageend_;
         if (!tex) return;
 
         const auto lines = display_lines(message_.visible());
@@ -1563,12 +1566,14 @@ private:
         const float x = 52.0f + width + 4.0f;
         const float y = 72.0f
             + (std::min(lines.size(), static_cast<std::size_t>(15)) - 1)
-            * 31.0f + 8.0f;
+            * 31.0f + 12.0f;
 
-        // 30-frame animation, 2 game-frames per animation-frame
-        const int frame = (indicator_frame_ / 2) % 30;
+        // 30-frame animation, matching original GlobalCount/2%30 timing
+        // Original: 60fps / 2 = 30 anim-frames/sec, 1 sec full cycle
+        // Ours:    125fps / 4 = 31 anim-frames/sec, ~1 sec full cycle
+        const int frame = (indicator_frame_ / 4) % 30;
         const SDL_FRect src{frame * 40.0f, 0.0f, 40.0f, 40.0f};
-        const SDL_FRect dst{x, y, 40.0f, 40.0f};
+        const SDL_FRect dst{x, y, 36.0f, 36.0f};
         SDL_RenderTexture(renderer_, tex.get(), &src, &dst);
     }
 
