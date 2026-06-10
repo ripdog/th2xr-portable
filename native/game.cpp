@@ -260,11 +260,15 @@ private:
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     Texture background_;
+    int bg_scene_ = -1;
+    bool bg_is_visual_ = false;
     std::array<Texture, 32> overlays_{};
     th2::Characters characters_;
     std::array<CharacterTexture, 32> character_textures_{};
     th2::AudioChannel bgm_;
     int bgm_track_ = -1;
+    bool bgm_loop_ = false;
+    int bgm_volume_ = 255;
     std::array<th2::AudioChannel, 8> transient_se_{};
     std::array<th2::AudioChannel, 16> se_channels_{};
     std::array<th2::AudioChannel, 8> voice_channels_{};
@@ -388,6 +392,8 @@ private:
     void play_bgm(int music, bool loop, int volume)
     {
         bgm_track_ = music;
+        bgm_loop_ = loop;
+        bgm_volume_ = volume;
         const auto gain = std::clamp(volume, 0, 255) / 255.0f;
         const auto single = std::format("BGM_{:03d}.OGG", music);
         if (bgm_archive_.find(single)) {
@@ -454,6 +460,8 @@ private:
     {
         const int scene = number(event, 1) * 10
             + std::max<std::int32_t>(0, number(event, 2));
+        bg_scene_ = scene;
+        bg_is_visual_ = false;
         const auto name = std::format(
             "B{:03d}{}{}{}.bmp", scene / 10, tone_ % 4, weather_, scene % 10);
         background_ = load_texture(renderer_, backgrounds_, name);
@@ -465,8 +473,27 @@ private:
         if (number(event, 2) >= 0) {
             visual += number(event, 2);
         }
+        bg_scene_ = visual;
+        bg_is_visual_ = true;
         background_ = load_texture(
             renderer_, graphics_, std::format("v{:06d}.tga", visual));
+    }
+
+    void restore_background()
+    {
+        if (bg_scene_ < 0) {
+            return;
+        }
+        if (bg_is_visual_) {
+            background_ = load_texture(
+                renderer_, graphics_,
+                std::format("v{:06d}.tga", bg_scene_));
+        } else {
+            const auto name = std::format(
+                "B{:03d}{}{}{}.bmp", bg_scene_ / 10, tone_ % 4,
+                weather_, bg_scene_ % 10);
+            background_ = load_texture(renderer_, backgrounds_, name);
+        }
     }
 
     void handle(const th2::Event& event)
@@ -480,6 +507,7 @@ private:
             set_visual(event);
         } else if (name == "BD") {
             background_.reset();
+            bg_scene_ = -1;
         } else if (name == "SetTimeMode") {
             tone_ = std::max<std::int32_t>(0, number(event, 0));
         } else if (name == "SetWeatherMode") {
@@ -756,7 +784,8 @@ private:
         }
 
         // Background
-        write_i32(out, background_ ? 1 : 0);
+        write_i32(out, bg_scene_);
+        write_i32(out, bg_is_visual_ ? 1 : 0);
 
         // Characters
         const auto ordered = characters_.ordered();
@@ -780,7 +809,9 @@ private:
         write_u32(out, overlay_count);
 
         // BGM
-        write_i32(out, bgm_.playing() ? bgm_track_ : -1);
+        write_i32(out, bgm_track_);
+        write_i32(out, bgm_loop_ ? 1 : 0);
+        write_i32(out, bgm_volume_);
 
         // SE transient
         std::uint32_t se_count = 0;
@@ -809,12 +840,21 @@ private:
         }
         write_u32(out, voice_count);
 
-        // Message state
+        // Message state - full segments for correct text-block position
         write_i32(out, message_.empty() ? 0 : 1);
+        const auto& segments = message_.segments();
+        write_u32(out, static_cast<std::uint32_t>(segments.size()));
+        for (const auto& seg : segments) {
+            write_u32(out, static_cast<std::uint32_t>(seg.size()));
+            if (!seg.empty()) {
+                out.write(seg.data(), static_cast<std::streamsize>(seg.size()));
+            }
+        }
+        write_u32(out, static_cast<std::uint32_t>(message_.revealed_count()));
         const auto& visible = message_.visible();
         write_u32(out, static_cast<std::uint32_t>(visible.size()));
-        if (!message_.empty()) {
-            write_str(out, visible, visible.size());
+        if (!visible.empty()) {
+            out.write(visible.data(), static_cast<std::streamsize>(visible.size()));
         }
 
         // Choice state
@@ -875,9 +915,10 @@ private:
         }
         runtime_.vm_restore(regs, stack_data, pc);
 
-        // Background - reset, script replay will restore it
-        read_i32(in);
-        background_.reset();
+        // Background
+        bg_scene_ = read_i32(in);
+        bg_is_visual_ = read_i32(in) != 0;
+        restore_background();
 
         // Characters
         characters_ = {};
@@ -899,8 +940,13 @@ private:
         read_u32(in);
         for (auto& ov : overlays_) { ov.reset(); }
 
-        // BGM - handled above (stopped)
-        read_i32(in);
+        // BGM
+        bgm_track_ = read_i32(in);
+        bgm_loop_ = read_i32(in) != 0;
+        bgm_volume_ = read_i32(in);
+        if (bgm_track_ >= 0) {
+            play_bgm(bgm_track_, bgm_loop_, bgm_volume_);
+        }
 
         // SE transient
         read_u32(in);
@@ -909,11 +955,29 @@ private:
         // Voice channels
         read_u32(in);
 
-        // Message state
+        // Message state - restore full segments
         const auto has_message = read_i32(in);
-        const auto visible_size = read_u32(in);
-        if (has_message && visible_size > 0) {
-            message_.set(read_str(in, visible_size));
+        if (has_message) {
+            const auto seg_count = read_u32(in);
+            std::vector<std::string> segments;
+            segments.reserve(seg_count);
+            for (std::uint32_t i = 0; i < seg_count; ++i) {
+                const auto seg_size = read_u32(in);
+                std::string seg(seg_size, '\0');
+                if (seg_size > 0) {
+                    in.read(seg.data(),
+                            static_cast<std::streamsize>(seg_size));
+                }
+                segments.push_back(std::move(seg));
+            }
+            const auto revealed = read_u32(in);
+            const auto visible_size = read_u32(in);
+            std::string visible(visible_size, '\0');
+            if (visible_size > 0) {
+                in.read(visible.data(),
+                        static_cast<std::streamsize>(visible_size));
+            }
+            message_.restore_state(segments, revealed, visible);
             waiting_for_input_ = true;
         } else {
             message_ = th2::Message{};

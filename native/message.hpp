@@ -15,6 +15,10 @@ public:
     bool reveal_next();
     bool empty() const { return segments_.empty(); }
     const std::string& visible() const { return visible_; }
+    std::size_t revealed_count() const { return revealed_; }
+    const std::vector<std::string>& segments() const { return segments_; }
+    void restore_state(const std::vector<std::string>& segments,
+                       std::size_t revealed, const std::string& visible);
 
 private:
     std::vector<std::string> segments_;

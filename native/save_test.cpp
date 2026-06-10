@@ -48,21 +48,36 @@ int test_binary_io()
 
 int test_message_roundtrip()
 {
-    // Create a message, serialize its visible text, deserialize and verify
+    // Create a multi-segment message, save its full state, restore and verify
     th2::Message msg;
-    msg.set("Hello\\kWorld");
+    msg.set("Hello\\kWorld\\kGoodbye");
+    // After set(), first segment is revealed
     if (msg.visible() != "Hello") return 5;
 
-    // Simulate save: get visible text
-    const auto text = msg.visible();
-    const auto size = text.size();
+    // Reveal second segment
+    if (!msg.reveal_next()) return 50;
+    if (msg.visible() != "HelloWorld") return 51;
 
-    // Simulate load: create new message with saved text
+    // Save message state
+    const auto segments = msg.segments();
+    const auto revealed = msg.revealed_count();
+    const auto visible = msg.visible();
+
+    if (segments.size() != 3) return 52;
+    if (revealed != 2) return 53;
+
+    // Restore into a new message
     th2::Message restored;
-    restored.set(text);
+    restored.restore_state(segments, revealed, visible);
 
-    if (restored.visible() != "Hello") return 6;
-    if (restored.visible().size() != size) return 7;
+    if (restored.visible() != "HelloWorld") return 54;
+    if (restored.revealed_count() != 2) return 55;
+    if (restored.segments().size() != 3) return 56;
+
+    // Should be able to reveal the last segment
+    if (!restored.reveal_next()) return 57;
+    if (restored.visible() != "HelloWorldGoodbye") return 58;
+    if (restored.reveal_next()) return 59;  // Should be no more
 
     return 0;
 }

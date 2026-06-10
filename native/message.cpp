@@ -64,4 +64,13 @@ void Message::reveal_current()
     }
 }
 
+void Message::restore_state(
+    const std::vector<std::string>& segments,
+    std::size_t revealed, const std::string& visible)
+{
+    segments_ = segments;
+    revealed_ = revealed;
+    visible_ = visible;
+}
+
 }  // namespace th2
