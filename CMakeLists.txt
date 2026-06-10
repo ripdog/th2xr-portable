@@ -8,6 +8,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(SDL3 CONFIG REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
 
 add_library(th2_archive
     native/archive.cpp
@@ -37,6 +39,13 @@ add_library(th2_runtime
 target_include_directories(th2_runtime PUBLIC native)
 target_compile_options(th2_runtime PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(th2_runtime PUBLIC th2_archive th2_scenario th2_bytecode)
+
+add_library(th2_audio
+    native/audio.cpp
+)
+target_include_directories(th2_audio PUBLIC native)
+target_compile_options(th2_audio PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(th2_audio PUBLIC SDL3::SDL3 PkgConfig::SNDFILE)
 
 add_executable(th2-archive-info
     native/archive_info.cpp
@@ -115,6 +124,7 @@ add_executable(toheart2
     native/message.cpp
 )
 target_link_libraries(toheart2 PRIVATE SDL3::SDL3 th2_runtime)
+target_link_libraries(toheart2 PRIVATE th2_audio)
 
 if(BUILD_TESTING)
     add_executable(th2-message-test
@@ -123,4 +133,10 @@ if(BUILD_TESTING)
     )
     target_include_directories(th2-message-test PRIVATE native)
     add_test(NAME message-pages COMMAND th2-message-test)
+
+    add_executable(th2-audio-test
+        native/audio_test.cpp
+    )
+    target_link_libraries(th2-audio-test PRIVATE th2_audio th2_archive)
+    add_test(NAME audio-decoder COMMAND th2-audio-test)
 endif()

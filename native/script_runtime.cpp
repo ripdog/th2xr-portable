@@ -7,6 +7,12 @@
 namespace th2 {
 namespace {
 
+std::uint16_t read_u16(std::span<const std::uint8_t> bytes, std::size_t position)
+{
+    return static_cast<std::uint16_t>(bytes[position])
+        | (static_cast<std::uint16_t>(bytes[position + 1]) << 8);
+}
+
 bool ends_with_sdt(const std::string& name)
 {
     if (name.size() < 4) {
@@ -105,7 +111,7 @@ ScriptStep ScriptRuntime::run()
             if (handle(event)) {
                 continue;
             }
-            return {result.reason, std::move(event), script_name_};
+            return {result.reason, std::move(event), script_name_, 0};
         }
         if (result.reason == VmYield::load_script) {
             const auto length = result.bytes[2];
@@ -113,7 +119,10 @@ ScriptStep ScriptRuntime::run()
                 reinterpret_cast<const char*>(result.bytes.data() + 3), length));
             continue;
         }
-        return {result.reason, {}, script_name_};
+        const std::uint32_t wait_value =
+            (result.reason == VmYield::wait_frames || result.reason == VmYield::wait_time)
+            ? read_u16(result.bytes, 2) : 0u;
+        return {result.reason, {}, script_name_, wait_value};
     }
 }
 

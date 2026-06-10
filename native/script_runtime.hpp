@@ -16,6 +16,7 @@ struct ScriptStep {
     VmYield reason;
     Event event;
     std::string script_name;
+    std::uint32_t wait_value = 0;
 };
 
 class ScriptRuntime {
