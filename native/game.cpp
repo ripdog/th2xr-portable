@@ -33,6 +33,11 @@ struct TextureDeleter {
 };
 using Texture = std::unique_ptr<SDL_Texture, TextureDeleter>;
 
+struct SurfaceDeleter {
+    void operator()(SDL_Surface* surface) const { SDL_DestroySurface(surface); }
+};
+using Surface = std::unique_ptr<SDL_Surface, SurfaceDeleter>;
+
 std::int32_t number(const th2::Event& event, std::size_t index)
 {
     return std::get<std::int32_t>(event.arguments.at(index));
@@ -309,6 +314,13 @@ private:
 
     struct Transition {
         Texture previous;
+        Surface previous_pixels;
+        Surface next_pixels;
+        Texture composite;
+        std::vector<std::uint8_t> mask;
+        int mask_width = 0;
+        int mask_height = 0;
+        int vague = 128;
         std::chrono::steady_clock::time_point started;
         std::chrono::milliseconds duration;
         int type = 1;
@@ -337,6 +349,7 @@ private:
     int bg_scene_ = -1;
     bool bg_is_visual_ = false;
     std::array<Texture, 32> overlays_{};
+    std::array<int, 32> overlay_layers_{};
     th2::Characters characters_;
     std::array<CharacterTexture, 32> character_textures_{};
     th2::AudioChannel bgm_;
@@ -438,14 +451,23 @@ private:
         return character_textures_[number];
     }
 
-    Texture capture_frame()
+    Surface capture_frame_pixels()
     {
         SDL_Surface* surface = SDL_RenderReadPixels(renderer_, nullptr);
         if (!surface) {
             throw std::runtime_error(SDL_GetError());
         }
-        SDL_Texture* raw = SDL_CreateTextureFromSurface(renderer_, surface);
+        SDL_Surface* converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
         SDL_DestroySurface(surface);
+        if (!converted) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        return Surface(converted);
+    }
+
+    Texture texture_from_surface(SDL_Surface* surface)
+    {
+        SDL_Texture* raw = SDL_CreateTextureFromSurface(renderer_, surface);
         if (!raw) {
             throw std::runtime_error(SDL_GetError());
         }
@@ -453,19 +475,91 @@ private:
         return Texture(raw);
     }
 
-    void begin_transition(int type, int frames, bool resume_script)
+    std::vector<std::uint8_t> load_transition_mask(
+        int type, int& width, int& height)
+    {
+        const auto name = std::format("f0{:03d}.bmp", type & 0x7f);
+        const auto* entry = graphics_.find(name);
+        if (!entry) {
+            throw std::runtime_error("transition mask not found: " + name);
+        }
+        Surface surface(th2::load_image(graphics_.read(*entry), entry->name));
+        width = surface->w;
+        height = surface->h;
+        std::array<std::uint8_t, 256> curve{};
+        for (int i = 0; i < 256; ++i) {
+            curve[i] = static_cast<std::uint8_t>(i);
+        }
+        std::string_view curve_name;
+        if (type & 0x100) {
+            curve_name = type & 0x200 ? "rev_accel1.AMP"
+                : type & 0x400 ? "rev_accel2.AMP" : "rev.AMP";
+        } else if (type & 0x200) {
+            curve_name = "accel1.AMP";
+        } else if (type & 0x400) {
+            curve_name = "accel2.AMP";
+        }
+        if (!curve_name.empty()) {
+            const auto* curve_entry = graphics_.find(curve_name);
+            if (!curve_entry) {
+                throw std::runtime_error(
+                    "transition curve not found: " + std::string(curve_name));
+            }
+            const auto bytes = graphics_.read(*curve_entry);
+            if (bytes.size() != curve.size()) {
+                throw std::runtime_error(
+                    "invalid transition curve: " + std::string(curve_name));
+            }
+            std::copy(bytes.begin(), bytes.end(), curve.begin());
+        }
+
+        std::vector<std::uint8_t> mask(
+            static_cast<std::size_t>(width) * height);
+        const bool flip_x = type & 0x800;
+        const bool flip_y = type & 0x1000;
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                Uint8 r = 0;
+                Uint8 g = 0;
+                Uint8 b = 0;
+                Uint8 a = 0;
+                SDL_ReadSurfacePixel(
+                    surface.get(), flip_x ? width - x - 1 : x,
+                    flip_y ? height - y - 1 : y, &r, &g, &b, &a);
+                mask[static_cast<std::size_t>(y) * width + x] = curve[b];
+            }
+        }
+        return mask;
+    }
+
+    void begin_transition(
+        int type, int frames, int vague, bool resume_script)
     {
         if (type < 0) {
             return;
         }
         const int effective_frames = frames > 0 ? frames : 30;
-        transition_ = Transition{
-            capture_frame(),
+        auto previous_pixels = capture_frame_pixels();
+        auto previous = texture_from_surface(previous_pixels.get());
+        Transition transition{
+            std::move(previous),
+            std::move(previous_pixels),
+            {},
+            {},
+            {},
+            0,
+            0,
+            vague >= 0 ? vague : 128,
             std::chrono::steady_clock::now(),
             std::chrono::milliseconds(effective_frames * 1000 / 60),
             type,
             resume_script,
         };
+        if (type >= 0x80) {
+            transition.mask = load_transition_mask(
+                type, transition.mask_width, transition.mask_height);
+        }
+        transition_ = std::move(transition);
     }
 
     void update_transition()
@@ -483,6 +577,71 @@ private:
         if (resume_script) {
             advance();
         }
+    }
+
+    void draw_pattern_transition(float progress)
+    {
+        auto& transition = *transition_;
+        if (!transition.next_pixels) {
+            transition.next_pixels = capture_frame_pixels();
+            if (transition.next_pixels->w != transition.previous_pixels->w
+                || transition.next_pixels->h != transition.previous_pixels->h) {
+                throw std::runtime_error("transition frame size changed");
+            }
+            SDL_Texture* raw = SDL_CreateTexture(
+                renderer_, SDL_PIXELFORMAT_RGBA32,
+                SDL_TEXTUREACCESS_STREAMING,
+                transition.next_pixels->w, transition.next_pixels->h);
+            if (!raw) {
+                throw std::runtime_error(SDL_GetError());
+            }
+            transition.composite.reset(raw);
+        }
+
+        const int width = transition.next_pixels->w;
+        const int height = transition.next_pixels->h;
+        std::vector<std::uint8_t> pixels(
+            static_cast<std::size_t>(width) * height * 4);
+        const auto* previous =
+            static_cast<const std::uint8_t*>(transition.previous_pixels->pixels);
+        const auto* next =
+            static_cast<const std::uint8_t*>(transition.next_pixels->pixels);
+        const int vague = std::clamp(transition.vague, 1, 256);
+        const int blend_offset = static_cast<int>(
+            progress * static_cast<float>(256 + vague));
+
+        for (int y = 0; y < height; ++y) {
+            const int mask_y = y * transition.mask_height / height;
+            for (int x = 0; x < width; ++x) {
+                const int mask_x = x * transition.mask_width / width;
+                const int mask = transition.mask[
+                    static_cast<std::size_t>(mask_y) * transition.mask_width
+                    + mask_x];
+                const int alpha = std::clamp(
+                    (mask + blend_offset - 256) * 256 / vague, 0, 255);
+                const auto source_offset =
+                    static_cast<std::size_t>(y) * transition.next_pixels->pitch
+                    + static_cast<std::size_t>(x) * 4;
+                const auto previous_offset =
+                    static_cast<std::size_t>(y) * transition.previous_pixels->pitch
+                    + static_cast<std::size_t>(x) * 4;
+                const auto output_offset =
+                    (static_cast<std::size_t>(y) * width + x) * 4;
+                for (int channel = 0; channel < 3; ++channel) {
+                    pixels[output_offset + channel] = static_cast<std::uint8_t>(
+                        (previous[previous_offset + channel] * (255 - alpha)
+                         + next[source_offset + channel] * alpha)
+                        / 255);
+                }
+                pixels[output_offset + 3] = 255;
+            }
+        }
+        if (!SDL_UpdateTexture(
+                transition.composite.get(), nullptr, pixels.data(), width * 4)) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        SDL_RenderTexture(
+            renderer_, transition.composite.get(), nullptr, nullptr);
     }
 
     void begin_background_fade(float target, int frames)
@@ -697,11 +856,13 @@ private:
         const auto name = event.instruction.name;
         if (name == "B" || name == "BT" || name == "BC" || name == "BCT") {
             if (number(event, 1) >= 0) {
-                begin_transition(number(event, 0), number(event, 3), true);
+                begin_transition(
+                    number(event, 0), number(event, 3), number(event, 6), true);
                 set_background(event);
             }
         } else if (name == "V" || name == "VT") {
-            begin_transition(number(event, 0), number(event, 3), true);
+            begin_transition(
+                number(event, 0), number(event, 3), number(event, 7), true);
             set_visual(event);
         } else if (name == "FI") {
             begin_background_fade(0.0f, 30);
@@ -728,6 +889,7 @@ private:
             if (slot < overlays_.size()) {
                 const auto& archive = text(event, 6) == "bak" ? backgrounds_ : graphics_;
                 overlays_[slot] = load_texture(renderer_, archive, text(event, 2));
+                overlay_layers_[slot] = number(event, 3);
             }
         } else if (name == "ResetBmp") {
             const auto slot = static_cast<std::size_t>(number(event, 0));
@@ -1418,14 +1580,14 @@ private:
     void open_system_menu()
     {
         if (choosing_) return;
-        begin_transition(1, 12, false);
+        begin_transition(1, 12, 128, false);
         ui_mode_ = UiMode::system_menu;
         menu_highlight_ = 4;
     }
 
     void close_system_menu()
     {
-        begin_transition(1, 12, false);
+        begin_transition(1, 12, 128, false);
         ui_mode_ = UiMode::game;
     }
 
@@ -1789,6 +1951,11 @@ private:
     {
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
         SDL_RenderClear(renderer_);
+        for (std::size_t i = 0; i < overlays_.size(); ++i) {
+            if (overlays_[i] && overlay_layers_[i] <= 0) {
+                SDL_RenderTexture(renderer_, overlays_[i].get(), nullptr, nullptr);
+            }
+        }
         if (background_) {
             SDL_RenderTexture(renderer_, background_.get(), nullptr, nullptr);
         }
@@ -1809,9 +1976,9 @@ private:
                 0.0f, 800.0f, 600.0f};
             SDL_RenderTexture(renderer_, loaded.texture.get(), nullptr, &destination);
         }
-        for (const auto& overlay : overlays_) {
-            if (overlay) {
-                SDL_RenderTexture(renderer_, overlay.get(), nullptr, nullptr);
+        for (std::size_t i = 0; i < overlays_.size(); ++i) {
+            if (overlays_[i] && overlay_layers_[i] > 0) {
+                SDL_RenderTexture(renderer_, overlays_[i].get(), nullptr, nullptr);
             }
         }
         if (background_darkness_ > 0.0f) {
@@ -1879,10 +2046,9 @@ private:
                     renderer_, transition_->previous.get(),
                     &rectangle, &rectangle);
             };
-            const bool white_flash_pattern =
-                (transition_->type & 0x7f) == 50
-                && transition_->type >= 0x80;
-            if (transition_->type == 0 || white_flash_pattern) {
+            if (transition_->type >= 0x80) {
+                draw_pattern_transition(progress);
+            } else if (transition_->type == 0) {
                 if (progress < 0.5f) {
                     SDL_SetTextureAlphaModFloat(
                         transition_->previous.get(), 1.0f);
@@ -1893,10 +2059,7 @@ private:
                     ? progress * 2.0f : (1.0f - progress) * 2.0f;
                 SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
                 SDL_SetRenderDrawColor(
-                    renderer_,
-                    white_flash_pattern ? 255 : 0,
-                    white_flash_pattern ? 255 : 0,
-                    white_flash_pattern ? 255 : 0,
+                    renderer_, 0, 0, 0,
                     static_cast<Uint8>(
                         std::clamp(midpoint, 0.0f, 1.0f) * 255.0f));
                 SDL_RenderFillRect(renderer_, nullptr);
