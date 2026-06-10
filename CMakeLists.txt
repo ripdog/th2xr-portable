@@ -47,6 +47,12 @@ target_include_directories(th2_audio PUBLIC native)
 target_compile_options(th2_audio PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(th2_audio PUBLIC SDL3::SDL3 PkgConfig::SNDFILE)
 
+add_library(th2_character
+    native/character.cpp
+)
+target_include_directories(th2_character PUBLIC native)
+target_compile_options(th2_character PRIVATE -Wall -Wextra -Wpedantic)
+
 add_executable(th2-archive-info
     native/archive_info.cpp
 )
@@ -124,9 +130,15 @@ add_executable(toheart2
     native/message.cpp
 )
 target_link_libraries(toheart2 PRIVATE SDL3::SDL3 th2_runtime)
-target_link_libraries(toheart2 PRIVATE th2_audio)
+target_link_libraries(toheart2 PRIVATE th2_audio th2_character)
 
 if(BUILD_TESTING)
+    add_executable(th2-character-test
+        native/character_test.cpp
+    )
+    target_link_libraries(th2-character-test PRIVATE th2_character)
+    add_test(NAME character-state COMMAND th2-character-test)
+
     add_executable(th2-message-test
         native/message.cpp
         native/message_test.cpp

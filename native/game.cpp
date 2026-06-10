@@ -1,5 +1,6 @@
 #include "archive.hpp"
 #include "audio.hpp"
+#include "character.hpp"
 #include "font.hpp"
 #include "image.hpp"
 #include "message.hpp"
@@ -181,6 +182,11 @@ private:
         std::size_t channel;
     };
 
+    struct CharacterTexture {
+        int pose = -1;
+        Texture texture;
+    };
+
     th2::Archive scripts_;
     th2::Archive graphics_;
     th2::Archive backgrounds_;
@@ -194,6 +200,8 @@ private:
     SDL_Renderer* renderer_ = nullptr;
     Texture background_;
     std::array<Texture, 32> overlays_{};
+    th2::Characters characters_;
+    std::array<CharacterTexture, 32> character_textures_{};
     th2::AudioChannel bgm_;
     std::array<th2::AudioChannel, 8> transient_se_{};
     std::array<th2::AudioChannel, 16> se_channels_{};
@@ -205,6 +213,51 @@ private:
     bool waiting_for_input_ = false;
     std::optional<std::chrono::steady_clock::time_point> wake_time_;
     std::optional<AudioWait> audio_wait_;
+
+    CharacterTexture& character_texture(int number)
+    {
+        if (number < 0
+            || static_cast<std::size_t>(number) >= character_textures_.size()) {
+            throw std::out_of_range("unsupported character number");
+        }
+        return character_textures_[number];
+    }
+
+    void load_character_texture(const th2::CharacterState& character)
+    {
+        auto& loaded = character_texture(character.number);
+        if (loaded.pose != character.pose || !loaded.texture) {
+            loaded.texture = load_texture(
+                renderer_, graphics_,
+                th2::character_asset_name(character.number, character.pose));
+            loaded.pose = character.pose;
+        }
+    }
+
+    void set_character(const th2::Event& event)
+    {
+        const int character_number = number(event, 0);
+        const auto* previous = characters_.find(character_number);
+        int locate = number(event, 2);
+        if (locate < 0) {
+            locate = event.instruction.name != "SetChar" && previous
+                ? previous->locate : 1;
+        }
+        const bool wait_form = event.instruction.name == "CW";
+        const std::size_t layer_index = wait_form ? 3 : 4;
+        const std::size_t brightness_index = wait_form ? 4 : 5;
+        const std::size_t alpha_index = wait_form ? 5 : 6;
+        const int layer = number(event, layer_index) < 0
+            ? 0 : number(event, layer_index);
+        const int brightness = number(event, brightness_index) < 0
+            ? 128 : number(event, brightness_index);
+        const int alpha = number(event, alpha_index) < 0
+            ? 256 : number(event, alpha_index);
+        auto& character = characters_.set(
+            character_number, number(event, 1), locate, layer,
+            brightness, alpha);
+        load_character_texture(character);
+    }
 
     void play_se(int channel, int sound, bool loop, int volume)
     {
@@ -299,6 +352,16 @@ private:
         background_ = load_texture(renderer_, backgrounds_, name);
     }
 
+    void set_visual(const th2::Event& event)
+    {
+        int visual = number(event, 1) * 10;
+        if (number(event, 2) >= 0) {
+            visual += number(event, 2);
+        }
+        background_ = load_texture(
+            renderer_, graphics_, std::format("v{:06d}.tga", visual));
+    }
+
     void handle(const th2::Event& event)
     {
         const auto name = event.instruction.name;
@@ -306,6 +369,8 @@ private:
             if (number(event, 1) >= 0) {
                 set_background(event);
             }
+        } else if (name == "V" || name == "VT") {
+            set_visual(event);
         } else if (name == "BD") {
             background_.reset();
         } else if (name == "SetTimeMode") {
@@ -326,6 +391,38 @@ private:
         } else if (name == "ResetBmpAll") {
             for (auto& overlay : overlays_) {
                 overlay.reset();
+            }
+        } else if (name == "C" || name == "CW" || name == "SetChar") {
+            set_character(event);
+        } else if (name == "CR" || name == "CRW" || name == "ResetChar") {
+            const int character_number = number(event, 0);
+            characters_.remove(character_number);
+            if (character_number >= 0
+                && static_cast<std::size_t>(character_number)
+                    < character_textures_.size()) {
+                character_textures_[character_number] = {};
+            }
+        } else if (name == "CP" || name == "SetCharPose") {
+            const int character_number = number(event, 0);
+            if (auto* character = characters_.find(character_number)) {
+                character->pose = number(event, 1);
+                load_character_texture(*character);
+            }
+        } else if (name == "CL" || name == "SetCharLocate") {
+            if (auto* character = characters_.find(number(event, 0))) {
+                character->locate = number(event, 1);
+            }
+        } else if (name == "CY" || name == "SetCharLayer") {
+            if (auto* character = characters_.find(number(event, 0))) {
+                character->layer = number(event, 1);
+            }
+        } else if (name == "CB") {
+            if (auto* character = characters_.find(number(event, 0))) {
+                character->brightness = number(event, 1);
+            }
+        } else if (name == "CA") {
+            if (auto* character = characters_.find(number(event, 0))) {
+                character->alpha = number(event, 1);
             }
         } else if (name == "SetMessage2") {
             message_.set(text(event, 0));
@@ -439,6 +536,23 @@ private:
         SDL_RenderClear(renderer_);
         if (background_) {
             SDL_RenderTexture(renderer_, background_.get(), nullptr, nullptr);
+        }
+        for (const auto& character : characters_.ordered()) {
+            auto& loaded = character_texture(character.number);
+            if (!loaded.texture) {
+                continue;
+            }
+            const auto brightness = static_cast<Uint8>(
+                std::clamp(character.brightness * 2, 0, 255));
+            SDL_SetTextureColorMod(
+                loaded.texture.get(), brightness, brightness, brightness);
+            SDL_SetTextureAlphaMod(
+                loaded.texture.get(),
+                static_cast<Uint8>(std::clamp(character.alpha, 0, 256) * 255 / 256));
+            SDL_FRect destination{
+                static_cast<float>(th2::character_offset(character.locate)),
+                0.0f, 800.0f, 600.0f};
+            SDL_RenderTexture(renderer_, loaded.texture.get(), nullptr, &destination);
         }
         for (const auto& overlay : overlays_) {
             if (overlay) {
