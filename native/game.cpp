@@ -167,6 +167,7 @@ public:
                     running_ = false;
                     continue;
                 }
+                SDL_ConvertEventToRenderCoordinates(renderer_, &event);
 
                 // UI mode routing
                 if (ui_mode_ == UiMode::system_menu) {
@@ -248,17 +249,19 @@ public:
                     } else if (event.wheel.y < 0) {
                         advance();
                     }
-                } else if (choosing_
-                           && event.type == SDL_EVENT_MOUSE_MOTION) {
-                    const float mouse_y = event.motion.y;
-                    float y = choice_y_start();
-                    for (int i = 0;
-                         i < static_cast<int>(choices_.size()); ++i) {
-                        if (mouse_y >= y && mouse_y < y + 31.0f) {
-                            choice_highlight_ = i;
-                            break;
+                } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
+                    update_sidebar_hover(event.motion.x, event.motion.y);
+                    if (choosing_) {
+                        const float mouse_y = event.motion.y;
+                        float y = choice_y_start();
+                        for (int i = 0;
+                             i < static_cast<int>(choices_.size()); ++i) {
+                            if (mouse_y >= y && mouse_y < y + 31.0f) {
+                                choice_highlight_ = i;
+                                break;
+                            }
+                            y += 31.0f;
                         }
-                        y += 31.0f;
                     }
                 }
             }
@@ -368,6 +371,7 @@ private:
     struct BacklogEntry { std::string text; };
     std::vector<BacklogEntry> backlog_;
     int backlog_scroll_ = 0;
+    int sidebar_hover_ = -1;
     bool message_visible_ = true;
 
     float choice_y_start() const
@@ -1459,15 +1463,37 @@ private:
             {468, 233, 20},  // QuickSave
         };
 
-        for (const auto& button : btns) {
+        for (int i = 0; i < static_cast<int>(std::size(btns)); ++i) {
+            const auto& button = btns[i];
+            const float state_x = i == sidebar_hover_ ? 44.0f : 22.0f;
             const SDL_FRect src{
-                22.0f, static_cast<float>(button.source_y),
+                state_x, static_cast<float>(button.source_y),
                 22.0f, static_cast<float>(button.h)};
             const SDL_FRect dst{
                 776.0f, static_cast<float>(button.y),
                 22.0f, static_cast<float>(button.h)};
             SDL_RenderTexture(renderer_, ui_sidebar_btns_.get(),
                               &src, &dst);
+        }
+    }
+
+    void update_sidebar_hover(float x, float y)
+    {
+        sidebar_hover_ = -1;
+        if (x < 776.0f || x >= 798.0f) {
+            return;
+        }
+        static constexpr std::array button_y{
+            271, 312, 353, 376, 399, 422, 445, 468,
+        };
+        static constexpr std::array button_h{
+            36, 36, 20, 20, 20, 20, 20, 20,
+        };
+        for (int i = 0; i < static_cast<int>(button_y.size()); ++i) {
+            if (y >= button_y[i] && y < button_y[i] + button_h[i]) {
+                sidebar_hover_ = i;
+                return;
+            }
         }
     }
 
@@ -1561,6 +1587,8 @@ private:
                     ++backlog_scroll_;
                 else close_backlog();
             }
+        } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            update_sidebar_hover(event.motion.x, event.motion.y);
         }
     }
 
