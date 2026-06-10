@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(toheart2_linux LANGUAGES CXX)
+project(toheart2_linux LANGUAGES C CXX)
 
 include(CTest)
 
@@ -21,6 +21,13 @@ add_library(th2_scenario
 target_include_directories(th2_scenario PUBLIC native)
 target_compile_options(th2_scenario PRIVATE -Wall -Wextra -Wpedantic)
 
+add_library(th2_bytecode
+    native/bytecode.cpp
+    native/event_metadata.c
+)
+target_include_directories(th2_bytecode PUBLIC native)
+target_compile_options(th2_bytecode PRIVATE -Wall -Wextra -Wpedantic)
+
 add_executable(th2-archive-info
     native/archive_info.cpp
 )
@@ -31,12 +38,23 @@ add_executable(th2-scenario-info
 )
 target_link_libraries(th2-scenario-info PRIVATE th2_archive th2_scenario)
 
+add_executable(th2-bytecode-info
+    native/bytecode_info.cpp
+)
+target_link_libraries(th2-bytecode-info PRIVATE th2_archive th2_scenario th2_bytecode)
+
 if(BUILD_TESTING)
     add_executable(th2-scenario-test
         native/scenario_test.cpp
     )
     target_link_libraries(th2-scenario-test PRIVATE th2_scenario)
     add_test(NAME scenario-parser COMMAND th2-scenario-test)
+
+    add_executable(th2-bytecode-test
+        native/bytecode_test.cpp
+    )
+    target_link_libraries(th2-bytecode-test PRIVATE th2_bytecode)
+    add_test(NAME bytecode-decoder COMMAND th2-bytecode-test)
 endif()
 
 add_executable(th2-sdl-smoke
