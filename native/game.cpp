@@ -1879,19 +1879,26 @@ private:
                     renderer_, transition_->previous.get(),
                     &rectangle, &rectangle);
             };
-            if (transition_->type == 0) {
+            const bool white_flash_pattern =
+                (transition_->type & 0x7f) == 50
+                && transition_->type >= 0x80;
+            if (transition_->type == 0 || white_flash_pattern) {
                 if (progress < 0.5f) {
                     SDL_SetTextureAlphaModFloat(
                         transition_->previous.get(), 1.0f);
                     SDL_RenderTexture(
                         renderer_, transition_->previous.get(), nullptr, nullptr);
                 }
-                const float black = progress < 0.5f
+                const float midpoint = progress < 0.5f
                     ? progress * 2.0f : (1.0f - progress) * 2.0f;
                 SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
                 SDL_SetRenderDrawColor(
-                    renderer_, 0, 0, 0,
-                    static_cast<Uint8>(std::clamp(black, 0.0f, 1.0f) * 255.0f));
+                    renderer_,
+                    white_flash_pattern ? 255 : 0,
+                    white_flash_pattern ? 255 : 0,
+                    white_flash_pattern ? 255 : 0,
+                    static_cast<Uint8>(
+                        std::clamp(midpoint, 0.0f, 1.0f) * 255.0f));
                 SDL_RenderFillRect(renderer_, nullptr);
             } else if (transition_->type >= 2 && transition_->type <= 7) {
                 SDL_SetTextureAlphaModFloat(transition_->previous.get(), 1.0f);
