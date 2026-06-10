@@ -224,7 +224,9 @@ public:
                     if (event.button.button == SDL_BUTTON_RIGHT) {
                         open_system_menu();
                     } else if (event.button.button == SDL_BUTTON_LEFT) {
-                        if (choosing_) {
+                        if (handle_sidebar_click(event.button.x, event.button.y)) {
+                            continue;
+                        } else if (choosing_) {
                             const float mouse_y = event.button.y;
                             float y = choice_y_start();
                             for (int i = 0;
@@ -1395,38 +1397,31 @@ private:
         SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 190);
         SDL_RenderFillRect(renderer_, nullptr);
 
-        // Sidebar
-        draw_sidebar();
-
         // Text: show from start_entry to backlog_scroll_ (newest at bottom)
         constexpr float line_h = 31.0f;
         constexpr float start_y = 34.0f;
         constexpr float max_y = 566.0f;
 
         int start_entry = backlog_scroll_;
-        // Walk up from the newest visible entry to find how many fit
-        float y = max_y;
-        int vis_count = 0;
+        float remaining = max_y - start_y;
         for (int i = backlog_scroll_; i >= 0; --i) {
             const auto lines = display_lines(backlog_[i].text);
-            y -= lines.size() * line_h;
-            if (y < start_y) break;
+            const float height = lines.size() * line_h;
+            if (height > remaining) {
+                break;
+            }
             start_entry = i;
-            ++vis_count;
+            remaining -= height;
         }
-        start_entry = backlog_scroll_ - vis_count + 1;
-        if (start_entry < 0) start_entry = 0;
 
-        y = max_y;
-        for (int i = backlog_scroll_; i >= start_entry; --i) {
+        float y = start_y;
+        for (int i = start_entry; i <= backlog_scroll_; ++i) {
             const auto& entry = backlog_[i];
             const auto lines = display_lines(entry.text);
-            y -= lines.size() * line_h;
-            const float yy = y;
             for (const auto& line : lines) {
-                font_.draw(renderer_, 54.0f, yy + 2.0f, line, 0, 0, 0);
-                font_.draw(renderer_, 52.0f, yy, line, 160, 160, 160);
-                // yy += line_h; // not needed, yy only used for shadow
+                font_.draw(renderer_, 54.0f, y + 2.0f, line, 0, 0, 0);
+                font_.draw(renderer_, 52.0f, y, line, 160, 160, 160);
+                y += line_h;
             }
         }
     }
@@ -1435,47 +1430,96 @@ private:
     {
         if (!ui_sidebar_track_ || !ui_sidebar_btns_) return;
 
-        // Scroll track background (sys0000.tga: 22 x 255)
-        const SDL_FRect trk_dst{776.0f, 10.0f, 22.0f, 255.0f};
+        // sys0000.tga is the complete 30x600 sidebar backing.
+        const SDL_FRect sidebar_dst{770.0f, 0.0f, 30.0f, 600.0f};
         SDL_RenderTexture(renderer_, ui_sidebar_track_.get(), nullptr,
-                          &trk_dst);
+                          &sidebar_dst);
 
-        // Scroll handle position
+        // sys0001.tga stores disabled, normal, hover and pressed states
+        // in four 22-pixel-wide columns.
         if (!backlog_.empty()) {
             const float ratio = static_cast<float>(backlog_scroll_)
                 / std::max(1, static_cast<int>(backlog_.size()) - 1);
-            const float handle_y = 10.0f + ratio * (255.0f - 20.0f);
-            const SDL_FRect hdl_src{0.0f, 0.0f, 22.0f, 20.0f};
-            const SDL_FRect hdl_dst{776.0f, handle_y, 22.0f, 20.0f};
+            const float handle_y = 10.0f + ratio * (255.0f - 31.0f);
+            const SDL_FRect hdl_src{22.0f, 0.0f, 22.0f, 30.0f};
+            const SDL_FRect hdl_dst{776.0f, handle_y, 22.0f, 30.0f};
             SDL_RenderTexture(renderer_, ui_sidebar_btns_.get(),
                               &hdl_src, &hdl_dst);
         }
 
-        // Sidebar buttons from sys0001.tga
-        // Each button: w=22, states stacked vertically at y=h*state
-        struct SBBtn { int y; int h; };
+        struct SBBtn { int y; int source_y; int h; };
         const SBBtn btns[] = {
-            {271, 36},  // PageUp
-            {312, 36},  // PageDown
-            {353, 20},  // Save
-            {376, 20},  // Load
-            {399, 20},  // Auto
-            {422, 20},  // Skip
-            {445, 20},  // Settings
-            {468, 20},  // QuickSave
+            {271, 36, 36},   // PageUp
+            {312, 77, 36},   // PageDown
+            {353, 118, 20},  // Save
+            {376, 141, 20},  // Load
+            {399, 164, 20},  // Auto
+            {422, 187, 20},  // Skip
+            {445, 210, 20},  // Settings
+            {468, 233, 20},  // QuickSave
         };
-        constexpr int btn_count = 8;
 
-        for (int i = 0; i < btn_count; ++i) {
+        for (const auto& button : btns) {
             const SDL_FRect src{
-                0.0f, static_cast<float>(btns[i].h * 0),
-                22.0f, static_cast<float>(btns[i].h)};
+                22.0f, static_cast<float>(button.source_y),
+                22.0f, static_cast<float>(button.h)};
             const SDL_FRect dst{
-                776.0f, static_cast<float>(btns[i].y),
-                22.0f, static_cast<float>(btns[i].h)};
+                776.0f, static_cast<float>(button.y),
+                22.0f, static_cast<float>(button.h)};
             SDL_RenderTexture(renderer_, ui_sidebar_btns_.get(),
                               &src, &dst);
         }
+    }
+
+    bool handle_sidebar_click(float x, float y)
+    {
+        if (x < 776.0f || x >= 798.0f) {
+            return false;
+        }
+        if (y >= 10.0f && y < 265.0f && !backlog_.empty()) {
+            const float ratio = std::clamp((y - 10.0f) / 255.0f, 0.0f, 1.0f);
+            backlog_scroll_ = static_cast<int>(
+                ratio * static_cast<float>(backlog_.size() - 1));
+            ui_mode_ = UiMode::backlog;
+            return true;
+        }
+
+        struct Hitbox { int y; int h; };
+        static constexpr Hitbox buttons[] = {
+            {271, 36}, {312, 36}, {353, 20}, {376, 20},
+            {399, 20}, {422, 20}, {445, 20}, {468, 20},
+        };
+        for (int i = 0; i < static_cast<int>(std::size(buttons)); ++i) {
+            if (y < buttons[i].y || y >= buttons[i].y + buttons[i].h) {
+                continue;
+            }
+            switch (i) {
+            case 0:
+                open_backlog();
+                if (ui_mode_ == UiMode::backlog && backlog_scroll_ > 0) {
+                    --backlog_scroll_;
+                }
+                break;
+            case 1:
+                if (ui_mode_ == UiMode::backlog
+                    && backlog_scroll_ < static_cast<int>(backlog_.size()) - 1) {
+                    ++backlog_scroll_;
+                } else if (ui_mode_ == UiMode::backlog) {
+                    close_backlog();
+                } else {
+                    advance();
+                }
+                break;
+            case 2: save(0); break;
+            case 3: load(0); break;
+            case 4: break;
+            case 5: break;
+            case 6: open_system_menu(); break;
+            case 7: save(0); break;
+            }
+            return true;
+        }
+        return true;
     }
 
     void handle_backlog_input(const SDL_Event& event)
@@ -1505,31 +1549,8 @@ private:
                 close_backlog();
                 return;
             }
-            const float mx = event.button.x; const float my = event.button.y;
-            // Click on scroll track jumps to position
-            if (mx >= 776 && mx < 798 && my >= 10 && my < 265) {
-                const float ratio = (my - 10.0f) / 255.0f;
-                backlog_scroll_ = static_cast<int>(
-                    ratio * (backlog_.size() - 1));
+            if (handle_sidebar_click(event.button.x, event.button.y)) {
                 return;
-            }
-            // Click on sidebar buttons
-            if (mx >= 776 && mx < 798) {
-                const int btn_ys[] = {271, 312, 353, 376, 399, 422, 445, 468};
-                const int btn_hs[] = {36, 36, 20, 20, 20, 20, 20, 20};
-                for (int i = 0; i < 8; ++i) {
-                    if (my >= btn_ys[i] && my < btn_ys[i] + btn_hs[i]) {
-                        switch (i) {
-                        case 0: backlog_scroll_ = std::max(0, backlog_scroll_ - 1); break;
-                        case 1: backlog_scroll_ = std::min(
-                                    static_cast<int>(backlog_.size()) - 1,
-                                    backlog_scroll_ + 1); break;
-                        case 2: save(0); close_backlog(); break;
-                        case 3: load(0); close_backlog(); break;
-                        }
-                        return;
-                    }
-                }
             }
             close_backlog();
         } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
@@ -1645,6 +1666,7 @@ private:
         } else if (ui_mode_ == UiMode::backlog) {
             draw_backlog();
         }
+        draw_sidebar();
         SDL_RenderPresent(renderer_);
     }
 };
