@@ -12,6 +12,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <fstream>
 #include <filesystem>
@@ -147,8 +148,32 @@ public:
             while (SDL_PollEvent(&event)) {
                 if (event.type == SDL_EVENT_QUIT) {
                     running_ = false;
-                } else if (event.type == SDL_EVENT_KEY_DOWN) {
-                    if (choosing_) {
+                    continue;
+                }
+
+                // UI mode routing
+                if (ui_mode_ == UiMode::system_menu) {
+                    handle_system_menu_input(event);
+                    continue;
+                }
+                if (ui_mode_ == UiMode::backlog) {
+                    handle_backlog_input(event);
+                    continue;
+                }
+
+                // Message window hidden - any input restores it
+                if (!message_visible_) {
+                    if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                        || event.type == SDL_EVENT_KEY_DOWN) {
+                        message_visible_ = true;
+                    }
+                    continue;
+                }
+
+                if (event.type == SDL_EVENT_KEY_DOWN) {
+                    if (event.key.key == SDLK_PAGEUP) {
+                        open_backlog();
+                    } else if (choosing_) {
                         if (event.key.key == SDLK_RETURN
                             || event.key.key == SDLK_SPACE) {
                             choice_selected_ = choice_highlight_;
@@ -165,7 +190,7 @@ public:
                         }
                     } else {
                         if (event.key.key == SDLK_ESCAPE) {
-                            running_ = false;
+                            open_system_menu();
                         } else if (event.key.key == SDLK_F5) {
                             save(0);
                         } else if (event.key.key == SDLK_F7) {
@@ -178,26 +203,32 @@ public:
                             advance();
                         }
                     }
-                } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
-                           && event.button.button == SDL_BUTTON_LEFT) {
-                    if (choosing_) {
-                        const float mouse_y = event.button.y;
-                        float y = choice_y_start();
-                        for (int i = 0;
-                             i < static_cast<int>(choices_.size()); ++i) {
-                            if (mouse_y >= y && mouse_y < y + 31.0f) {
-                                choice_selected_ = i;
-                                advance();
-                                break;
+                } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+                    if (event.button.button == SDL_BUTTON_RIGHT) {
+                        open_system_menu();
+                    } else if (event.button.button == SDL_BUTTON_LEFT) {
+                        if (choosing_) {
+                            const float mouse_y = event.button.y;
+                            float y = choice_y_start();
+                            for (int i = 0;
+                                 i < static_cast<int>(choices_.size()); ++i) {
+                                if (mouse_y >= y && mouse_y < y + 31.0f) {
+                                    choice_selected_ = i;
+                                    advance();
+                                    break;
+                                }
+                                y += 31.0f;
                             }
-                            y += 31.0f;
+                        } else {
+                            advance();
                         }
-                    } else {
+                    }
+                } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+                    if (event.wheel.y > 0) {
+                        open_backlog();
+                    } else if (event.wheel.y < 0) {
                         advance();
                     }
-                } else if (event.type == SDL_EVENT_MOUSE_WHEEL
-                           && event.wheel.y < 0) {
-                    advance();
                 } else if (choosing_
                            && event.type == SDL_EVENT_MOUSE_MOTION) {
                     const float mouse_y = event.motion.y;
@@ -226,6 +257,7 @@ public:
                 advance();
             }
             update_audio();
+            ++indicator_frame_;
             draw();
             SDL_Delay(8);
         }
@@ -302,6 +334,16 @@ private:
     int choice_result_register_ = -1;
     bool choice_ex_ = false;
 
+    // --- UI State ---
+    enum class UiMode { game, system_menu, backlog };
+    UiMode ui_mode_ = UiMode::game;
+    int menu_highlight_ = 0;
+    struct BacklogEntry { std::string text; };
+    std::vector<BacklogEntry> backlog_;
+    int backlog_scroll_ = 0;
+    bool message_visible_ = true;
+    int indicator_frame_ = 0;
+
     float choice_y_start() const
     {
         if (!message_.empty()) {
@@ -327,6 +369,7 @@ private:
             if (message_.reveal_next()) {
                 return;
             }
+            push_backlog();
             waiting_for_input_ = false;
         }
         advance(true);
@@ -677,6 +720,9 @@ private:
         if (waiting_for_input_ && message_.reveal_next()) {
             return;
         }
+        if (waiting_for_input_) {
+            push_backlog();
+        }
         waiting_for_input_ = false;
         if (choosing_) {
             if (choice_selected_ < 0) {
@@ -936,6 +982,8 @@ private:
         audio_wait_.reset();
         wake_time_.reset();
         bgm_track_ = -1;
+        ui_mode_ = UiMode::game;
+        message_visible_ = true;
 
         // Script identity
         const auto script_name = read_str(in, 64);
@@ -1163,6 +1211,252 @@ private:
         return result;
     }
 
+    // --- UI Methods ---
+
+    void push_backlog()
+    {
+        if (!message_.empty()) {
+            backlog_.push_back({message_.visible()});
+            if (backlog_.size() > 256) {
+                backlog_.erase(backlog_.begin());
+            }
+        }
+    }
+
+    void open_system_menu()
+    {
+        if (choosing_) return;
+        ui_mode_ = UiMode::system_menu;
+        menu_highlight_ = 4;
+    }
+
+    void close_system_menu()
+    {
+        ui_mode_ = UiMode::game;
+    }
+
+    void open_backlog()
+    {
+        if (backlog_.empty() || choosing_) return;
+        ui_mode_ = UiMode::backlog;
+        backlog_scroll_ = static_cast<int>(backlog_.size()) - 1;
+    }
+
+    void close_backlog()
+    {
+        ui_mode_ = UiMode::game;
+    }
+
+    void execute_menu_item(int index)
+    {
+        switch (index) {
+        case 0: save(0); break;
+        case 1: load(0); break;
+        case 2: message_visible_ = !message_visible_; break;
+        case 3: break;  // Settings placeholder
+        case 4: break;  // Close (handled by caller)
+        }
+    }
+
+    void draw_system_menu()
+    {
+        struct MenuItem { const char* label; int x, y, w, h; };
+        const MenuItem items[] = {
+            {"Save",      200, 112, 400, 82},
+            {"Load",      200, 200, 400, 82},
+            {"Hide Text", 200, 288, 400, 82},
+            {"Settings",  200, 376, 400, 82},
+            {"Close",     306, 480, 188, 32},
+        };
+        constexpr int count = 5;
+
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 180);
+        SDL_RenderFillRect(renderer_, nullptr);
+
+        for (int i = 0; i < count; ++i) {
+            const auto& item = items[i];
+            const bool hl = (i == menu_highlight_);
+
+            if (hl) {
+                SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 40);
+                SDL_FRect bg{static_cast<float>(item.x),
+                             static_cast<float>(item.y),
+                             static_cast<float>(item.w),
+                             static_cast<float>(item.h)};
+                SDL_RenderFillRect(renderer_, &bg);
+            }
+
+            const float tw = std::strlen(item.label) * 12.0f;
+            const float tx = item.x + (item.w - tw) / 2.0f;
+            const float ty = item.y + (item.h - 24) / 2.0f;
+
+            font_.draw(renderer_, tx + 2.0f, ty + 2.0f, item.label, 0, 0, 0);
+            if (hl) {
+                font_.draw(renderer_, tx, ty, item.label, 255, 255, 255);
+            } else {
+                font_.draw(renderer_, tx, ty, item.label, 128, 128, 128);
+            }
+        }
+    }
+
+    void handle_system_menu_input(const SDL_Event& event)
+    {
+        struct MenuItem { const char* label; int x, y, w, h; };
+        const MenuItem items[] = {
+            {"Save",      200, 112, 400, 82},
+            {"Load",      200, 200, 400, 82},
+            {"Hide Text", 200, 288, 400, 82},
+            {"Settings",  200, 376, 400, 82},
+            {"Close",     306, 480, 188, 32},
+        };
+        constexpr int count = 5;
+
+        if (event.type == SDL_EVENT_KEY_DOWN) {
+            if (event.key.key == SDLK_ESCAPE) {
+                close_system_menu();
+            } else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_SPACE) {
+                const int item = menu_highlight_;
+                close_system_menu();
+                execute_menu_item(item);
+            } else if (event.key.key == SDLK_UP) {
+                menu_highlight_ = (menu_highlight_ - 1 + count) % count;
+            } else if (event.key.key == SDLK_DOWN) {
+                menu_highlight_ = (menu_highlight_ + 1) % count;
+            }
+        } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            if (event.button.button == SDL_BUTTON_RIGHT) {
+                close_system_menu();
+            } else if (event.button.button == SDL_BUTTON_LEFT) {
+                const float mx = event.button.x;
+                const float my = event.button.y;
+                for (int i = 0; i < count; ++i) {
+                    const auto& item = items[i];
+                    if (mx >= item.x && mx < item.x + item.w
+                        && my >= item.y && my < item.y + item.h) {
+                        close_system_menu();
+                        execute_menu_item(i);
+                        break;
+                    }
+                }
+            }
+        } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            const float mx = event.motion.x;
+            const float my = event.motion.y;
+            for (int i = 0; i < count; ++i) {
+                const auto& item = items[i];
+                if (mx >= item.x && mx < item.x + item.w
+                    && my >= item.y && my < item.y + item.h) {
+                    menu_highlight_ = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    void draw_backlog()
+    {
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 220);
+        SDL_RenderFillRect(renderer_, nullptr);
+
+        constexpr int visible_lines = 16;
+        constexpr float line_height = 31.0f;
+        constexpr float start_y = 50.0f;
+
+        int start_entry = backlog_scroll_ - visible_lines + 1;
+        if (start_entry < 0) start_entry = 0;
+
+        float y = start_y;
+        for (int i = start_entry;
+             i <= backlog_scroll_ && i < static_cast<int>(backlog_.size());
+             ++i) {
+            const auto lines = display_lines(backlog_[i].text);
+            for (const auto& line : lines) {
+                font_.draw(renderer_, 54.0f, y + 2.0f, line, 0, 0, 0);
+                font_.draw(renderer_, 52.0f, y, line, 160, 160, 160);
+                y += line_height;
+                if (y > 550.0f) break;
+            }
+            if (y > 550.0f) break;
+        }
+
+        if (!backlog_.empty()) {
+            const float ratio = static_cast<float>(backlog_scroll_)
+                / std::max(1, static_cast<int>(backlog_.size()) - 1);
+            const float iy = 50.0f + ratio * 500.0f;
+            SDL_SetRenderDrawColor(renderer_, 128, 128, 128, 200);
+            SDL_FRect ind{780.0f, iy, 8.0f, 20.0f};
+            SDL_RenderFillRect(renderer_, &ind);
+        }
+    }
+
+    void handle_backlog_input(const SDL_Event& event)
+    {
+        if (event.type == SDL_EVENT_KEY_DOWN) {
+            if (event.key.key == SDLK_ESCAPE || event.key.key == SDLK_RETURN
+                || event.key.key == SDLK_SPACE) {
+                close_backlog();
+            } else if (event.key.key == SDLK_UP) {
+                if (backlog_scroll_ > 0) --backlog_scroll_;
+            } else if (event.key.key == SDLK_DOWN) {
+                if (backlog_scroll_ < static_cast<int>(backlog_.size()) - 1) {
+                    ++backlog_scroll_;
+                } else {
+                    close_backlog();
+                }
+            } else if (event.key.key == SDLK_PAGEUP) {
+                backlog_scroll_ = std::max(0, backlog_scroll_ - 8);
+            } else if (event.key.key == SDLK_PAGEDOWN) {
+                backlog_scroll_ = std::min(
+                    static_cast<int>(backlog_.size()) - 1,
+                    backlog_scroll_ + 8);
+            } else if (event.key.key == SDLK_HOME) {
+                backlog_scroll_ = 0;
+            } else if (event.key.key == SDLK_END) {
+                backlog_scroll_ = static_cast<int>(backlog_.size()) - 1;
+            }
+        } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            close_backlog();
+        } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+            if (event.wheel.y > 0) {
+                if (backlog_scroll_ > 0) --backlog_scroll_;
+            } else if (event.wheel.y < 0) {
+                if (backlog_scroll_ < static_cast<int>(backlog_.size()) - 1) {
+                    ++backlog_scroll_;
+                } else {
+                    close_backlog();
+                }
+            }
+        }
+    }
+
+    void draw_click_indicator()
+    {
+        if (!waiting_for_input_ || !message_visible_ || message_.empty()) {
+            return;
+        }
+        if ((indicator_frame_ / 30) % 2 != 0) return;
+
+        const auto lines = display_lines(message_.visible());
+        if (lines.empty()) return;
+
+        const auto& last_line = lines.back();
+        float width = 0;
+        for (unsigned char c : last_line) {
+            width += (c >= 0x20 && c <= 0x7E) ? 12.0f : 24.0f;
+        }
+
+        const float x = 52.0f + width + 4.0f;
+        const float y = 72.0f
+            + (std::min(lines.size(), static_cast<std::size_t>(15)) - 1)
+            * 31.0f + 20.0f;
+
+        SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 200);
+        SDL_FRect rect{x, y, 8.0f, 6.0f};
+        SDL_RenderFillRect(renderer_, &rect);
+    }
+
     void draw()
     {
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
@@ -1192,7 +1486,7 @@ private:
                 SDL_RenderTexture(renderer_, overlay.get(), nullptr, nullptr);
             }
         }
-        if (!message_.empty()) {
+        if (message_visible_ && !message_.empty()) {
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 150);
             SDL_RenderFillRect(renderer_, nullptr);
@@ -1207,7 +1501,7 @@ private:
                 }
             }
         }
-        if (choosing_ && !choices_.empty()) {
+        if (message_visible_ && choosing_ && !choices_.empty()) {
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             const float top = choice_y_start() - 8.0f;
             const float height = choices_.size() * 31.0f + 16.0f;
@@ -1226,6 +1520,14 @@ private:
                     highlighted ? 255 : 128);
                 y += 31.0f;
             }
+        }
+        if (ui_mode_ == UiMode::game) {
+            draw_click_indicator();
+        }
+        if (ui_mode_ == UiMode::system_menu) {
+            draw_system_menu();
+        } else if (ui_mode_ == UiMode::backlog) {
+            draw_backlog();
         }
         SDL_RenderPresent(renderer_);
     }
