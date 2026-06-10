@@ -271,7 +271,15 @@ private:
     int bgm_volume_ = 255;
     std::array<th2::AudioChannel, 8> transient_se_{};
     std::array<th2::AudioChannel, 16> se_channels_{};
+    std::array<int, 16> se_sound_{};  // sound number per channel, -1 = none
+    std::array<bool, 16> se_loop_{};
+    std::array<int, 16> se_volume_{};
     std::array<th2::AudioChannel, 8> voice_channels_{};
+    std::array<int, 8> voice_sound_{};  // voice number per channel, -1 = none
+    std::array<int, 8> voice_character_{};  // character for this voice
+    std::array<int, 8> voice_scenario_{};  // scenario for voice filename
+    std::array<int, 8> voice_volume_{};
+    std::array<bool, 8> voice_loop_{};
     th2::Message message_;
     int tone_ = 0;
     int weather_ = 0;
@@ -376,6 +384,9 @@ private:
             se_channels_[channel].play(
                 load_audio(se_archive_, name), loop,
                 std::clamp(volume, 0, 255) / 255.0f);
+            se_sound_[channel] = sound;
+            se_loop_[channel] = loop;
+            se_volume_[channel] = volume;
             return;
         }
         auto found = std::find_if(
@@ -430,6 +441,11 @@ private:
             voice_channels_[channel].play(
                 load_audio(voice_archive_, name), loop,
                 std::clamp(volume, 0, 256) / 256.0f);
+            voice_sound_[channel] = voice;
+            voice_character_[channel] = character;
+            voice_scenario_[channel] = scenario;
+            voice_volume_[channel] = volume;
+            voice_loop_[channel] = loop;
         }
     }
 
@@ -593,6 +609,7 @@ private:
             const auto channel = number(event, 0);
             if (channel >= 0 && static_cast<std::size_t>(channel) < se_channels_.size()) {
                 se_channels_[channel].stop();
+                se_sound_[channel] = -1;
             }
         } else if (name == "SEV") {
             const auto channel = number(event, 0);
@@ -614,6 +631,7 @@ private:
             const auto channel = number(event, 1) < 0 ? 0 : number(event, 1);
             if (channel >= 0 && static_cast<std::size_t>(channel) < voice_channels_.size()) {
                 voice_channels_[channel].stop();
+                voice_sound_[channel] = -1;
             }
         } else if (name == "VW") {
             const auto channel = number(event, 0) < 0 ? 0 : number(event, 0);
@@ -822,23 +840,54 @@ private:
         }
         write_u32(out, se_count);
 
-        // SE channels
+        // SE channels - full state for each active channel
         std::uint32_t se_ch_count = 0;
-        for (const auto& ch : se_channels_) {
-            if (ch.playing()) {
+        for (std::size_t i = 0; i < se_channels_.size(); ++i) {
+            if (se_channels_[i].playing()) {
                 ++se_ch_count;
             }
         }
         write_u32(out, se_ch_count);
+        for (std::size_t i = 0; i < se_channels_.size(); ++i) {
+            if (se_channels_[i].playing()) {
+                write_u32(out, static_cast<std::uint32_t>(i));
+                write_i32(out, se_sound_[i]);
+                write_i32(out, se_loop_[i] ? 1 : 0);
+                write_i32(out, se_volume_[i]);
+            }
+        }
 
-        // Voice channels
+        // Voice channels - full state for each active channel
         std::uint32_t voice_count = 0;
-        for (const auto& ch : voice_channels_) {
-            if (ch.playing()) {
+        for (std::size_t i = 0; i < voice_channels_.size(); ++i) {
+            if (voice_channels_[i].playing()) {
                 ++voice_count;
             }
         }
         write_u32(out, voice_count);
+        for (std::size_t i = 0; i < voice_channels_.size(); ++i) {
+            if (voice_channels_[i].playing()) {
+                write_u32(out, static_cast<std::uint32_t>(i));
+                write_i32(out, voice_sound_[i]);
+                write_i32(out, voice_character_[i]);
+                write_i32(out, voice_scenario_[i]);
+                write_i32(out, voice_volume_[i]);
+                write_i32(out, voice_loop_[i] ? 1 : 0);
+            }
+        }
+
+        // VM wait state
+        write_i32(out, wake_time_.has_value() ? 1 : 0);
+        if (wake_time_) {
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                *wake_time_ - std::chrono::steady_clock::now()).count();
+            write_i64(out, remaining > 0 ? remaining : 0);
+        }
+        write_i32(out, audio_wait_.has_value() ? 1 : 0);
+        if (audio_wait_) {
+            write_i32(out, audio_wait_->kind == AudioWaitKind::sound_effect ? 1 : 2);
+            write_u32(out, static_cast<std::uint32_t>(audio_wait_->channel));
+        }
 
         // Message state - full segments for correct text-block position
         write_i32(out, message_.empty() ? 0 : 1);
@@ -950,10 +999,60 @@ private:
 
         // SE transient
         read_u32(in);
-        // SE channels
-        read_u32(in);
-        // Voice channels
-        read_u32(in);
+
+        // SE channels - restore active channels
+        const auto se_ch_count = read_u32(in);
+        for (std::uint32_t i = 0; i < se_ch_count; ++i) {
+            const auto channel = static_cast<std::size_t>(read_u32(in));
+            const auto sound = read_i32(in);
+            const auto loop = read_i32(in) != 0;
+            const auto volume = read_i32(in);
+            if (channel < se_channels_.size() && sound >= 0) {
+                play_se(static_cast<int>(channel), sound, loop, volume);
+            }
+        }
+
+        // Voice channels - restore active channels
+        const auto voice_count = read_u32(in);
+        for (std::uint32_t i = 0; i < voice_count; ++i) {
+            const auto channel = static_cast<std::size_t>(read_u32(in));
+            const auto sound = read_i32(in);
+            const auto character = read_i32(in);
+            const auto scenario = read_i32(in);
+            const auto volume = read_i32(in);
+            const auto loop = read_i32(in) != 0;
+            if (channel < voice_channels_.size()) {
+                const auto name = std::format(
+                    "K{:09d}_{:03d}{:03d}.OGG", scenario, sound, character);
+                voice_channels_[channel].play(
+                    load_audio(voice_archive_, name), loop,
+                    std::clamp(volume, 0, 256) / 256.0f);
+                voice_sound_[channel] = sound;
+                voice_character_[channel] = character;
+                voice_scenario_[channel] = scenario;
+                voice_volume_[channel] = volume;
+                voice_loop_[channel] = loop;
+            }
+        }
+
+        // VM wait state
+        if (read_i32(in)) {
+            const auto remaining = read_i64(in);
+            wake_time_ = std::chrono::steady_clock::now()
+                + std::chrono::milliseconds(remaining);
+        } else {
+            wake_time_.reset();
+        }
+        if (read_i32(in)) {
+            const auto kind_int = read_i32(in);
+            const auto channel = static_cast<std::size_t>(read_u32(in));
+            audio_wait_ = AudioWait{
+                kind_int == 1 ? AudioWaitKind::sound_effect
+                              : AudioWaitKind::voice,
+                channel};
+        } else {
+            audio_wait_.reset();
+        }
 
         // Message state - restore full segments
         const auto has_message = read_i32(in);
@@ -1015,6 +1114,12 @@ private:
         write_u32(out, static_cast<std::uint32_t>(value));
     }
 
+    void write_i64(std::ostream& out, std::int64_t value) const
+    {
+        write_u32(out, static_cast<std::uint32_t>(value & 0xFFFFFFFF));
+        write_u32(out, static_cast<std::uint32_t>((value >> 32) & 0xFFFFFFFF));
+    }
+
     void write_str(std::ostream& out, std::string_view str,
                    std::size_t padded_size) const
     {
@@ -1038,6 +1143,13 @@ private:
     std::int32_t read_i32(std::istream& in) const
     {
         return static_cast<std::int32_t>(read_u32(in));
+    }
+
+    std::int64_t read_i64(std::istream& in) const
+    {
+        const auto low = static_cast<std::int64_t>(read_u32(in));
+        const auto high = static_cast<std::int64_t>(read_u32(in));
+        return low | (high << 32);
     }
 
     std::string read_str(std::istream& in, std::size_t size) const
