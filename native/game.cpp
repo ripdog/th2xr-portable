@@ -1918,6 +1918,37 @@ private:
                 const SDL_FRect dst{0.0f, 246.0f, 800.0f, 142.0f};
                 SDL_RenderTexture(renderer_, prompt.get(), nullptr, &dst);
             }
+            const int selected = save_confirm_slot_ - save_page_ * 10;
+            if (selected >= 0 && selected < 10) {
+                const float x = 25.0f;
+                const float y = 271.0f;
+                if (save_thumbnails_[selected]) {
+                    const SDL_FRect thumb{x, y + 2.0f, 80.0f, 60.0f};
+                    SDL_RenderTexture(
+                        renderer_, save_thumbnails_[selected].get(),
+                        nullptr, &thumb);
+                }
+                const auto slot_text =
+                    std::format("{:03d}", save_confirm_slot_ + 1);
+                font_.draw(
+                    renderer_, x + 102.0f, y + 4.0f,
+                    slot_text, 245, 220, 190);
+                font_.draw(
+                    renderer_, x + 134.0f, y + 4.0f,
+                    visible_saves_[selected].message.substr(0, 18),
+                    255, 245, 225);
+
+                std::tm local{};
+                localtime_r(
+                    &visible_saves_[selected].timestamp, &local);
+                const auto date = std::format(
+                    "{:04d}/{:02d}/{:02d}  {:02d}:{:02d}",
+                    local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
+                    local.tm_hour, local.tm_min);
+                font_.draw(
+                    renderer_, x + 100.0f, y + 36.0f,
+                    date, 210, 110, 120);
+            }
             if (ui_confirm_buttons_) {
                 const SDL_FRect yes_src{
                     0.0f, save_hover_ == 13 ? 32.0f : 0.0f, 130.0f, 32.0f};
