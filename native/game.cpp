@@ -169,6 +169,9 @@ public:
                     continue;
                 }
                 SDL_ConvertEventToRenderCoordinates(renderer_, &event);
+                if (transition_ || background_fade_) {
+                    continue;
+                }
 
                 // UI mode routing
                 if (ui_mode_ == UiMode::system_menu) {
@@ -281,6 +284,8 @@ public:
             }
             update_audio();
             draw();
+            update_transition();
+            update_background_fade();
             SDL_Delay(8);
         }
         return 0;
@@ -300,6 +305,21 @@ private:
     struct CharacterTexture {
         int pose = -1;
         Texture texture;
+    };
+
+    struct Transition {
+        Texture previous;
+        std::chrono::steady_clock::time_point started;
+        std::chrono::milliseconds duration;
+        int type = 1;
+        bool resume_script = false;
+    };
+
+    struct BackgroundFade {
+        float from = 0.0f;
+        float to = 0.0f;
+        std::chrono::steady_clock::time_point started;
+        std::chrono::milliseconds duration;
     };
 
     th2::Archive scripts_;
@@ -351,6 +371,9 @@ private:
     bool waiting_for_input_ = false;
     std::optional<std::chrono::steady_clock::time_point> wake_time_;
     std::optional<AudioWait> audio_wait_;
+    std::optional<Transition> transition_;
+    std::optional<BackgroundFade> background_fade_;
+    float background_darkness_ = 0.0f;
     std::chrono::steady_clock::time_point skip_next_time_{};
 
     struct Choice {
@@ -386,7 +409,7 @@ private:
 
     void skip()
     {
-        if (choosing_) {
+        if (choosing_ || transition_ || background_fade_) {
             return;
         }
         wake_time_.reset();
@@ -413,6 +436,84 @@ private:
             throw std::out_of_range("unsupported character number");
         }
         return character_textures_[number];
+    }
+
+    Texture capture_frame()
+    {
+        SDL_Surface* surface = SDL_RenderReadPixels(renderer_, nullptr);
+        if (!surface) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        SDL_Texture* raw = SDL_CreateTextureFromSurface(renderer_, surface);
+        SDL_DestroySurface(surface);
+        if (!raw) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        SDL_SetTextureBlendMode(raw, SDL_BLENDMODE_BLEND);
+        return Texture(raw);
+    }
+
+    void begin_transition(int type, int frames, bool resume_script)
+    {
+        if (type < 0) {
+            return;
+        }
+        const int effective_frames = frames > 0 ? frames : 30;
+        transition_ = Transition{
+            capture_frame(),
+            std::chrono::steady_clock::now(),
+            std::chrono::milliseconds(effective_frames * 1000 / 60),
+            type,
+            resume_script,
+        };
+    }
+
+    void update_transition()
+    {
+        if (!transition_) {
+            return;
+        }
+        const auto elapsed = std::chrono::steady_clock::now()
+            - transition_->started;
+        if (elapsed < transition_->duration) {
+            return;
+        }
+        const bool resume_script = transition_->resume_script;
+        transition_.reset();
+        if (resume_script) {
+            advance();
+        }
+    }
+
+    void begin_background_fade(float target, int frames)
+    {
+        const int effective_frames = frames > 0 ? frames : 30;
+        background_fade_ = BackgroundFade{
+            background_darkness_,
+            std::clamp(target, 0.0f, 1.0f),
+            std::chrono::steady_clock::now(),
+            std::chrono::milliseconds(effective_frames * 1000 / 60),
+        };
+    }
+
+    void update_background_fade()
+    {
+        if (!background_fade_) {
+            return;
+        }
+        const auto elapsed = std::chrono::steady_clock::now()
+            - background_fade_->started;
+        const float progress = std::clamp(
+            std::chrono::duration<float>(elapsed).count()
+                / std::chrono::duration<float>(background_fade_->duration).count(),
+            0.0f, 1.0f);
+        background_darkness_ = background_fade_->from
+            + (background_fade_->to - background_fade_->from) * progress;
+        if (progress >= 1.0f) {
+            background_darkness_ = background_fade_->to;
+            background_fade_.reset();
+            advance();
+        }
     }
 
     void load_character_texture(const th2::CharacterState& character)
@@ -596,10 +697,25 @@ private:
         const auto name = event.instruction.name;
         if (name == "B" || name == "BT" || name == "BC" || name == "BCT") {
             if (number(event, 1) >= 0) {
+                begin_transition(number(event, 0), number(event, 3), true);
                 set_background(event);
             }
         } else if (name == "V" || name == "VT") {
+            begin_transition(number(event, 0), number(event, 3), true);
             set_visual(event);
+        } else if (name == "FI") {
+            begin_background_fade(0.0f, 30);
+        } else if (name == "FIF") {
+            begin_background_fade(0.0f, number(event, 0));
+        } else if (name == "FO") {
+            begin_background_fade(1.0f, 30);
+        } else if (name == "FOF") {
+            begin_background_fade(1.0f, number(event, 0));
+        } else if (name == "FB") {
+            const float average = (
+                number(event, 0) + number(event, 1) + number(event, 2))
+                / (3.0f * 128.0f);
+            begin_background_fade(1.0f - average, number(event, 3));
         } else if (name == "BD") {
             background_.reset();
             bg_scene_ = -1;
@@ -753,7 +869,7 @@ private:
 
     void advance(bool skipping = false)
     {
-        if (wake_time_ || audio_wait_) {
+        if (wake_time_ || audio_wait_ || transition_ || background_fade_) {
             return;
         }
         if (waiting_for_input_ && message_.reveal_next()) {
@@ -819,6 +935,12 @@ private:
                         audio_wait_.reset();
                         continue;
                     }
+                    break;
+                }
+                if (transition_) {
+                    break;
+                }
+                if (background_fade_) {
                     break;
                 }
                 if (skipping && waiting_for_input_) {
@@ -1296,11 +1418,16 @@ private:
     void open_system_menu()
     {
         if (choosing_) return;
+        begin_transition(1, 12, false);
         ui_mode_ = UiMode::system_menu;
         menu_highlight_ = 4;
     }
 
-    void close_system_menu() { ui_mode_ = UiMode::game; }
+    void close_system_menu()
+    {
+        begin_transition(1, 12, false);
+        ui_mode_ = UiMode::game;
+    }
 
     void open_backlog()
     {
@@ -1687,6 +1814,14 @@ private:
                 SDL_RenderTexture(renderer_, overlay.get(), nullptr, nullptr);
             }
         }
+        if (background_darkness_ > 0.0f) {
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(
+                renderer_, 0, 0, 0,
+                static_cast<Uint8>(background_darkness_ * 255.0f));
+            const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
+            SDL_RenderFillRect(renderer_, &game_area);
+        }
         if (ui_mode_ != UiMode::backlog && message_visible_ && !message_.empty()) {
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 150);
@@ -1732,6 +1867,62 @@ private:
             draw_backlog();
         }
         draw_sidebar();
+        if (transition_) {
+            const auto elapsed = std::chrono::steady_clock::now()
+                - transition_->started;
+            const float progress = std::clamp(
+                std::chrono::duration<float>(elapsed).count()
+                    / std::chrono::duration<float>(transition_->duration).count(),
+                0.0f, 1.0f);
+            auto draw_previous = [&](const SDL_FRect& rectangle) {
+                SDL_RenderTexture(
+                    renderer_, transition_->previous.get(),
+                    &rectangle, &rectangle);
+            };
+            if (transition_->type == 0) {
+                if (progress < 0.5f) {
+                    SDL_SetTextureAlphaModFloat(
+                        transition_->previous.get(), 1.0f);
+                    SDL_RenderTexture(
+                        renderer_, transition_->previous.get(), nullptr, nullptr);
+                }
+                const float black = progress < 0.5f
+                    ? progress * 2.0f : (1.0f - progress) * 2.0f;
+                SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+                SDL_SetRenderDrawColor(
+                    renderer_, 0, 0, 0,
+                    static_cast<Uint8>(std::clamp(black, 0.0f, 1.0f) * 255.0f));
+                SDL_RenderFillRect(renderer_, nullptr);
+            } else if (transition_->type >= 2 && transition_->type <= 7) {
+                SDL_SetTextureAlphaModFloat(transition_->previous.get(), 1.0f);
+                const float width = 800.0f;
+                const float height = 600.0f;
+                if (transition_->type == 2) {
+                    draw_previous({0.0f, 0.0f, width, height * (1.0f - progress)});
+                } else if (transition_->type == 3) {
+                    const float y = height * progress;
+                    draw_previous({0.0f, y, width, height - y});
+                } else if (transition_->type == 4) {
+                    const float x = width * progress;
+                    draw_previous({x, 0.0f, width - x, height});
+                } else if (transition_->type == 5) {
+                    draw_previous({0.0f, 0.0f, width * (1.0f - progress), height});
+                } else if (transition_->type == 6) {
+                    const float side = width * (1.0f - progress) / 2.0f;
+                    draw_previous({0.0f, 0.0f, side, height});
+                    draw_previous({width - side, 0.0f, side, height});
+                } else {
+                    const float middle = width * (1.0f - progress);
+                    const float x = (width - middle) / 2.0f;
+                    draw_previous({x, 0.0f, middle, height});
+                }
+            } else {
+                SDL_SetTextureAlphaModFloat(
+                    transition_->previous.get(), 1.0f - progress);
+                SDL_RenderTexture(
+                    renderer_, transition_->previous.get(), nullptr, nullptr);
+            }
+        }
         SDL_RenderPresent(renderer_);
     }
 };
