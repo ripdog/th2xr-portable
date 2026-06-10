@@ -13,6 +13,8 @@
 #include <chrono>
 #include <cstdint>
 #include <exception>
+#include <fstream>
+#include <filesystem>
 #include <filesystem>
 #include <format>
 #include <iostream>
@@ -164,6 +166,10 @@ public:
                     } else {
                         if (event.key.key == SDLK_ESCAPE) {
                             running_ = false;
+                        } else if (event.key.key == SDLK_F5) {
+                            save(0);
+                        } else if (event.key.key == SDLK_F7) {
+                            load(0);
                         } else if (event.key.key == SDLK_F11) {
                             SDL_SetWindowFullscreen(
                                 window_, !(SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN));
@@ -258,6 +264,7 @@ private:
     th2::Characters characters_;
     std::array<CharacterTexture, 32> character_textures_{};
     th2::AudioChannel bgm_;
+    int bgm_track_ = -1;
     std::array<th2::AudioChannel, 8> transient_se_{};
     std::array<th2::AudioChannel, 16> se_channels_{};
     std::array<th2::AudioChannel, 8> voice_channels_{};
@@ -380,6 +387,7 @@ private:
 
     void play_bgm(int music, bool loop, int volume)
     {
+        bgm_track_ = music;
         const auto gain = std::clamp(volume, 0, 255) / 255.0f;
         const auto single = std::format("BGM_{:03d}.OGG", music);
         if (bgm_archive_.find(single)) {
@@ -533,6 +541,7 @@ private:
             const int music = number(event, 0);
             if (music < 0) {
                 bgm_.stop();
+                bgm_track_ = -1;
             } else {
                 const int loop = number(event, 2) < 0 ? 1 : number(event, 2);
                 const int volume = number(event, 3) < 0 ? 255 : number(event, 3);
@@ -540,6 +549,7 @@ private:
             }
         } else if (name == "MS") {
             bgm_.stop();
+            bgm_track_ = -1;
         } else if (name == "MP") {
             bgm_.pause(number(event, 0) != 0);
         } else if (name == "MV") {
@@ -689,6 +699,292 @@ private:
                 }
             }
         }
+    }
+
+    void save(int slot)
+    {
+        const auto path = save_path(slot);
+        std::ofstream file(path, std::ios::binary);
+        if (!file) {
+            return;
+        }
+        save_body(file);
+    }
+
+    void load(int slot)
+    {
+        const auto path = save_path(slot);
+        std::ifstream file(path, std::ios::binary);
+        if (!file) {
+            return;
+        }
+        load_body(file);
+    }
+
+    std::filesystem::path save_path(int slot) const
+    {
+        return std::format("save_{:02d}.sav", slot);
+    }
+
+    void save_body(std::ostream& out) const
+    {
+        write_u32(out, 1);  // native version
+
+        // Script identity
+        write_str(out, runtime_.script_name(), 64);
+        write_i32(out, tone_);
+        write_i32(out, weather_);
+
+        // VM state
+        write_u32(out, static_cast<std::uint32_t>(runtime_.vm_pc()));
+        const auto registers = runtime_.vm_registers();
+        for (const auto r : registers) {
+            write_i32(out, r);
+        }
+        const auto stack = runtime_.vm_stack();
+        write_u32(out, static_cast<std::uint32_t>(stack.size()));
+        for (const auto s : stack) {
+            write_i32(out, s);
+        }
+
+        // Flags
+        for (const auto f : runtime_.all_flags()) {
+            write_i32(out, f);
+        }
+        for (const auto f : runtime_.all_game_flags()) {
+            write_i32(out, f);
+        }
+
+        // Background
+        write_i32(out, background_ ? 1 : 0);
+
+        // Characters
+        const auto ordered = characters_.ordered();
+        write_u32(out, static_cast<std::uint32_t>(ordered.size()));
+        for (const auto& ch : ordered) {
+            write_i32(out, ch.number);
+            write_i32(out, ch.pose);
+            write_i32(out, ch.locate);
+            write_i32(out, ch.layer);
+            write_i32(out, ch.brightness);
+            write_i32(out, ch.alpha);
+        }
+
+        // Overlays
+        std::uint32_t overlay_count = 0;
+        for (const auto& ov : overlays_) {
+            if (ov) {
+                ++overlay_count;
+            }
+        }
+        write_u32(out, overlay_count);
+
+        // BGM
+        write_i32(out, bgm_.playing() ? bgm_track_ : -1);
+
+        // SE transient
+        std::uint32_t se_count = 0;
+        for (const auto& ch : transient_se_) {
+            if (ch.playing()) {
+                ++se_count;
+            }
+        }
+        write_u32(out, se_count);
+
+        // SE channels
+        std::uint32_t se_ch_count = 0;
+        for (const auto& ch : se_channels_) {
+            if (ch.playing()) {
+                ++se_ch_count;
+            }
+        }
+        write_u32(out, se_ch_count);
+
+        // Voice channels
+        std::uint32_t voice_count = 0;
+        for (const auto& ch : voice_channels_) {
+            if (ch.playing()) {
+                ++voice_count;
+            }
+        }
+        write_u32(out, voice_count);
+
+        // Message state
+        write_i32(out, message_.empty() ? 0 : 1);
+        const auto& visible = message_.visible();
+        write_u32(out, static_cast<std::uint32_t>(visible.size()));
+        if (!message_.empty()) {
+            write_str(out, visible, visible.size());
+        }
+
+        // Choice state
+        write_i32(out, choosing_ ? 1 : 0);
+        write_u32(out, static_cast<std::uint32_t>(choices_.size()));
+        for (const auto& c : choices_) {
+            write_str(out, c.text, 256);
+            write_i32(out, c.flag_no);
+            write_i32(out, c.flag_value);
+            write_str(out, c.sno, 8);
+        }
+        write_i32(out, choice_highlight_);
+        write_i32(out, choice_selected_);
+        write_i32(out, choice_result_register_);
+        write_i32(out, choice_ex_ ? 1 : 0);
+    }
+
+    void load_body(std::istream& in)
+    {
+        const auto version = read_u32(in);
+        if (version < 1) {
+            return;
+        }
+
+        // Stop all audio before restore
+        bgm_.stop();
+        for (auto& ch : transient_se_) { ch.stop(); }
+        for (auto& ch : se_channels_) { ch.stop(); }
+        for (auto& ch : voice_channels_) { ch.stop(); }
+        audio_wait_.reset();
+        wake_time_.reset();
+        bgm_track_ = -1;
+
+        // Script identity
+        const auto script_name = read_str(in, 64);
+        runtime_.load(script_name);
+        tone_ = read_i32(in);
+        weather_ = read_i32(in);
+
+        // VM state
+        const auto pc = read_u32(in);
+        std::array<std::int32_t, 50> regs{};
+        for (auto& r : regs) {
+            r = read_i32(in);
+        }
+        const auto stack_size = read_u32(in);
+        std::vector<std::int32_t> stack_data;
+        stack_data.reserve(stack_size);
+        for (std::uint32_t i = 0; i < stack_size; ++i) {
+            stack_data.push_back(read_i32(in));
+        }
+        // Flags
+        for (std::size_t i = 0; i < 1024; ++i) {
+            runtime_.set_flag(i, read_i32(in));
+        }
+        for (std::size_t i = 0; i < 1024; ++i) {
+            runtime_.set_game_flag(i, read_i32(in));
+        }
+        runtime_.vm_restore(regs, stack_data, pc);
+
+        // Background - reset, script replay will restore it
+        read_i32(in);
+        background_.reset();
+
+        // Characters
+        characters_ = {};
+        character_textures_ = {};
+        const auto char_count = read_u32(in);
+        for (std::uint32_t i = 0; i < char_count; ++i) {
+            const auto number = read_i32(in);
+            const auto pose = read_i32(in);
+            const auto locate = read_i32(in);
+            const auto layer = read_i32(in);
+            const auto brightness = read_i32(in);
+            const auto alpha = read_i32(in);
+            auto& ch = characters_.set(
+                number, pose, locate, layer, brightness, alpha);
+            load_character_texture(ch);
+        }
+
+        // Overlays - reset all
+        read_u32(in);
+        for (auto& ov : overlays_) { ov.reset(); }
+
+        // BGM - handled above (stopped)
+        read_i32(in);
+
+        // SE transient
+        read_u32(in);
+        // SE channels
+        read_u32(in);
+        // Voice channels
+        read_u32(in);
+
+        // Message state
+        const auto has_message = read_i32(in);
+        const auto visible_size = read_u32(in);
+        if (has_message && visible_size > 0) {
+            message_.set(read_str(in, visible_size));
+            waiting_for_input_ = true;
+        } else {
+            message_ = th2::Message{};
+            waiting_for_input_ = false;
+        }
+
+        // Choice state
+        choosing_ = read_i32(in) != 0;
+        choices_.clear();
+        const auto choices_count = read_u32(in);
+        for (std::uint32_t i = 0; i < choices_count; ++i) {
+            choices_.push_back(Choice{
+                read_str(in, 256),
+                read_i32(in),
+                read_i32(in),
+                read_str(in, 8),
+            });
+        }
+        choice_highlight_ = read_i32(in);
+        choice_selected_ = read_i32(in);
+        choice_result_register_ = read_i32(in);
+        choice_ex_ = read_i32(in) != 0;
+    }
+
+    void write_u32(std::ostream& out, std::uint32_t value) const
+    {
+        out.put(static_cast<char>(value & 0xFF));
+        out.put(static_cast<char>((value >> 8) & 0xFF));
+        out.put(static_cast<char>((value >> 16) & 0xFF));
+        out.put(static_cast<char>((value >> 24) & 0xFF));
+    }
+
+    void write_i32(std::ostream& out, std::int32_t value) const
+    {
+        write_u32(out, static_cast<std::uint32_t>(value));
+    }
+
+    void write_str(std::ostream& out, std::string_view str,
+                   std::size_t padded_size) const
+    {
+        const auto len = std::min(str.size(), padded_size);
+        out.write(str.data(), static_cast<std::streamsize>(len));
+        for (std::size_t i = len; i < padded_size; ++i) {
+            out.put('\0');
+        }
+    }
+
+    std::uint32_t read_u32(std::istream& in) const
+    {
+        std::uint32_t value = 0;
+        for (int shift = 0; shift < 32; shift += 8) {
+            value |= static_cast<std::uint32_t>(
+                static_cast<unsigned char>(in.get())) << shift;
+        }
+        return value;
+    }
+
+    std::int32_t read_i32(std::istream& in) const
+    {
+        return static_cast<std::int32_t>(read_u32(in));
+    }
+
+    std::string read_str(std::istream& in, std::size_t size) const
+    {
+        std::string result(size, '\0');
+        in.read(result.data(), static_cast<std::streamsize>(size));
+        const auto null_pos = result.find('\0');
+        if (null_pos != std::string::npos) {
+            result.resize(null_pos);
+        }
+        return result;
     }
 
     void draw()

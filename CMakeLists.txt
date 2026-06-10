@@ -157,4 +157,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(th2-choice-test PRIVATE th2_runtime)
     add_test(NAME choice-events COMMAND th2-choice-test)
+
+    add_executable(th2-save-test
+        native/message.cpp
+        native/save_test.cpp
+    )
+    target_include_directories(th2-save-test PRIVATE native)
+    target_link_libraries(th2-save-test PRIVATE th2_runtime th2_character)
+    add_test(NAME save-roundtrip COMMAND th2-save-test)
 endif()

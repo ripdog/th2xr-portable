@@ -38,7 +38,13 @@ public:
     std::int32_t reg(std::size_t index) const;
     void set_reg(std::size_t index, std::int32_t value);
     std::span<const std::int32_t> registers() const { return registers_; }
+    std::span<const std::int32_t> stack() const { return stack_; }
     std::size_t pc() const { return pc_; }
+    std::size_t stack_size() const { return stack_.size(); }
+    std::int32_t stack_at(std::size_t index) const { return stack_.at(index); }
+    void push_stack(std::int32_t value) { stack_.push_back(value); }
+    void set_pc(std::size_t value) { pc_ = value; }
+    void reset_stack() { stack_.clear(); }
 
 private:
     const Scenario* scenario_;

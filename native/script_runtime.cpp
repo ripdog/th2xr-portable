@@ -61,6 +61,21 @@ std::int32_t ScriptRuntime::flag(std::size_t index) const
     return flags_.at(index);
 }
 
+std::int32_t ScriptRuntime::game_flag(std::size_t index) const
+{
+    return game_flags_.at(index);
+}
+
+void ScriptRuntime::set_flag(std::size_t index, std::int32_t value)
+{
+    flags_.at(index) = value;
+}
+
+void ScriptRuntime::set_game_flag(std::size_t index, std::int32_t value)
+{
+    game_flags_.at(index) = value;
+}
+
 void ScriptRuntime::set_reg(std::size_t index, std::int32_t value)
 {
     vm_->set_reg(index, value);
@@ -69,6 +84,36 @@ void ScriptRuntime::set_reg(std::size_t index, std::int32_t value)
 std::int32_t ScriptRuntime::reg(std::size_t index) const
 {
     return vm_->reg(index);
+}
+
+std::span<const std::int32_t> ScriptRuntime::vm_registers() const
+{
+    return vm_->registers();
+}
+
+std::span<const std::int32_t> ScriptRuntime::vm_stack() const
+{
+    return vm_->stack();
+}
+
+std::size_t ScriptRuntime::vm_pc() const
+{
+    return vm_->pc();
+}
+
+void ScriptRuntime::vm_restore(
+    std::span<const std::int32_t> registers,
+    std::span<const std::int32_t> stack,
+    std::size_t pc)
+{
+    vm_->set_pc(pc);
+    vm_->reset_stack();
+    for (const auto value : stack) {
+        vm_->push_stack(value);
+    }
+    for (std::size_t i = 0; i < registers.size() && i < Vm::register_count; ++i) {
+        vm_->set_reg(i, registers[i]);
+    }
 }
 
 bool ScriptRuntime::handle(const Event& event)
