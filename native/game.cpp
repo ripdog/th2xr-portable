@@ -267,6 +267,7 @@ private:
             const auto lines = display_lines(message_.visible());
             float y = 72.0f;
             for (const auto& line : lines) {
+                font_.draw(renderer_, 54.0f, y + 2.0f, line, 0, 0, 0);
                 font_.draw(renderer_, 52.0f, y, line);
                 y += 31.0f;
                 if (y > 535.0f) {
