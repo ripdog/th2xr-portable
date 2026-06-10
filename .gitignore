@@ -1,3 +1,6 @@
 /build/
 /game-data/
 
+
+# Save files
+save_*.sav
