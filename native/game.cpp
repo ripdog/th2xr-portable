@@ -1809,9 +1809,9 @@ private:
             }
         }
 
-        // Close button from sys0111.tga (src: 0, state*32, 188, 32)
-        const int cs = (menu_highlight_ == 4) ? 32 : 0;
-        const SDL_FRect csrc{0.0f, static_cast<float>(cs), 188.0f, 32.0f};
+        // sys0111.tga stores normal, hover and pressed states horizontally.
+        const float cs = menu_highlight_ == 4 ? 188.0f : 0.0f;
+        const SDL_FRect csrc{cs, 0.0f, 188.0f, 32.0f};
         const SDL_FRect cdst{306.0f, 480.0f, 188.0f, 32.0f};
         if (ui_sys_cancel_) {
             SDL_RenderTexture(renderer_, ui_sys_cancel_.get(), &csrc, &cdst);
