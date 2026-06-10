@@ -1877,7 +1877,7 @@ private:
             font_.draw(
                 renderer_, x + 100.0f, y + 44.0f, date, 210, 110, 120);
             font_.draw(
-                renderer_, x + 224.0f, y + 9.0f,
+                renderer_, x + 134.0f, y + 9.0f,
                 visible_saves_[i].message.substr(0, 18), 255, 245, 225);
             if (slot == newest_save_slot_ && ui_save_new_) {
                 const SDL_FRect badge{x + 302.0f, y + 37.0f, 56.0f, 29.0f};
