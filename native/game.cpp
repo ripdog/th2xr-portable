@@ -344,6 +344,7 @@ private:
     Texture ui_keywait_;           // sys0011.tga (mid-page cursor)
     Texture ui_pageend_;           // sys0010.tga (end-of-page cursor)
     th2::Message message_;
+    bool message_ends_block_ = true;
     int tone_ = 0;
     int weather_ = 0;
     bool running_ = true;
@@ -651,9 +652,11 @@ private:
         } else if (name == "SetMessage2") {
             push_backlog();
             message_.set(text(event, 0));
+            message_ends_block_ = number(event, 1) == 2;
             waiting_for_input_ = true;
         } else if (name == "AddMessage2") {
             message_.append(text(event, 0));
+            message_ends_block_ = number(event, 1) == 2;
             waiting_for_input_ = true;
         } else if (name == "M") {
             const int music = number(event, 0);
@@ -850,7 +853,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 2);  // native version
+        write_u32(out, 3);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -1005,6 +1008,7 @@ private:
         }
         write_i32(out, backlog_depth_);
         write_i32(out, ui_mode_ == UiMode::backlog ? 1 : 0);
+        write_i32(out, message_ends_block_ ? 1 : 0);
     }
 
     void load_body(std::istream& in)
@@ -1208,6 +1212,7 @@ private:
                 ui_mode_ = UiMode::backlog;
             }
         }
+        message_ends_block_ = version >= 3 ? read_i32(in) != 0 : true;
     }
 
     void write_u32(std::ostream& out, std::uint32_t value) const
@@ -1623,7 +1628,7 @@ private:
         if (!waiting_for_input_ || !message_visible_ || message_.empty()) return;
 
         const bool end_of_block =
-            message_.revealed_count() >= message_.segments().size();
+            !message_.has_hidden_segments() && message_ends_block_;
         auto& tex = end_of_block ? ui_keywait_ : ui_pageend_;
         if (!tex) return;
 
