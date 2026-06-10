@@ -127,6 +127,23 @@ public:
         SDL_SetRenderLogicalPresentation(
             renderer_, 800, 600, SDL_LOGICAL_PRESENTATION_LETTERBOX);
         runtime_.load("EV_0301MORNING.SDT");
+
+        auto try_load = [&](std::string_view name) -> Texture {
+            const auto* entry = graphics_.find(name);
+            if (!entry) return {};
+            try {
+                return load_texture(renderer_, graphics_, name);
+            } catch (...) {
+                return {};
+            }
+        };
+        ui_sys_menu_bg_ = try_load("sys0100.tga");
+        ui_sys_menu_btns_ = try_load("sys0110.tga");
+        ui_sys_cancel_ = try_load("sys0111.tga");
+        ui_sidebar_track_ = try_load("sys0000.tga");
+        ui_sidebar_btns_ = try_load("sys0001.tga");
+        ui_keywait_ = try_load("sys0011.tga");
+        ui_pageend_ = try_load("sys0010.tga");
     }
 
     ~Game()
@@ -312,6 +329,15 @@ private:
     std::array<int, 8> voice_scenario_{};  // scenario for voice filename
     std::array<int, 8> voice_volume_{};
     std::array<bool, 8> voice_loop_{};
+
+    // UI textures (from GRP.PAK)
+    Texture ui_sys_menu_bg_;       // sys0100.tga
+    Texture ui_sys_menu_btns_;     // sys0110.tga
+    Texture ui_sys_cancel_;        // sys0111.tga
+    Texture ui_sidebar_track_;     // sys0000.tga
+    Texture ui_sidebar_btns_;      // sys0001.tga
+    Texture ui_keywait_;           // sys0011.tga (mid-page cursor)
+    Texture ui_pageend_;           // sys0010.tga (end-of-page cursor)
     th2::Message message_;
     int tone_ = 0;
     int weather_ = 0;
@@ -1215,12 +1241,11 @@ private:
 
     void push_backlog()
     {
-        if (!message_.empty()) {
-            backlog_.push_back({message_.visible()});
-            if (backlog_.size() > 256) {
-                backlog_.erase(backlog_.begin());
-            }
-        }
+        if (message_.empty()) return;
+        const auto& text = message_.visible();
+        if (!backlog_.empty() && backlog_.back().text == text) return;
+        backlog_.push_back({text});
+        if (backlog_.size() > 256) backlog_.erase(backlog_.begin());
     }
 
     void open_system_menu()
@@ -1230,10 +1255,7 @@ private:
         menu_highlight_ = 4;
     }
 
-    void close_system_menu()
-    {
-        ui_mode_ = UiMode::game;
-    }
+    void close_system_menu() { ui_mode_ = UiMode::game; }
 
     void open_backlog()
     {
@@ -1242,10 +1264,7 @@ private:
         backlog_scroll_ = static_cast<int>(backlog_.size()) - 1;
     }
 
-    void close_backlog()
-    {
-        ui_mode_ = UiMode::game;
-    }
+    void close_backlog() { ui_mode_ = UiMode::game; }
 
     void execute_menu_item(int index)
     {
@@ -1253,64 +1272,85 @@ private:
         case 0: save(0); break;
         case 1: load(0); break;
         case 2: message_visible_ = !message_visible_; break;
-        case 3: break;  // Settings placeholder
-        case 4: break;  // Close (handled by caller)
+        case 3: break;
+        case 4: break;
         }
     }
 
     void draw_system_menu()
     {
-        struct MenuItem { const char* label; int x, y, w, h; };
-        const MenuItem items[] = {
-            {"Save",      200, 112, 400, 82},
-            {"Load",      200, 200, 400, 82},
-            {"Hide Text", 200, 288, 400, 82},
-            {"Settings",  200, 376, 400, 82},
-            {"Close",     306, 480, 188, 32},
-        };
-        constexpr int count = 5;
+        // Background
+        if (ui_sys_menu_bg_) {
+            SDL_RenderTexture(renderer_, ui_sys_menu_bg_.get(),
+                              nullptr, nullptr);
+        } else {
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 180);
+            SDL_RenderFillRect(renderer_, nullptr);
+        }
 
-        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 180);
-        SDL_RenderFillRect(renderer_, nullptr);
+        // 4 main buttons from sys0110.tga
+        // Layout: Save(0,0) Load(400,0) Hide(0,246) Settings(400,246)
+        // Each: w=400, h=82, 3 states stacked vertically (0,82,164)
+        const int btn_x[4] = {0, 400, 0, 400};
+        const int btn_y[4] = {0, 0, 246, 246};
+        const int dst_x[4] = {200, 200, 200, 200};
+        const int dst_y[4] = {112, 200, 288, 376};
 
-        for (int i = 0; i < count; ++i) {
-            const auto& item = items[i];
-            const bool hl = (i == menu_highlight_);
-
-            if (hl) {
-                SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 40);
-                SDL_FRect bg{static_cast<float>(item.x),
-                             static_cast<float>(item.y),
-                             static_cast<float>(item.w),
-                             static_cast<float>(item.h)};
-                SDL_RenderFillRect(renderer_, &bg);
-            }
-
-            const float tw = std::strlen(item.label) * 12.0f;
-            const float tx = item.x + (item.w - tw) / 2.0f;
-            const float ty = item.y + (item.h - 24) / 2.0f;
-
-            font_.draw(renderer_, tx + 2.0f, ty + 2.0f, item.label, 0, 0, 0);
-            if (hl) {
-                font_.draw(renderer_, tx, ty, item.label, 255, 255, 255);
+        for (int i = 0; i < 4; ++i) {
+            const int state = (i == menu_highlight_) ? 82 : 0;
+            const SDL_FRect src{
+                static_cast<float>(btn_x[i]),
+                static_cast<float>(btn_y[i] + state), 400.0f, 82.0f};
+            const SDL_FRect dst{
+                static_cast<float>(dst_x[i]),
+                static_cast<float>(dst_y[i]), 400.0f, 82.0f};
+            if (ui_sys_menu_btns_) {
+                SDL_RenderTexture(renderer_, ui_sys_menu_btns_.get(),
+                                  &src, &dst);
             } else {
-                font_.draw(renderer_, tx, ty, item.label, 128, 128, 128);
+                // Fallback: draw text
+                const char* labels[4] = {"Save", "Load", "Hide Text", "Settings"};
+                const float tw = std::strlen(labels[i]) * 12.0f;
+                const float tx = dst_x[i] + (400.0f - tw) / 2.0f;
+                const float ty = dst_y[i] + (82.0f - 24.0f) / 2.0f;
+                font_.draw(renderer_, tx + 2, ty + 2, labels[i], 0, 0, 0);
+                if (i == menu_highlight_) {
+                    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 40);
+                    SDL_RenderFillRect(renderer_, &dst);
+                    font_.draw(renderer_, tx, ty, labels[i], 255, 255, 255);
+                } else {
+                    font_.draw(renderer_, tx, ty, labels[i], 128, 128, 128);
+                }
             }
+        }
+
+        // Close button from sys0111.tga (src: 0, state*32, 188, 32)
+        const int cs = (menu_highlight_ == 4) ? 32 : 0;
+        const SDL_FRect csrc{0.0f, static_cast<float>(cs), 188.0f, 32.0f};
+        const SDL_FRect cdst{306.0f, 480.0f, 188.0f, 32.0f};
+        if (ui_sys_cancel_) {
+            SDL_RenderTexture(renderer_, ui_sys_cancel_.get(), &csrc, &cdst);
+        } else {
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+            if (menu_highlight_ == 4) {
+                SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 40);
+                SDL_RenderFillRect(renderer_, &cdst);
+            }
+            font_.draw(renderer_, 356.0f, 484.0f, "Close", 0, 0, 0);
+            font_.draw(renderer_, 354.0f, 482.0f, "Close",
+                       menu_highlight_ == 4 ? 255 : 128,
+                       menu_highlight_ == 4 ? 255 : 128,
+                       menu_highlight_ == 4 ? 255 : 128);
         }
     }
 
     void handle_system_menu_input(const SDL_Event& event)
     {
-        struct MenuItem { const char* label; int x, y, w, h; };
-        const MenuItem items[] = {
-            {"Save",      200, 112, 400, 82},
-            {"Load",      200, 200, 400, 82},
-            {"Hide Text", 200, 288, 400, 82},
-            {"Settings",  200, 376, 400, 82},
-            {"Close",     306, 480, 188, 32},
-        };
-        constexpr int count = 5;
+        const int dst_x[5] = {200, 200, 200, 200, 306};
+        const int dst_y[5] = {112, 200, 288, 376, 480};
+        const int dst_w[5] = {400, 400, 400, 400, 188};
+        const int dst_h[5] = {82, 82, 82, 82, 32};
 
         if (event.type == SDL_EVENT_KEY_DOWN) {
             if (event.key.key == SDLK_ESCAPE) {
@@ -1320,20 +1360,18 @@ private:
                 close_system_menu();
                 execute_menu_item(item);
             } else if (event.key.key == SDLK_UP) {
-                menu_highlight_ = (menu_highlight_ - 1 + count) % count;
+                menu_highlight_ = (menu_highlight_ - 1 + 5) % 5;
             } else if (event.key.key == SDLK_DOWN) {
-                menu_highlight_ = (menu_highlight_ + 1) % count;
+                menu_highlight_ = (menu_highlight_ + 1) % 5;
             }
         } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
             if (event.button.button == SDL_BUTTON_RIGHT) {
                 close_system_menu();
             } else if (event.button.button == SDL_BUTTON_LEFT) {
-                const float mx = event.button.x;
-                const float my = event.button.y;
-                for (int i = 0; i < count; ++i) {
-                    const auto& item = items[i];
-                    if (mx >= item.x && mx < item.x + item.w
-                        && my >= item.y && my < item.y + item.h) {
+                const float mx = event.button.x; const float my = event.button.y;
+                for (int i = 0; i < 5; ++i) {
+                    if (mx >= dst_x[i] && mx < dst_x[i] + dst_w[i]
+                        && my >= dst_y[i] && my < dst_y[i] + dst_h[i]) {
                         close_system_menu();
                         execute_menu_item(i);
                         break;
@@ -1341,12 +1379,10 @@ private:
                 }
             }
         } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
-            const float mx = event.motion.x;
-            const float my = event.motion.y;
-            for (int i = 0; i < count; ++i) {
-                const auto& item = items[i];
-                if (mx >= item.x && mx < item.x + item.w
-                    && my >= item.y && my < item.y + item.h) {
+            const float mx = event.motion.x; const float my = event.motion.y;
+            for (int i = 0; i < 5; ++i) {
+                if (mx >= dst_x[i] && mx < dst_x[i] + dst_w[i]
+                    && my >= dst_y[i] && my < dst_y[i] + dst_h[i]) {
                     menu_highlight_ = i;
                     break;
                 }
@@ -1356,105 +1392,184 @@ private:
 
     void draw_backlog()
     {
+        // Darken background
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 220);
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 190);
         SDL_RenderFillRect(renderer_, nullptr);
 
-        constexpr int visible_lines = 16;
-        constexpr float line_height = 31.0f;
-        constexpr float start_y = 50.0f;
+        // Sidebar
+        draw_sidebar();
 
-        int start_entry = backlog_scroll_ - visible_lines + 1;
+        // Text: show from start_entry to backlog_scroll_ (newest at bottom)
+        constexpr float line_h = 31.0f;
+        constexpr float start_y = 34.0f;
+        constexpr float max_y = 566.0f;
+
+        int start_entry = backlog_scroll_;
+        // Walk up from the newest visible entry to find how many fit
+        float y = max_y;
+        int vis_count = 0;
+        for (int i = backlog_scroll_; i >= 0; --i) {
+            const auto lines = display_lines(backlog_[i].text);
+            y -= lines.size() * line_h;
+            if (y < start_y) break;
+            start_entry = i;
+            ++vis_count;
+        }
+        start_entry = backlog_scroll_ - vis_count + 1;
         if (start_entry < 0) start_entry = 0;
 
-        float y = start_y;
-        for (int i = start_entry;
-             i <= backlog_scroll_ && i < static_cast<int>(backlog_.size());
-             ++i) {
-            const auto lines = display_lines(backlog_[i].text);
+        y = max_y;
+        for (int i = backlog_scroll_; i >= start_entry; --i) {
+            const auto& entry = backlog_[i];
+            const auto lines = display_lines(entry.text);
+            y -= lines.size() * line_h;
+            const float yy = y;
             for (const auto& line : lines) {
-                font_.draw(renderer_, 54.0f, y + 2.0f, line, 0, 0, 0);
-                font_.draw(renderer_, 52.0f, y, line, 160, 160, 160);
-                y += line_height;
-                if (y > 550.0f) break;
+                font_.draw(renderer_, 54.0f, yy + 2.0f, line, 0, 0, 0);
+                font_.draw(renderer_, 52.0f, yy, line, 160, 160, 160);
+                // yy += line_h; // not needed, yy only used for shadow
             }
-            if (y > 550.0f) break;
         }
+    }
 
+    void draw_sidebar()
+    {
+        if (!ui_sidebar_track_ || !ui_sidebar_btns_) return;
+
+        // Scroll track background (sys0000.tga: 22 x 255)
+        const SDL_FRect trk_dst{776.0f, 10.0f, 22.0f, 255.0f};
+        SDL_RenderTexture(renderer_, ui_sidebar_track_.get(), nullptr,
+                          &trk_dst);
+
+        // Scroll handle position
         if (!backlog_.empty()) {
             const float ratio = static_cast<float>(backlog_scroll_)
                 / std::max(1, static_cast<int>(backlog_.size()) - 1);
-            const float iy = 50.0f + ratio * 500.0f;
-            SDL_SetRenderDrawColor(renderer_, 128, 128, 128, 200);
-            SDL_FRect ind{780.0f, iy, 8.0f, 20.0f};
-            SDL_RenderFillRect(renderer_, &ind);
+            const float handle_y = 10.0f + ratio * (255.0f - 20.0f);
+            const SDL_FRect hdl_src{0.0f, 0.0f, 22.0f, 20.0f};
+            const SDL_FRect hdl_dst{776.0f, handle_y, 22.0f, 20.0f};
+            SDL_RenderTexture(renderer_, ui_sidebar_btns_.get(),
+                              &hdl_src, &hdl_dst);
+        }
+
+        // Sidebar buttons from sys0001.tga
+        // Each button: w=22, states stacked vertically at y=h*state
+        struct SBBtn { int y; int h; };
+        const SBBtn btns[] = {
+            {271, 36},  // PageUp
+            {312, 36},  // PageDown
+            {353, 20},  // Save
+            {376, 20},  // Load
+            {399, 20},  // Auto
+            {422, 20},  // Skip
+            {445, 20},  // Settings
+            {468, 20},  // QuickSave
+        };
+        constexpr int btn_count = 8;
+
+        for (int i = 0; i < btn_count; ++i) {
+            const SDL_FRect src{
+                0.0f, static_cast<float>(btns[i].h * 0),
+                22.0f, static_cast<float>(btns[i].h)};
+            const SDL_FRect dst{
+                776.0f, static_cast<float>(btns[i].y),
+                22.0f, static_cast<float>(btns[i].h)};
+            SDL_RenderTexture(renderer_, ui_sidebar_btns_.get(),
+                              &src, &dst);
         }
     }
 
     void handle_backlog_input(const SDL_Event& event)
     {
         if (event.type == SDL_EVENT_KEY_DOWN) {
-            if (event.key.key == SDLK_ESCAPE || event.key.key == SDLK_RETURN
-                || event.key.key == SDLK_SPACE) {
+            if (event.key.key == SDLK_ESCAPE) {
                 close_backlog();
             } else if (event.key.key == SDLK_UP) {
                 if (backlog_scroll_ > 0) --backlog_scroll_;
             } else if (event.key.key == SDLK_DOWN) {
-                if (backlog_scroll_ < static_cast<int>(backlog_.size()) - 1) {
+                if (backlog_scroll_ < static_cast<int>(backlog_.size()) - 1)
                     ++backlog_scroll_;
-                } else {
-                    close_backlog();
-                }
+                else close_backlog();
             } else if (event.key.key == SDLK_PAGEUP) {
-                backlog_scroll_ = std::max(0, backlog_scroll_ - 8);
+                backlog_scroll_ = std::max(0, backlog_scroll_ - 1);
             } else if (event.key.key == SDLK_PAGEDOWN) {
                 backlog_scroll_ = std::min(
                     static_cast<int>(backlog_.size()) - 1,
-                    backlog_scroll_ + 8);
+                    backlog_scroll_ + 1);
             } else if (event.key.key == SDLK_HOME) {
                 backlog_scroll_ = 0;
             } else if (event.key.key == SDLK_END) {
                 backlog_scroll_ = static_cast<int>(backlog_.size()) - 1;
             }
         } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            if (event.button.button == SDL_BUTTON_RIGHT) {
+                close_backlog();
+                return;
+            }
+            const float mx = event.button.x; const float my = event.button.y;
+            // Click on scroll track jumps to position
+            if (mx >= 776 && mx < 798 && my >= 10 && my < 265) {
+                const float ratio = (my - 10.0f) / 255.0f;
+                backlog_scroll_ = static_cast<int>(
+                    ratio * (backlog_.size() - 1));
+                return;
+            }
+            // Click on sidebar buttons
+            if (mx >= 776 && mx < 798) {
+                const int btn_ys[] = {271, 312, 353, 376, 399, 422, 445, 468};
+                const int btn_hs[] = {36, 36, 20, 20, 20, 20, 20, 20};
+                for (int i = 0; i < 8; ++i) {
+                    if (my >= btn_ys[i] && my < btn_ys[i] + btn_hs[i]) {
+                        switch (i) {
+                        case 0: backlog_scroll_ = std::max(0, backlog_scroll_ - 1); break;
+                        case 1: backlog_scroll_ = std::min(
+                                    static_cast<int>(backlog_.size()) - 1,
+                                    backlog_scroll_ + 1); break;
+                        case 2: save(0); close_backlog(); break;
+                        case 3: load(0); close_backlog(); break;
+                        }
+                        return;
+                    }
+                }
+            }
             close_backlog();
         } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
             if (event.wheel.y > 0) {
                 if (backlog_scroll_ > 0) --backlog_scroll_;
-            } else if (event.wheel.y < 0) {
-                if (backlog_scroll_ < static_cast<int>(backlog_.size()) - 1) {
+            } else {
+                if (backlog_scroll_ < static_cast<int>(backlog_.size()) - 1)
                     ++backlog_scroll_;
-                } else {
-                    close_backlog();
-                }
+                else close_backlog();
             }
         }
     }
 
     void draw_click_indicator()
     {
-        if (!waiting_for_input_ || !message_visible_ || message_.empty()) {
-            return;
-        }
-        if ((indicator_frame_ / 30) % 2 != 0) return;
+        if (!waiting_for_input_ || !message_visible_ || message_.empty()) return;
+
+        // Use sys0010.tga (end-of-page cursor) or sys0011.tga (mid-page)
+        auto& tex = ui_pageend_;
+        if (!tex) return;
 
         const auto lines = display_lines(message_.visible());
         if (lines.empty()) return;
-
         const auto& last_line = lines.back();
         float width = 0;
-        for (unsigned char c : last_line) {
+        for (unsigned char c : last_line)
             width += (c >= 0x20 && c <= 0x7E) ? 12.0f : 24.0f;
-        }
 
         const float x = 52.0f + width + 4.0f;
         const float y = 72.0f
             + (std::min(lines.size(), static_cast<std::size_t>(15)) - 1)
-            * 31.0f + 20.0f;
+            * 31.0f + 8.0f;
 
-        SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 200);
-        SDL_FRect rect{x, y, 8.0f, 6.0f};
-        SDL_RenderFillRect(renderer_, &rect);
+        // 30-frame animation, 2 game-frames per animation-frame
+        const int frame = (indicator_frame_ / 2) % 30;
+        const SDL_FRect src{frame * 40.0f, 0.0f, 40.0f, 40.0f};
+        const SDL_FRect dst{x, y, 40.0f, 40.0f};
+        SDL_RenderTexture(renderer_, tex.get(), &src, &dst);
     }
 
     void draw()
