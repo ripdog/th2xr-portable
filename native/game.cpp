@@ -939,8 +939,10 @@ private:
                 const auto output_offset =
                     (static_cast<std::size_t>(y) * width + x) * 4;
                 for (int channel = 0; channel < 3; ++channel) {
+                    const int previous_value = transition.type == 178
+                        ? 0 : previous[previous_offset + channel];
                     pixels[output_offset + channel] = static_cast<std::uint8_t>(
-                        (previous[previous_offset + channel] * (255 - alpha)
+                        (previous_value * (255 - alpha)
                          + next[source_offset + channel] * alpha)
                         / 255);
                 }
