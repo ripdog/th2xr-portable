@@ -53,6 +53,12 @@ add_library(th2_character
 target_include_directories(th2_character PUBLIC native)
 target_compile_options(th2_character PRIVATE -Wall -Wextra -Wpedantic)
 
+add_library(th2_config
+    native/config.cpp
+)
+target_include_directories(th2_config PUBLIC native)
+target_compile_options(th2_config PRIVATE -Wall -Wextra -Wpedantic)
+
 add_executable(th2-archive-info
     native/archive_info.cpp
 )
@@ -130,7 +136,7 @@ add_executable(toheart2
     native/message.cpp
 )
 target_link_libraries(toheart2 PRIVATE SDL3::SDL3 th2_runtime)
-target_link_libraries(toheart2 PRIVATE th2_audio th2_character)
+target_link_libraries(toheart2 PRIVATE th2_audio th2_character th2_config)
 
 if(BUILD_TESTING)
     add_executable(th2-character-test
@@ -165,4 +171,10 @@ if(BUILD_TESTING)
     target_include_directories(th2-save-test PRIVATE native)
     target_link_libraries(th2-save-test PRIVATE th2_runtime th2_character)
     add_test(NAME save-roundtrip COMMAND th2-save-test)
+
+    add_executable(th2-config-test
+        native/config_test.cpp
+    )
+    target_link_libraries(th2-config-test PRIVATE th2_config)
+    add_test(NAME config-roundtrip COMMAND th2-config-test)
 endif()
