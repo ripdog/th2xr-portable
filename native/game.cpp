@@ -30,6 +30,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -207,6 +208,9 @@ public:
 
     int run()
     {
+        constexpr auto frame_duration = std::chrono::nanoseconds(
+            1'000'000'000 / 60);
+        auto next_frame = std::chrono::steady_clock::now();
         while (running_) {
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
@@ -360,7 +364,13 @@ public:
             draw();
             update_transition();
             update_background_fade();
-            SDL_Delay(8);
+            next_frame += frame_duration;
+            const auto now = std::chrono::steady_clock::now();
+            if (next_frame > now) {
+                std::this_thread::sleep_until(next_frame);
+            } else if (now - next_frame > frame_duration * 4) {
+                next_frame = now;
+            }
         }
         return 0;
     }
@@ -390,8 +400,8 @@ private:
         int mask_width = 0;
         int mask_height = 0;
         int vague = 128;
-        std::chrono::steady_clock::time_point started;
-        std::chrono::milliseconds duration;
+        int frame = 0;
+        int frames = 1;
         int type = 1;
         bool resume_script = false;
         std::uint64_t debug_id = 0;
@@ -719,7 +729,7 @@ private:
         }
         if (transition_) {
             if (force_unread) {
-                transition_->started -= transition_->duration;
+                transition_->frame = transition_->frames;
             }
             return;
         }
@@ -858,8 +868,8 @@ private:
             0,
             0,
             vague >= 0 ? vague : 128,
-            std::chrono::steady_clock::now(),
-            std::chrono::milliseconds(effective_frames * 1000 / 60),
+            0,
+            effective_frames,
             type,
             resume_script,
             next_transition_debug_id_++,
@@ -878,9 +888,8 @@ private:
         if (!transition_) {
             return;
         }
-        const auto elapsed = std::chrono::steady_clock::now()
-            - transition_->started;
-        if (elapsed < transition_->duration) {
+        ++transition_->frame;
+        if (transition_->frame < transition_->frames) {
             return;
         }
         const bool resume_script = transition_->resume_script;
@@ -960,8 +969,7 @@ private:
         if (!config_.dump_transition_frames || !transition_) {
             return;
         }
-        const int frame_count = std::max(
-            1, static_cast<int>(transition_->duration.count() * 60 / 1000));
+        const int frame_count = transition_->frames;
         const int frame = std::clamp(
             static_cast<int>(progress * frame_count), 0, frame_count);
         if (frame == transition_->last_dumped_frame) {
@@ -985,7 +993,7 @@ private:
                      << "vm_pc=" << runtime_.vm_pc() << '\n'
                      << "type=" << transition_->type << '\n'
                      << "vague=" << transition_->vague << '\n'
-                     << "duration_ms=" << transition_->duration.count() << '\n'
+                     << "frames=" << transition_->frames << '\n'
                      << "mask_width=" << transition_->mask_width << '\n'
                      << "mask_height=" << transition_->mask_height << '\n';
         }
@@ -3326,11 +3334,9 @@ private:
             draw_sidebar();
         }
         if (transition_) {
-            const auto elapsed = std::chrono::steady_clock::now()
-                - transition_->started;
             const float progress = std::clamp(
-                std::chrono::duration<float>(elapsed).count()
-                    / std::chrono::duration<float>(transition_->duration).count(),
+                static_cast<float>(transition_->frame + 1)
+                    / transition_->frames,
                 0.0f, 1.0f);
             auto draw_previous = [&](const SDL_FRect& rectangle) {
                 SDL_RenderTexture(
