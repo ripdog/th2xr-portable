@@ -109,6 +109,9 @@ ImGuiLayer::ImGuiLayer(SDL_Window* window, SDL_Renderer* renderer)
 
 ImGuiLayer::~ImGuiLayer()
 {
+    if (SDL_TextInputActive(window_)) {
+        SDL_StopTextInput(window_);
+    }
     for (auto* texture : ImGui::GetPlatformIO().Textures) {
         SDL_DestroyTexture(sdl_texture(texture->GetTexID()));
         texture->SetTexID(ImTextureID_Invalid);
@@ -167,6 +170,12 @@ void ImGuiLayer::new_frame()
 void ImGuiLayer::render()
 {
     ImGui::Render();
+    const bool wants_text = ImGui::GetIO().WantTextInput;
+    if (wants_text && !SDL_TextInputActive(window_)) {
+        SDL_StartTextInput(window_);
+    } else if (!wants_text && SDL_TextInputActive(window_)) {
+        SDL_StopTextInput(window_);
+    }
     const auto* data = ImGui::GetDrawData();
     if (!data) {
         return;

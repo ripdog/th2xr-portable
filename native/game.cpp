@@ -6,6 +6,7 @@
 #include "image.hpp"
 #include "imgui_layer.hpp"
 #include "message.hpp"
+#include "player_name.hpp"
 #include "script_runtime.hpp"
 
 #include <SDL3/SDL.h>
@@ -16,6 +17,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <ctime>
 #include <cstring>
 #include <exception>
@@ -128,6 +130,11 @@ public:
           voice_archive_(data / "voice.pak"), runtime_(scripts_), font_(fonts_),
           config_(th2::load_config(config_path_))
     {
+        default_player_name_ =
+            th2::load_default_player_name(data / "TOHEART2.EXE");
+        if (config_.player_name.family.empty()) {
+            config_.player_name = default_player_name_;
+        }
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
             throw std::runtime_error(SDL_GetError());
         }
@@ -210,9 +217,9 @@ public:
                 }
                 SDL_ConvertEventToRenderCoordinates(renderer_, &event);
                 imgui_->process_event(event);
-                if (config_open_) {
+                if (config_open_ || name_input_open_) {
                     if (event.type == SDL_EVENT_KEY_DOWN
-                        && event.key.key == SDLK_ESCAPE) {
+                        && event.key.key == SDLK_ESCAPE && config_open_) {
                         close_config();
                     }
                     continue;
@@ -337,7 +344,7 @@ public:
             if (control_held) {
                 const auto now = std::chrono::steady_clock::now();
                 if (now >= skip_next_time_) {
-                    skip();
+                    skip(true);
                     skip_next_time_ = now + std::chrono::milliseconds(40);
                 }
             } else if (wake_time_
@@ -350,6 +357,7 @@ public:
             update_title();
             imgui_->new_frame();
             draw_config();
+            draw_name_input();
             draw();
             update_transition();
             update_background_fade();
@@ -436,12 +444,18 @@ private:
 
     float bgm_gain(int volume) const
     {
+        if (config_.bgm_muted) {
+            return 0.0f;
+        }
         return std::clamp(volume, 0, 255) / 255.0f
             * config_.bgm_volume / 256.0f;
     }
 
     float se_gain(int volume) const
     {
+        if (config_.se_muted) {
+            return 0.0f;
+        }
         return std::clamp(volume, 0, 255) / 255.0f
             * config_.se_volume / 256.0f;
     }
@@ -462,10 +476,13 @@ private:
 
     float voice_gain(int volume, int character) const
     {
+        const auto index = voice_character_index(character);
+        if (config_.voice_muted || config_.character_voice_muted[index]) {
+            return 0.0f;
+        }
         return std::clamp(volume, 0, 256) / 256.0f
             * config_.voice_volume / 256.0f
-            * config_.character_voice_volume[
-                voice_character_index(character)] / 256.0f;
+            * config_.character_voice_volume[index] / 256.0f;
     }
 
     void apply_audio_gains()
@@ -557,6 +574,15 @@ private:
     Surface save_snapshot_;
     std::array<Texture, 10> save_thumbnails_{};
     bool config_open_ = false;
+    bool confirm_return_title_ = false;
+    bool name_input_open_ = false;
+    std::string name_error_;
+    th2::PlayerName default_player_name_;
+    std::array<char, 64> name_family_{};
+    std::array<char, 64> name_given_{};
+    std::array<char, 64> name_family_reading_{};
+    std::array<char, 64> name_given_reading_{};
+    std::array<char, 64> name_nickname_{};
     bool auto_mode_ = false;
     bool skip_mode_ = false;
 
@@ -646,12 +672,24 @@ private:
         return 468.0f;
     }
 
-    void skip()
+    void skip(bool force_unread = false)
     {
-        if (choosing_ || transition_ || background_fade_) {
+        if (choosing_) {
             return;
         }
-        if (waiting_for_input_ && !config_.skip_unread
+        if (transition_) {
+            if (force_unread) {
+                transition_->started -= transition_->duration;
+            }
+            return;
+        }
+        if (background_fade_) {
+            if (force_unread) {
+                background_fade_->started -= background_fade_->duration;
+            }
+            return;
+        }
+        if (waiting_for_input_ && !force_unread && !config_.skip_unread
             && !current_text_is_read()) {
             skip_mode_ = false;
             return;
@@ -1168,14 +1206,16 @@ private:
             }
         } else if (name == "SetMessage2") {
             push_backlog();
-            message_.set(text(event, 0));
+            message_.set(th2::substitute_player_name(
+                text(event, 0), config_.player_name));
             current_line_key_ = runtime_.script_name() + ':'
                 + std::to_string(runtime_.vm_pc());
             message_ends_block_ = number(event, 1) == 2;
             waiting_for_input_ = true;
             auto_next_time_.reset();
         } else if (name == "AddMessage2") {
-            message_.append(text(event, 0));
+            message_.append(th2::substitute_player_name(
+                text(event, 0), config_.player_name));
             current_line_key_ = runtime_.script_name() + ':'
                 + std::to_string(runtime_.vm_pc());
             message_ends_block_ = number(event, 1) == 2;
@@ -1243,13 +1283,15 @@ private:
             }
         } else if (name == "SetSelectMes") {
             choices_.push_back(Choice{
-                text(event, 0),
+                th2::substitute_player_name(
+                    text(event, 0), config_.player_name),
                 number(event, 1),
                 number(event, 2),
             });
         } else if (name == "SetSelectMesEx") {
             choices_.push_back(Choice{
-                text(event, 0),
+                th2::substitute_player_name(
+                    text(event, 0), config_.player_name),
                 number(event, 2),
                 number(event, 3),
                 text(event, 1),
@@ -1468,7 +1510,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 4);  // native version
+        write_u32(out, 5);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -1636,6 +1678,18 @@ private:
         for (const auto& key : config_.read_lines) {
             write_u32(out, static_cast<std::uint32_t>(key.size()));
             out.write(key.data(), static_cast<std::streamsize>(key.size()));
+        }
+        const std::array saved_names{
+            &config_.player_name.family,
+            &config_.player_name.given,
+            &config_.player_name.family_reading,
+            &config_.player_name.given_reading,
+            &config_.player_name.nickname,
+            &config_.player_name.nickname_reading,
+        };
+        for (const auto* value : saved_names) {
+            write_u32(out, static_cast<std::uint32_t>(value->size()));
+            out.write(value->data(), static_cast<std::streamsize>(value->size()));
         }
     }
 
@@ -1860,6 +1914,21 @@ private:
             }
             th2::save_config(config_path_, config_);
         }
+        if (version >= 5) {
+            const auto read_name = [&]() {
+                const auto size = read_u32(in);
+                std::string value(size, '\0');
+                in.read(value.data(), static_cast<std::streamsize>(size));
+                return value;
+            };
+            config_.player_name.family = read_name();
+            config_.player_name.given = read_name();
+            config_.player_name.family_reading = read_name();
+            config_.player_name.given_reading = read_name();
+            config_.player_name.nickname = read_name();
+            config_.player_name.nickname_reading = read_name();
+            th2::save_config(config_path_, config_);
+        }
     }
 
     void write_u32(std::ostream& out, std::uint32_t value) const
@@ -1957,6 +2026,21 @@ private:
         advance();
     }
 
+    void open_name_input()
+    {
+        name_input_open_ = true;
+        name_error_.clear();
+        const auto copy = [](auto& destination, const std::string& source) {
+            std::snprintf(
+                destination.data(), destination.size(), "%s", source.c_str());
+        };
+        copy(name_family_, config_.player_name.family);
+        copy(name_given_, config_.player_name.given);
+        copy(name_family_reading_, config_.player_name.family_reading);
+        copy(name_given_reading_, config_.player_name.given_reading);
+        copy(name_nickname_, config_.player_name.nickname);
+    }
+
     void begin_title_exit(bool start_game)
     {
         if (title_exit_started_) {
@@ -1979,7 +2063,7 @@ private:
         const bool start_game = title_exit_game_;
         title_exit_started_.reset();
         if (start_game) {
-            start_new_game();
+            open_name_input();
         } else {
             running_ = false;
         }
@@ -2002,6 +2086,42 @@ private:
         th2::save_config(config_path_, config_);
     }
 
+    bool volume_control(const char* label, int& volume, bool& muted)
+    {
+        bool changed = false;
+        ImGui::PushID(label);
+        ImGui::BeginDisabled(muted);
+        changed |= ImGui::SliderInt("##volume", &volume, 0, 256);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        changed |= ImGui::Checkbox("Mute", &muted);
+        ImGui::SameLine();
+        ImGui::TextUnformatted(label);
+        ImGui::PopID();
+        return changed;
+    }
+
+    void return_to_title()
+    {
+        config_open_ = false;
+        confirm_return_title_ = false;
+        auto_mode_ = false;
+        skip_mode_ = false;
+        wake_time_.reset();
+        audio_wait_.reset();
+        transition_.reset();
+        background_fade_.reset();
+        bgm_.stop();
+        for (auto& channel : transient_se_) channel.stop();
+        for (auto& channel : se_channels_) channel.stop();
+        for (auto& channel : voice_channels_) channel.stop();
+        ui_mode_ = UiMode::title;
+        title_highlight_ = 0;
+        title_exit_started_.reset();
+        title_started_ = std::chrono::steady_clock::now();
+        th2::save_config(config_path_, config_);
+    }
+
     void draw_config()
     {
         if (!config_open_) {
@@ -2013,10 +2133,6 @@ private:
         if (ImGui::Begin("Panel Config", &open)) {
             if (ImGui::BeginTabBar("config-tabs")) {
                 if (ImGui::BeginTabItem("Playback")) {
-                    if (ImGui::Checkbox("Auto mode", &auto_mode_)
-                        && auto_mode_) {
-                        skip_mode_ = false;
-                    }
                     ImGui::Checkbox(
                         "Auto mode skips previously read text",
                         &config_.auto_skip_read);
@@ -2027,30 +2143,27 @@ private:
                         "Delay at page end", &config_.auto_page_ms,
                         500, 15000, "%d ms");
                     ImGui::Separator();
-                    if (ImGui::Checkbox("Skip mode", &skip_mode_)
-                        && skip_mode_) {
-                        auto_mode_ = false;
-                    }
                     ImGui::Checkbox(
-                        "Allow skipping unread text", &config_.skip_unread);
+                        "Auto-skip includes unread text",
+                        &config_.skip_unread);
                     ImGui::EndTabItem();
                 }
                 if (ImGui::BeginTabItem("Audio")) {
-                    bool audio_changed = ImGui::SliderInt(
-                        "Music", &config_.bgm_volume, 0, 256);
-                    audio_changed |= ImGui::SliderInt(
-                        "Sound effects", &config_.se_volume, 0, 256);
-                    audio_changed |= ImGui::SliderInt(
-                        "Voices", &config_.voice_volume, 0, 256);
+                    bool audio_changed = volume_control(
+                        "Music", config_.bgm_volume, config_.bgm_muted);
+                    audio_changed |= volume_control(
+                        "Sound effects", config_.se_volume, config_.se_muted);
+                    audio_changed |= volume_control(
+                        "Voices", config_.voice_volume, config_.voice_muted);
                     ImGui::SeparatorText("Character voices");
                     static constexpr std::array labels{
                         "Konomi", "Manaka", "Tamaki", "Karin", "Sango",
                         "Ruri", "Yuma", "Lucy", "Yuki", "Other", "Sasara",
                     };
                     for (std::size_t i = 0; i < labels.size(); ++i) {
-                        audio_changed |= ImGui::SliderInt(
-                            labels[i], &config_.character_voice_volume[i],
-                            0, 256);
+                        audio_changed |= volume_control(
+                            labels[i], config_.character_voice_volume[i],
+                            config_.character_voice_muted[i]);
                     }
                     if (audio_changed) {
                         apply_audio_gains();
@@ -2072,11 +2185,100 @@ private:
             if (ImGui::Button("Close", ImVec2(110.0f, 0.0f))) {
                 open = false;
             }
+            if (ui_mode_ != UiMode::title) {
+                ImGui::SameLine();
+                if (ImGui::Button(
+                        "Return to Title", ImVec2(140.0f, 0.0f))) {
+                    confirm_return_title_ = true;
+                    ImGui::OpenPopup("Return to Title?");
+                }
+            }
+            if (ImGui::BeginPopupModal(
+                    "Return to Title?", nullptr,
+                    ImGuiWindowFlags_AlwaysAutoResize)) {
+                ImGui::TextUnformatted(
+                    "Unsaved progress will be lost.\nReturn to the title screen?");
+                if (ImGui::Button("Return", ImVec2(120.0f, 0.0f))) {
+                    return_to_title();
+                    ImGui::CloseCurrentPopup();
+                    open = false;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+                    confirm_return_title_ = false;
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
         }
         ImGui::End();
         if (!open) {
             close_config();
         }
+    }
+
+    void draw_name_input()
+    {
+        if (!name_input_open_) {
+            return;
+        }
+        ImGui::SetNextWindowSize(ImVec2(430.0f, 330.0f), ImGuiCond_Always);
+        ImGui::SetNextWindowPos(
+            ImVec2(400.0f, 300.0f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::Begin(
+            "Player Name", nullptr,
+            ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize);
+        ImGui::TextUnformatted("Enter the protagonist's name.");
+        ImGui::Separator();
+        ImGui::InputText(
+            "Family name", name_family_.data(), name_family_.size());
+        ImGui::InputText(
+            "Given name", name_given_.data(), name_given_.size());
+        ImGui::InputText(
+            "Family reading", name_family_reading_.data(),
+            name_family_reading_.size());
+        ImGui::InputText(
+            "Given reading", name_given_reading_.data(),
+            name_given_reading_.size());
+        ImGui::InputText(
+            "Nickname", name_nickname_.data(), name_nickname_.size());
+        if (!name_error_.empty()) {
+            ImGui::TextColored(
+                ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s",
+                name_error_.c_str());
+        }
+        if (ImGui::Button("Start Game", ImVec2(120.0f, 0.0f))) {
+            if (name_family_[0] == '\0' || name_given_[0] == '\0'
+                || name_family_reading_[0] == '\0'
+                || name_given_reading_[0] == '\0'
+                || name_nickname_[0] == '\0') {
+                name_error_ = "Every field must contain a name.";
+            } else {
+                config_.player_name = {
+                    name_family_.data(),
+                    name_given_.data(),
+                    name_family_reading_.data(),
+                    name_given_reading_.data(),
+                    name_nickname_.data(),
+                    name_nickname_.data(),
+                };
+                th2::save_config(config_path_, config_);
+                name_input_open_ = false;
+                start_new_game();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Reset Defaults", ImVec2(130.0f, 0.0f))) {
+            config_.player_name = default_player_name_;
+            open_name_input();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(90.0f, 0.0f))) {
+            name_input_open_ = false;
+            title_started_ = std::chrono::steady_clock::now()
+                - std::chrono::milliseconds(120 * 1000 / 60);
+        }
+        ImGui::End();
     }
 
     void open_backlog()

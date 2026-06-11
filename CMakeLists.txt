@@ -55,6 +55,7 @@ target_compile_options(th2_character PRIVATE -Wall -Wextra -Wpedantic)
 
 add_library(th2_config
     native/config.cpp
+    native/player_name.cpp
 )
 target_include_directories(th2_config PUBLIC native)
 target_compile_options(th2_config PRIVATE -Wall -Wextra -Wpedantic)
@@ -187,4 +188,10 @@ if(BUILD_TESTING)
     )
     target_link_libraries(th2-config-test PRIVATE th2_config)
     add_test(NAME config-roundtrip COMMAND th2-config-test)
+
+    add_executable(th2-player-name-test
+        native/player_name_test.cpp
+    )
+    target_link_libraries(th2-player-name-test PRIVATE th2_config)
+    add_test(NAME player-name-substitution COMMAND th2-player-name-test)
 endif()
