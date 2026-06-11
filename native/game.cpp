@@ -63,14 +63,6 @@ Texture load_texture(SDL_Renderer* renderer, const th2::Archive& archive,
         throw std::runtime_error("image not found: " + std::string(name));
     }
     SDL_Surface* surface = th2::load_image(archive.read(*entry), entry->name);
-    if (SDL_Palette* palette = SDL_GetSurfacePalette(surface)) {
-        std::vector<SDL_Color> colors(
-            palette->colors, palette->colors + palette->ncolors);
-        for (auto& color : colors) {
-            color.a = 255;
-        }
-        SDL_SetPaletteColors(palette, colors.data(), 0, palette->ncolors);
-    }
     SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
     SDL_DestroySurface(surface);
     if (!texture) {
@@ -548,6 +540,17 @@ private:
     std::optional<std::chrono::steady_clock::time_point> auto_next_time_;
     std::string current_line_key_;
 
+    th2::AudioChannel& waited_audio_channel()
+    {
+        if (audio_wait_->kind == AudioWaitKind::voice) {
+            return voice_channels_.at(audio_wait_->channel);
+        }
+        if (audio_wait_->channel < se_channels_.size()) {
+            return se_channels_.at(audio_wait_->channel);
+        }
+        return transient_se_.at(audio_wait_->channel - se_channels_.size());
+    }
+
     struct Choice {
         std::string text;
         int flag_no = -1;
@@ -730,10 +733,7 @@ private:
         }
         wake_time_.reset();
         if (audio_wait_) {
-            auto& channel = audio_wait_->kind == AudioWaitKind::sound_effect
-                ? se_channels_.at(audio_wait_->channel)
-                : voice_channels_.at(audio_wait_->channel);
-            channel.stop();
+            waited_audio_channel().stop();
             audio_wait_.reset();
         }
         if (waiting_for_input_) {
@@ -933,8 +933,10 @@ private:
                 const auto output_offset =
                     (static_cast<std::size_t>(y) * width + x) * 4;
                 for (int channel = 0; channel < 3; ++channel) {
+                    const int previous_value = transition.type == 178
+                        ? 0 : previous[previous_offset + channel];
                     pixels[output_offset + channel] = static_cast<std::uint8_t>(
-                        (previous[previous_offset + channel] * (255 - alpha)
+                        (previous_value * (255 - alpha)
                          + next[source_offset + channel] * alpha)
                         / 255);
                 }
@@ -1016,7 +1018,8 @@ private:
         load_character_texture(character);
     }
 
-    void play_se(int channel, int sound, bool loop, int volume)
+    void play_se(int channel, int sound, bool loop, int volume,
+                 bool wait_for_completion = false)
     {
         const auto name = std::format("SE_{:04d}.WAV", sound);
         if (channel >= 0 && static_cast<std::size_t>(channel) < se_channels_.size()) {
@@ -1038,6 +1041,10 @@ private:
             std::distance(transient_se_.begin(), found));
         transient_se_volume_[index] = volume;
         found->play(load_audio(se_archive_, name), false, se_gain(volume));
+        if (wait_for_completion) {
+            audio_wait_ = AudioWait{
+                AudioWaitKind::sound_effect, se_channels_.size() + index};
+        }
     }
 
     void play_bgm(int music, bool loop, int volume)
@@ -1102,9 +1109,7 @@ private:
             channel.update();
         }
         if (audio_wait_) {
-            const auto& channel = audio_wait_->kind == AudioWaitKind::sound_effect
-                ? se_channels_.at(audio_wait_->channel)
-                : voice_channels_.at(audio_wait_->channel);
+            const auto& channel = waited_audio_channel();
             if (!channel.playing()) {
                 audio_wait_.reset();
                 advance();
@@ -1283,7 +1288,7 @@ private:
             section_ending_ = true;
         } else if (name == "SE") {
             play_se(-1, number(event, 0), false,
-                    number(event, 1) < 0 ? 255 : number(event, 1));
+                    number(event, 1) < 0 ? 255 : number(event, 1), true);
         } else if (name == "SEP") {
             play_se(
                 number(event, 0), number(event, 1), number(event, 3) != 0,
@@ -1420,11 +1425,7 @@ private:
                 }
                 if (audio_wait_) {
                     if (skipping) {
-                        auto& channel =
-                            audio_wait_->kind == AudioWaitKind::sound_effect
-                            ? se_channels_.at(audio_wait_->channel)
-                            : voice_channels_.at(audio_wait_->channel);
-                        channel.stop();
+                        waited_audio_channel().stop();
                         audio_wait_.reset();
                         continue;
                     }
