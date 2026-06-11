@@ -933,10 +933,8 @@ private:
                 const auto output_offset =
                     (static_cast<std::size_t>(y) * width + x) * 4;
                 for (int channel = 0; channel < 3; ++channel) {
-                    const int previous_value = transition.type == 178
-                        ? 0 : previous[previous_offset + channel];
                     pixels[output_offset + channel] = static_cast<std::uint8_t>(
-                        (previous_value * (255 - alpha)
+                        (previous[previous_offset + channel] * (255 - alpha)
                          + next[source_offset + channel] * alpha)
                         / 255);
                 }
@@ -1194,6 +1192,10 @@ private:
                 number(event, 0) + number(event, 1) + number(event, 2))
                 / (3.0f * 128.0f);
             begin_background_fade(1.0f - average, number(event, 3));
+        } else if (name == "WaitFrame") {
+            const int frames = std::max<std::int32_t>(0, number(event, 0));
+            wake_time_ = std::chrono::steady_clock::now()
+                + std::chrono::milliseconds(frames * 1000 / 60);
         } else if (name == "BD") {
             background_.reset();
             bg_scene_ = -1;
@@ -1429,6 +1431,9 @@ private:
                         audio_wait_.reset();
                         continue;
                     }
+                    break;
+                }
+                if (wake_time_) {
                     break;
                 }
                 if (transition_) {
