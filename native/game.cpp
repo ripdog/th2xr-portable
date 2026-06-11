@@ -3113,7 +3113,7 @@ private:
 
         const bool end_of_block =
             !message_.has_hidden_segments() && message_ends_block_;
-        auto& tex = end_of_block ? ui_pageend_ : ui_keywait_;
+        auto& tex = end_of_block ? ui_keywait_ : ui_pageend_;
         if (!tex) return;
 
         const auto lines = display_lines(message_.visible());
