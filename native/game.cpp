@@ -425,6 +425,7 @@ private:
     bool bg_is_visual_ = false;
     std::array<Texture, 32> overlays_{};
     std::array<int, 32> overlay_layers_{};
+    std::array<bool, 32> overlay_is_transition_mask_{};
     th2::Characters characters_;
     std::array<CharacterTexture, 32> character_textures_{};
     th2::AudioChannel bgm_;
@@ -917,7 +918,8 @@ private:
             static_cast<const std::uint8_t*>(transition.previous_pixels->pixels);
         const auto* next =
             static_cast<const std::uint8_t*>(transition.next_pixels->pixels);
-        const int vague = std::clamp(transition.vague, 1, 256);
+        const int vague = transition.type == 178
+            ? 1 : std::clamp(transition.vague, 1, 256);
         const int blend_offset = static_cast<int>(
             progress * static_cast<float>(256 + vague));
 
@@ -1268,15 +1270,22 @@ private:
                 const auto& archive = text(event, 6) == "bak" ? backgrounds_ : graphics_;
                 overlays_[slot] = load_texture(renderer_, archive, text(event, 2));
                 overlay_layers_[slot] = number(event, 3);
+                const auto filename = text(event, 2);
+                overlay_is_transition_mask_[slot] =
+                    filename.size() == 9
+                    && (filename[0] == 'f' || filename[0] == 'F')
+                    && filename[1] == '0';
             }
         } else if (name == "ResetBmp") {
             const auto slot = static_cast<std::size_t>(number(event, 0));
             if (slot < overlays_.size()) {
                 overlays_[slot].reset();
+                overlay_is_transition_mask_[slot] = false;
             }
         } else if (name == "ResetBmpAll") {
-            for (auto& overlay : overlays_) {
-                overlay.reset();
+            for (std::size_t i = 0; i < overlays_.size(); ++i) {
+                overlays_[i].reset();
+                overlay_is_transition_mask_[i] = false;
             }
         } else if (name == "C" || name == "CW" || name == "SetChar") {
             set_character(event);
@@ -3237,7 +3246,8 @@ private:
             }
         }
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
-            if (overlays_[i] && overlay_layers_[i] <= 0) {
+            if (overlays_[i] && overlay_layers_[i] <= 0
+                && !overlay_is_transition_mask_[i]) {
                 SDL_RenderTexture(renderer_, overlays_[i].get(), nullptr, nullptr);
             }
         }
@@ -3262,7 +3272,8 @@ private:
             SDL_RenderTexture(renderer_, loaded.texture.get(), nullptr, &destination);
         }
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
-            if (overlays_[i] && overlay_layers_[i] > 0) {
+            if (overlays_[i] && overlay_layers_[i] > 0
+                && !overlay_is_transition_mask_[i]) {
                 SDL_RenderTexture(renderer_, overlays_[i].get(), nullptr, nullptr);
             }
         }
