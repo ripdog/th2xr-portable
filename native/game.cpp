@@ -2031,6 +2031,7 @@ private:
         if (frame < 120 || title_exit_started_) {
             return;
         }
+        const int previous_highlight = title_highlight_;
         if (event.type == SDL_EVENT_KEY_DOWN) {
             if (event.key.key == SDLK_UP) {
                 do {
@@ -2074,6 +2075,9 @@ private:
                     }
                 }
             }
+        }
+        if (title_highlight_ != previous_highlight) {
+            play_se(-1, 9108, false, 255);
         }
     }
 
