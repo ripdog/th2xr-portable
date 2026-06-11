@@ -2,7 +2,9 @@
 
 #include <SDL3/SDL.h>
 
+#include <chrono>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -41,8 +43,11 @@ private:
     AudioClip loop_clip_{};
     bool loop_ = false;
     bool active_ = false;
+    std::chrono::steady_clock::time_point playback_end_{};
+    std::optional<std::chrono::steady_clock::time_point> paused_at_;
 
     void queue();
+    void set_playback_end();
 };
 
 }  // namespace th2

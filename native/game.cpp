@@ -63,6 +63,14 @@ Texture load_texture(SDL_Renderer* renderer, const th2::Archive& archive,
         throw std::runtime_error("image not found: " + std::string(name));
     }
     SDL_Surface* surface = th2::load_image(archive.read(*entry), entry->name);
+    if (SDL_Palette* palette = SDL_GetSurfacePalette(surface)) {
+        std::vector<SDL_Color> colors(
+            palette->colors, palette->colors + palette->ncolors);
+        for (auto& color : colors) {
+            color.a = 255;
+        }
+        SDL_SetPaletteColors(palette, colors.data(), 0, palette->ncolors);
+    }
     SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
     SDL_DestroySurface(surface);
     if (!texture) {

@@ -107,9 +107,12 @@ AudioChannel::~AudioChannel()
 AudioChannel::AudioChannel(AudioChannel&& other) noexcept
     : stream_(std::exchange(other.stream_, nullptr)),
       clip_(std::move(other.clip_)), loop_clip_(std::move(other.loop_clip_)),
-      loop_(other.loop_), active_(other.active_)
+      loop_(other.loop_), active_(other.active_),
+      playback_end_(other.playback_end_),
+      paused_at_(std::move(other.paused_at_))
 {
     other.active_ = false;
+    other.paused_at_.reset();
 }
 
 AudioChannel& AudioChannel::operator=(AudioChannel&& other) noexcept
@@ -121,7 +124,10 @@ AudioChannel& AudioChannel::operator=(AudioChannel&& other) noexcept
         loop_clip_ = std::move(other.loop_clip_);
         loop_ = other.loop_;
         active_ = other.active_;
+        playback_end_ = other.playback_end_;
+        paused_at_ = std::move(other.paused_at_);
         other.active_ = false;
+        other.paused_at_.reset();
     }
     return *this;
 }
@@ -149,6 +155,8 @@ void AudioChannel::play(AudioClip clip, bool loop, float gain)
         throw std::runtime_error(SDL_GetError());
     }
     active_ = true;
+    paused_at_.reset();
+    set_playback_end();
 }
 
 void AudioChannel::play_intro_loop(AudioClip intro, AudioClip loop, float gain)
@@ -182,6 +190,7 @@ void AudioChannel::stop()
     loop_clip_ = {};
     loop_ = false;
     active_ = false;
+    paused_at_.reset();
 }
 
 void AudioChannel::pause(bool paused)
@@ -191,8 +200,15 @@ void AudioChannel::pause(bool paused)
     }
     if (paused) {
         SDL_PauseAudioStreamDevice(stream_);
+        if (!paused_at_) {
+            paused_at_ = std::chrono::steady_clock::now();
+        }
     } else {
         SDL_ResumeAudioStreamDevice(stream_);
+        if (paused_at_) {
+            playback_end_ += std::chrono::steady_clock::now() - *paused_at_;
+            paused_at_.reset();
+        }
     }
 }
 
@@ -205,25 +221,40 @@ void AudioChannel::set_gain(float gain)
 
 void AudioChannel::update()
 {
-    if (!stream_ || !active_) {
+    if (!stream_ || !active_ || paused_at_
+        || std::chrono::steady_clock::now() < playback_end_) {
         return;
     }
-    if (SDL_GetAudioStreamQueued(stream_) == 0) {
-        if (!loop_clip_.samples.empty()) {
-            clip_ = std::move(loop_clip_);
-            loop_ = true;
-            queue();
-        } else if (loop_) {
-            queue();
-        } else {
-            active_ = false;
-        }
+    if (!loop_clip_.samples.empty()) {
+        clip_ = std::move(loop_clip_);
+        loop_ = true;
+        queue();
+        set_playback_end();
+    } else if (loop_) {
+        queue();
+        set_playback_end();
+    } else {
+        active_ = false;
     }
 }
 
 bool AudioChannel::playing() const
 {
     return stream_ && active_;
+}
+
+void AudioChannel::set_playback_end()
+{
+    const auto frames = clip_.channels > 0
+        ? clip_.samples.size() / static_cast<std::size_t>(clip_.channels)
+        : 0;
+    const auto duration = clip_.sample_rate > 0
+        ? std::chrono::duration<double>(
+              static_cast<double>(frames) / clip_.sample_rate)
+        : std::chrono::duration<double>::zero();
+    playback_end_ = std::chrono::steady_clock::now()
+        + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            duration);
 }
 
 }  // namespace th2
