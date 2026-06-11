@@ -1,12 +1,15 @@
 #include "archive.hpp"
 #include "audio.hpp"
 #include "character.hpp"
+#include "config.hpp"
 #include "font.hpp"
 #include "image.hpp"
+#include "imgui_layer.hpp"
 #include "message.hpp"
 #include "script_runtime.hpp"
 
 #include <SDL3/SDL.h>
+#include <imgui.h>
 
 #include <algorithm>
 #include <array>
@@ -122,7 +125,8 @@ public:
         : scripts_(data / "SDT.PAK"), graphics_(data / "GRP.PAK"),
           backgrounds_(data / "bak.pak"), fonts_(data / "FNT.PAK"),
           bgm_archive_(data / "bgm.PAK"), se_archive_(data / "SE.PAK"),
-          voice_archive_(data / "voice.pak"), runtime_(scripts_), font_(fonts_)
+          voice_archive_(data / "voice.pak"), runtime_(scripts_), font_(fonts_),
+          config_(th2::load_config(config_path_))
     {
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
             throw std::runtime_error(SDL_GetError());
@@ -134,6 +138,10 @@ public:
         }
         SDL_SetRenderLogicalPresentation(
             renderer_, 800, 600, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+        if (config_.fullscreen) {
+            SDL_SetWindowFullscreen(window_, true);
+        }
+        imgui_ = std::make_unique<th2::ImGuiLayer>(window_, renderer_);
         auto try_load = [&](std::string_view name) -> Texture {
             const auto* entry = graphics_.find(name);
             if (!entry) return {};
@@ -180,6 +188,8 @@ public:
 
     ~Game()
     {
+        th2::save_config(config_path_, config_);
+        imgui_.reset();
         for (auto& overlay : overlays_) {
             overlay.reset();
         }
@@ -199,6 +209,14 @@ public:
                     continue;
                 }
                 SDL_ConvertEventToRenderCoordinates(renderer_, &event);
+                imgui_->process_event(event);
+                if (config_open_) {
+                    if (event.type == SDL_EVENT_KEY_DOWN
+                        && event.key.key == SDLK_ESCAPE) {
+                        close_config();
+                    }
+                    continue;
+                }
                 if (transition_ || background_fade_) {
                     continue;
                 }
@@ -324,6 +342,8 @@ public:
             }
             update_audio();
             update_title();
+            imgui_->new_frame();
+            draw_config();
             draw();
             update_transition();
             update_background_fade();
@@ -379,8 +399,11 @@ private:
     th2::Archive voice_archive_;
     th2::ScriptRuntime runtime_;
     th2::GameFont font_;
+    const std::filesystem::path config_path_{"toheart2-config.ini"};
+    th2::GameConfig config_;
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
+    std::unique_ptr<th2::ImGuiLayer> imgui_;
     Texture background_;
     int bg_scene_ = -1;
     bool bg_is_visual_ = false;
@@ -475,6 +498,10 @@ private:
     int newest_save_slot_ = -1;
     Surface save_snapshot_;
     std::array<Texture, 10> save_thumbnails_{};
+    bool config_open_ = false;
+    UiMode config_return_mode_ = UiMode::game;
+    bool auto_mode_ = false;
+    bool skip_mode_ = false;
 
     struct SaveMetadata {
         bool exists = false;
@@ -1785,6 +1812,86 @@ private:
         ui_mode_ = UiMode::game;
     }
 
+    void open_config(UiMode return_mode)
+    {
+        config_return_mode_ = return_mode;
+        config_open_ = true;
+    }
+
+    void close_config()
+    {
+        config_open_ = false;
+        th2::save_config(config_path_, config_);
+    }
+
+    void draw_config()
+    {
+        if (!config_open_) {
+            return;
+        }
+        ImGui::SetNextWindowSize(ImVec2(570.0f, 500.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(ImVec2(115.0f, 50.0f), ImGuiCond_FirstUseEver);
+        bool open = true;
+        if (ImGui::Begin("Panel Config", &open)) {
+            if (ImGui::BeginTabBar("config-tabs")) {
+                if (ImGui::BeginTabItem("Playback")) {
+                    ImGui::Checkbox("Auto mode", &auto_mode_);
+                    ImGui::Checkbox(
+                        "Auto mode skips previously read text",
+                        &config_.auto_skip_read);
+                    ImGui::SliderInt(
+                        "Delay between lines", &config_.auto_line_ms,
+                        250, 10000, "%d ms");
+                    ImGui::SliderInt(
+                        "Delay at page end", &config_.auto_page_ms,
+                        500, 15000, "%d ms");
+                    ImGui::Separator();
+                    ImGui::Checkbox("Skip mode", &skip_mode_);
+                    ImGui::Checkbox(
+                        "Allow skipping unread text", &config_.skip_unread);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Audio")) {
+                    ImGui::SliderInt(
+                        "Music", &config_.bgm_volume, 0, 256);
+                    ImGui::SliderInt(
+                        "Sound effects", &config_.se_volume, 0, 256);
+                    ImGui::SliderInt(
+                        "Voices", &config_.voice_volume, 0, 256);
+                    ImGui::SeparatorText("Character voices");
+                    static constexpr std::array labels{
+                        "Konomi", "Tamaki", "Manaka", "Yuma", "Sasara",
+                        "Lucy", "Karin", "Sango", "Ruri", "Yuki", "Other",
+                    };
+                    for (std::size_t i = 0; i < labels.size(); ++i) {
+                        ImGui::SliderInt(
+                            labels[i], &config_.character_voice_volume[i],
+                            0, 256);
+                    }
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Display & Input")) {
+                    if (ImGui::Checkbox("Fullscreen", &config_.fullscreen)) {
+                        SDL_SetWindowFullscreen(window_, config_.fullscreen);
+                    }
+                    ImGui::Checkbox(
+                        "Mouse wheel opens backlog",
+                        &config_.wheel_opens_backlog);
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            }
+            ImGui::Separator();
+            if (ImGui::Button("Close", ImVec2(110.0f, 0.0f))) {
+                open = false;
+            }
+        }
+        ImGui::End();
+        if (!open) {
+            close_config();
+        }
+    }
+
     void open_backlog()
     {
         if (choosing_) return;
@@ -1805,7 +1912,7 @@ private:
         case 0: open_save_load(UiMode::save); break;
         case 1: open_save_load(UiMode::load); break;
         case 2: message_visible_ = !message_visible_; break;
-        case 3: break;
+        case 3: open_config(UiMode::game); break;
         case 4: break;
         }
     }
@@ -2013,6 +2120,9 @@ private:
         case 1:
             save_snapshot_ = capture_frame_pixels();
             open_save_load(UiMode::load);
+            break;
+        case 2:
+            open_config(UiMode::title);
             break;
         case 4:
             begin_title_exit(false);
@@ -2506,9 +2616,9 @@ private:
                 save_snapshot_ = capture_frame_pixels();
                 open_save_load(UiMode::load);
                 break;
-            case 4: break;
-            case 5: break;
-            case 6: open_system_menu(); break;
+            case 4: auto_mode_ = !auto_mode_; break;
+            case 5: skip_mode_ = !skip_mode_; break;
+            case 6: open_config(UiMode::game); break;
             case 7:
                 save_snapshot_ = capture_frame_pixels();
                 save(0);
@@ -2600,6 +2710,7 @@ private:
         if (ui_mode_ == UiMode::title) {
             draw_title();
             if (!transition_) {
+                imgui_->render();
                 SDL_RenderPresent(renderer_);
                 return;
             }
@@ -2750,6 +2861,7 @@ private:
                     renderer_, transition_->previous.get(), nullptr, nullptr);
             }
         }
+        imgui_->render();
         SDL_RenderPresent(renderer_);
     }
 };

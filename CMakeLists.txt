@@ -59,6 +59,15 @@ add_library(th2_config
 target_include_directories(th2_config PUBLIC native)
 target_compile_options(th2_config PRIVATE -Wall -Wextra -Wpedantic)
 
+add_library(imgui
+    third_party/imgui/imgui.cpp
+    third_party/imgui/imgui_draw.cpp
+    third_party/imgui/imgui_tables.cpp
+    third_party/imgui/imgui_widgets.cpp
+)
+target_include_directories(imgui PUBLIC third_party/imgui)
+target_compile_options(imgui PRIVATE -w)
+
 add_executable(th2-archive-info
     native/archive_info.cpp
 )
@@ -133,10 +142,11 @@ add_executable(toheart2
     native/font.cpp
     native/game.cpp
     native/image.cpp
+    native/imgui_layer.cpp
     native/message.cpp
 )
 target_link_libraries(toheart2 PRIVATE SDL3::SDL3 th2_runtime)
-target_link_libraries(toheart2 PRIVATE th2_audio th2_character th2_config)
+target_link_libraries(toheart2 PRIVATE th2_audio th2_character th2_config imgui)
 
 if(BUILD_TESTING)
     add_executable(th2-character-test
