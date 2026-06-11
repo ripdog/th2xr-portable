@@ -585,6 +585,7 @@ private:
     std::array<char, 64> name_nickname_{};
     bool auto_mode_ = false;
     bool skip_mode_ = false;
+    bool section_ending_ = false;
 
     std::string current_read_key() const
     {
@@ -615,6 +616,31 @@ private:
         skip_mode_ = false;
         auto_next_time_.reset();
         advance();
+    }
+
+    bool load_next_section()
+    {
+        std::string current = runtime_.script_name();
+        std::ranges::transform(
+            current, current.begin(),
+            [](unsigned char byte) {
+                return static_cast<char>(std::toupper(byte));
+            });
+        std::vector<std::string> names;
+        for (const auto& entry : scripts_.entries()) {
+            if (entry.name.size() == current.size()
+                && std::isdigit(static_cast<unsigned char>(entry.name[0]))) {
+                names.push_back(entry.name);
+            }
+        }
+        std::ranges::sort(names);
+        const auto found = std::ranges::find(names, current);
+        if (found == names.end() || std::next(found) == names.end()) {
+            return false;
+        }
+        runtime_.load(*std::next(found));
+        section_ending_ = false;
+        return true;
     }
 
     bool voice_playing() const
@@ -1084,6 +1110,12 @@ private:
             + std::max<std::int32_t>(0, number(event, 2));
         bg_scene_ = scene;
         bg_is_visual_ = false;
+        if (scene == 0) {
+            background_.reset();
+            characters_.clear();
+            character_textures_ = {};
+            return;
+        }
         const auto name = std::format(
             "B{:03d}{}{}{}.bmp", scene / 10, tone_ % 4, weather_, scene % 10);
         background_ = load_texture(renderer_, backgrounds_, name);
@@ -1239,6 +1271,8 @@ private:
         } else if (name == "MV") {
             bgm_volume_ = number(event, 0);
             bgm_.set_gain(bgm_gain(bgm_volume_));
+        } else if (name == "MW") {
+            section_ending_ = true;
         } else if (name == "SE") {
             play_se(-1, number(event, 0), false,
                     number(event, 1) < 0 ? 255 : number(event, 1));
@@ -1321,10 +1355,8 @@ private:
             mark_current_text_read();
         }
         if (waiting_for_input_ && message_.reveal_next()) {
-            if (message_.has_hidden_segments()) {
-                auto_next_time_.reset();
-                return;
-            }
+            auto_next_time_.reset();
+            return;
         }
         waiting_for_input_ = false;
         if (choosing_) {
@@ -1348,8 +1380,11 @@ private:
         while (running_ && !waiting_for_input_ && !choosing_) {
             const auto step = runtime_.run();
             if (step.reason == th2::VmYield::ended) {
-                running_ = false;
-                break;
+                if (!section_ending_ || !load_next_section()) {
+                    return_to_title();
+                    break;
+                }
+                continue;
             }
             if (step.reason == th2::VmYield::wait_frames
                 || step.reason == th2::VmYield::wait_time) {
@@ -1364,6 +1399,7 @@ private:
                 break;
             }
             if (step.reason == th2::VmYield::frame) {
+                wake_time_ = std::chrono::steady_clock::now();
                 break;
             }
             if (step.reason == th2::VmYield::event) {
@@ -3077,7 +3113,7 @@ private:
 
         const bool end_of_block =
             !message_.has_hidden_segments() && message_ends_block_;
-        auto& tex = end_of_block ? ui_keywait_ : ui_pageend_;
+        auto& tex = end_of_block ? ui_pageend_ : ui_keywait_;
         if (!tex) return;
 
         const auto lines = display_lines(message_.visible());
@@ -3105,6 +3141,11 @@ private:
     {
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
         SDL_RenderClear(renderer_);
+        if (name_input_open_) {
+            imgui_->render();
+            SDL_RenderPresent(renderer_);
+            return;
+        }
         if (ui_mode_ == UiMode::title) {
             draw_title();
             if (!transition_) {
