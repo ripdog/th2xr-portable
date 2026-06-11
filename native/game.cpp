@@ -276,8 +276,12 @@ public:
                             save_snapshot_ = capture_frame_pixels();
                             open_save_load(UiMode::load);
                         } else if (event.key.key == SDLK_F11) {
+                            config_.fullscreen =
+                                !(SDL_GetWindowFlags(window_)
+                                  & SDL_WINDOW_FULLSCREEN);
                             SDL_SetWindowFullscreen(
-                                window_, !(SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN));
+                                window_, config_.fullscreen);
+                            th2::save_config(config_path_, config_);
                         } else if (event.key.key == SDLK_RETURN
                                    || event.key.key == SDLK_SPACE) {
                             advance();
@@ -306,7 +310,8 @@ public:
                         }
                     }
                 } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
-                    if (event.wheel.y > 0) {
+                    if (event.wheel.y > 0
+                        && config_.wheel_opens_backlog) {
                         open_backlog();
                     } else if (event.wheel.y < 0) {
                         advance();
@@ -341,6 +346,7 @@ public:
                 advance();
             }
             update_audio();
+            update_playback_modes();
             update_title();
             imgui_->new_frame();
             draw_config();
@@ -416,6 +422,7 @@ private:
     bool bgm_loop_ = false;
     int bgm_volume_ = 255;
     std::array<th2::AudioChannel, 8> transient_se_{};
+    std::array<int, 8> transient_se_volume_{};
     std::array<th2::AudioChannel, 16> se_channels_{};
     std::array<int, 16> se_sound_{};  // sound number per channel, -1 = none
     std::array<bool, 16> se_loop_{};
@@ -426,6 +433,55 @@ private:
     std::array<int, 8> voice_scenario_{};  // scenario for voice filename
     std::array<int, 8> voice_volume_{};
     std::array<bool, 8> voice_loop_{};
+
+    float bgm_gain(int volume) const
+    {
+        return std::clamp(volume, 0, 255) / 255.0f
+            * config_.bgm_volume / 256.0f;
+    }
+
+    float se_gain(int volume) const
+    {
+        return std::clamp(volume, 0, 255) / 255.0f
+            * config_.se_volume / 256.0f;
+    }
+
+    std::size_t voice_character_index(int character) const
+    {
+        if (character >= 1 && character <= 9) {
+            return static_cast<std::size_t>(character - 1);
+        }
+        if (character == 28) {
+            return 10;
+        }
+        if (character == 99) {
+            return 9;
+        }
+        return 10;
+    }
+
+    float voice_gain(int volume, int character) const
+    {
+        return std::clamp(volume, 0, 256) / 256.0f
+            * config_.voice_volume / 256.0f
+            * config_.character_voice_volume[
+                voice_character_index(character)] / 256.0f;
+    }
+
+    void apply_audio_gains()
+    {
+        bgm_.set_gain(bgm_gain(bgm_volume_));
+        for (std::size_t i = 0; i < transient_se_.size(); ++i) {
+            transient_se_[i].set_gain(se_gain(transient_se_volume_[i]));
+        }
+        for (std::size_t i = 0; i < se_channels_.size(); ++i) {
+            se_channels_[i].set_gain(se_gain(se_volume_[i]));
+        }
+        for (std::size_t i = 0; i < voice_channels_.size(); ++i) {
+            voice_channels_[i].set_gain(
+                voice_gain(voice_volume_[i], voice_character_[i]));
+        }
+    }
 
     // UI textures (from GRP.PAK)
     Texture ui_sys_menu_bg_;       // sys0100.tga
@@ -464,6 +520,8 @@ private:
     std::optional<BackgroundFade> background_fade_;
     float background_darkness_ = 0.0f;
     std::chrono::steady_clock::time_point skip_next_time_{};
+    std::optional<std::chrono::steady_clock::time_point> auto_next_time_;
+    std::string current_line_key_;
 
     struct Choice {
         std::string text;
@@ -499,9 +557,72 @@ private:
     Surface save_snapshot_;
     std::array<Texture, 10> save_thumbnails_{};
     bool config_open_ = false;
-    UiMode config_return_mode_ = UiMode::game;
     bool auto_mode_ = false;
     bool skip_mode_ = false;
+
+    std::string current_read_key() const
+    {
+        if (current_line_key_.empty() || message_.empty()) {
+            return {};
+        }
+        return current_line_key_ + ':'
+            + std::to_string(message_.revealed_count());
+    }
+
+    bool current_text_is_read() const
+    {
+        const auto key = current_read_key();
+        return !key.empty() && config_.read_lines.contains(key);
+    }
+
+    void mark_current_text_read()
+    {
+        const auto key = current_read_key();
+        if (!key.empty() && config_.read_lines.insert(key).second) {
+            th2::save_config(config_path_, config_);
+        }
+    }
+
+    bool voice_playing() const
+    {
+        return std::any_of(
+            voice_channels_.begin(), voice_channels_.end(),
+            [](const th2::AudioChannel& channel) {
+                return channel.playing();
+            });
+    }
+
+    void update_playback_modes()
+    {
+        if (config_open_ || ui_mode_ != UiMode::game || choosing_
+            || transition_ || background_fade_ || wake_time_ || audio_wait_) {
+            auto_next_time_.reset();
+            return;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (skip_mode_) {
+            if (now >= skip_next_time_
+                && (config_.skip_unread || current_text_is_read())) {
+                skip();
+                skip_next_time_ = now + std::chrono::milliseconds(40);
+            }
+            return;
+        }
+        if (!auto_mode_ || !waiting_for_input_ || voice_playing()) {
+            auto_next_time_.reset();
+            return;
+        }
+        if (!auto_next_time_) {
+            const int delay = config_.auto_skip_read && current_text_is_read()
+                ? 40
+                : (message_ends_block_
+                    ? config_.auto_page_ms : config_.auto_line_ms);
+            auto_next_time_ = now + std::chrono::milliseconds(delay);
+        } else if (now >= *auto_next_time_) {
+            auto_next_time_.reset();
+            advance();
+        }
+    }
 
     struct SaveMetadata {
         bool exists = false;
@@ -523,6 +644,11 @@ private:
         if (choosing_ || transition_ || background_fade_) {
             return;
         }
+        if (waiting_for_input_ && !config_.skip_unread
+            && !current_text_is_read()) {
+            skip_mode_ = false;
+            return;
+        }
         wake_time_.reset();
         if (audio_wait_) {
             auto& channel = audio_wait_->kind == AudioWaitKind::sound_effect
@@ -532,7 +658,9 @@ private:
             audio_wait_.reset();
         }
         if (waiting_for_input_) {
+            mark_current_text_read();
             if (message_.reveal_next() && message_.has_hidden_segments()) {
+                auto_next_time_.reset();
                 return;
             }
             waiting_for_input_ = false;
@@ -815,7 +943,7 @@ private:
         if (channel >= 0 && static_cast<std::size_t>(channel) < se_channels_.size()) {
             se_channels_[channel].play(
                 load_audio(se_archive_, name), loop,
-                std::clamp(volume, 0, 255) / 255.0f);
+                se_gain(volume));
             se_sound_[channel] = sound;
             se_loop_[channel] = loop;
             se_volume_[channel] = volume;
@@ -827,9 +955,10 @@ private:
         if (found == transient_se_.end()) {
             found = transient_se_.begin();
         }
-        found->play(
-            load_audio(se_archive_, name), false,
-            std::clamp(volume, 0, 255) / 255.0f);
+        const auto index = static_cast<std::size_t>(
+            std::distance(transient_se_.begin(), found));
+        transient_se_volume_[index] = volume;
+        found->play(load_audio(se_archive_, name), false, se_gain(volume));
     }
 
     void play_bgm(int music, bool loop, int volume)
@@ -837,7 +966,7 @@ private:
         bgm_track_ = music;
         bgm_loop_ = loop;
         bgm_volume_ = volume;
-        const auto gain = std::clamp(volume, 0, 255) / 255.0f;
+        const auto gain = bgm_gain(volume);
         const auto single = std::format("BGM_{:03d}.OGG", music);
         if (bgm_archive_.find(single)) {
             bgm_.play(load_audio(bgm_archive_, single), loop, gain);
@@ -872,7 +1001,7 @@ private:
         if (channel >= 0 && static_cast<std::size_t>(channel) < voice_channels_.size()) {
             voice_channels_[channel].play(
                 load_audio(voice_archive_, name), loop,
-                std::clamp(volume, 0, 256) / 256.0f);
+                voice_gain(volume, character));
             voice_sound_[channel] = voice;
             voice_character_[channel] = character;
             voice_scenario_[channel] = scenario;
@@ -1033,12 +1162,18 @@ private:
         } else if (name == "SetMessage2") {
             push_backlog();
             message_.set(text(event, 0));
+            current_line_key_ = runtime_.script_name() + ':'
+                + std::to_string(runtime_.vm_pc());
             message_ends_block_ = number(event, 1) == 2;
             waiting_for_input_ = true;
+            auto_next_time_.reset();
         } else if (name == "AddMessage2") {
             message_.append(text(event, 0));
+            current_line_key_ = runtime_.script_name() + ':'
+                + std::to_string(runtime_.vm_pc());
             message_ends_block_ = number(event, 1) == 2;
             waiting_for_input_ = true;
+            auto_next_time_.reset();
         } else if (name == "M") {
             const int music = number(event, 0);
             if (music < 0) {
@@ -1055,7 +1190,8 @@ private:
         } else if (name == "MP") {
             bgm_.pause(number(event, 0) != 0);
         } else if (name == "MV") {
-            bgm_.set_gain(std::clamp(number(event, 0), 0, 255) / 255.0f);
+            bgm_volume_ = number(event, 0);
+            bgm_.set_gain(bgm_gain(bgm_volume_));
         } else if (name == "SE") {
             play_se(-1, number(event, 0), false,
                     number(event, 1) < 0 ? 255 : number(event, 1));
@@ -1072,8 +1208,8 @@ private:
         } else if (name == "SEV") {
             const auto channel = number(event, 0);
             if (channel >= 0 && static_cast<std::size_t>(channel) < se_channels_.size()) {
-                se_channels_[channel].set_gain(
-                    std::clamp(number(event, 1), 0, 255) / 255.0f);
+                se_volume_[channel] = number(event, 1);
+                se_channels_[channel].set_gain(se_gain(se_volume_[channel]));
             }
         } else if (name == "SEW" || name == "SEVW") {
             const auto channel = number(event, 0);
@@ -1132,8 +1268,12 @@ private:
         if (wake_time_ || audio_wait_ || transition_ || background_fade_) {
             return;
         }
+        if (waiting_for_input_) {
+            mark_current_text_read();
+        }
         if (waiting_for_input_ && message_.reveal_next()) {
             if (message_.has_hidden_segments()) {
+                auto_next_time_.reset();
                 return;
             }
         }
@@ -1321,7 +1461,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 3);  // native version
+        write_u32(out, 4);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -1477,6 +1617,19 @@ private:
         write_i32(out, backlog_depth_);
         write_i32(out, ui_mode_ == UiMode::backlog ? 1 : 0);
         write_i32(out, message_ends_block_ ? 1 : 0);
+
+        // Playback and read state
+        write_u32(out, static_cast<std::uint32_t>(current_line_key_.size()));
+        out.write(current_line_key_.data(),
+                  static_cast<std::streamsize>(current_line_key_.size()));
+        write_i32(out, auto_mode_ ? 1 : 0);
+        write_i32(out, skip_mode_ ? 1 : 0);
+        write_u32(
+            out, static_cast<std::uint32_t>(config_.read_lines.size()));
+        for (const auto& key : config_.read_lines) {
+            write_u32(out, static_cast<std::uint32_t>(key.size()));
+            out.write(key.data(), static_cast<std::streamsize>(key.size()));
+        }
     }
 
     void load_body(std::istream& in)
@@ -1586,7 +1739,7 @@ private:
                     "K{:09d}_{:03d}{:03d}.OGG", scenario, sound, character);
                 voice_channels_[channel].play(
                     load_audio(voice_archive_, name), loop,
-                    std::clamp(volume, 0, 256) / 256.0f);
+                    voice_gain(volume, character));
                 voice_sound_[channel] = sound;
                 voice_character_[channel] = character;
                 voice_scenario_[channel] = scenario;
@@ -1681,6 +1834,25 @@ private:
             }
         }
         message_ends_block_ = version >= 3 ? read_i32(in) != 0 : true;
+        current_line_key_.clear();
+        auto_mode_ = false;
+        skip_mode_ = false;
+        if (version >= 4) {
+            const auto key_size = read_u32(in);
+            current_line_key_.resize(key_size);
+            in.read(current_line_key_.data(),
+                    static_cast<std::streamsize>(key_size));
+            auto_mode_ = read_i32(in) != 0;
+            skip_mode_ = read_i32(in) != 0;
+            const auto read_count = read_u32(in);
+            for (std::uint32_t i = 0; i < read_count; ++i) {
+                const auto size = read_u32(in);
+                std::string key(size, '\0');
+                in.read(key.data(), static_cast<std::streamsize>(size));
+                config_.read_lines.insert(std::move(key));
+            }
+            th2::save_config(config_path_, config_);
+        }
     }
 
     void write_u32(std::ostream& out, std::uint32_t value) const
@@ -1812,9 +1984,8 @@ private:
         ui_mode_ = UiMode::game;
     }
 
-    void open_config(UiMode return_mode)
+    void open_config()
     {
-        config_return_mode_ = return_mode;
         config_open_ = true;
     }
 
@@ -1835,7 +2006,10 @@ private:
         if (ImGui::Begin("Panel Config", &open)) {
             if (ImGui::BeginTabBar("config-tabs")) {
                 if (ImGui::BeginTabItem("Playback")) {
-                    ImGui::Checkbox("Auto mode", &auto_mode_);
+                    if (ImGui::Checkbox("Auto mode", &auto_mode_)
+                        && auto_mode_) {
+                        skip_mode_ = false;
+                    }
                     ImGui::Checkbox(
                         "Auto mode skips previously read text",
                         &config_.auto_skip_read);
@@ -1846,27 +2020,33 @@ private:
                         "Delay at page end", &config_.auto_page_ms,
                         500, 15000, "%d ms");
                     ImGui::Separator();
-                    ImGui::Checkbox("Skip mode", &skip_mode_);
+                    if (ImGui::Checkbox("Skip mode", &skip_mode_)
+                        && skip_mode_) {
+                        auto_mode_ = false;
+                    }
                     ImGui::Checkbox(
                         "Allow skipping unread text", &config_.skip_unread);
                     ImGui::EndTabItem();
                 }
                 if (ImGui::BeginTabItem("Audio")) {
-                    ImGui::SliderInt(
+                    bool audio_changed = ImGui::SliderInt(
                         "Music", &config_.bgm_volume, 0, 256);
-                    ImGui::SliderInt(
+                    audio_changed |= ImGui::SliderInt(
                         "Sound effects", &config_.se_volume, 0, 256);
-                    ImGui::SliderInt(
+                    audio_changed |= ImGui::SliderInt(
                         "Voices", &config_.voice_volume, 0, 256);
                     ImGui::SeparatorText("Character voices");
                     static constexpr std::array labels{
-                        "Konomi", "Tamaki", "Manaka", "Yuma", "Sasara",
-                        "Lucy", "Karin", "Sango", "Ruri", "Yuki", "Other",
+                        "Konomi", "Manaka", "Tamaki", "Karin", "Sango",
+                        "Ruri", "Yuma", "Lucy", "Yuki", "Other", "Sasara",
                     };
                     for (std::size_t i = 0; i < labels.size(); ++i) {
-                        ImGui::SliderInt(
+                        audio_changed |= ImGui::SliderInt(
                             labels[i], &config_.character_voice_volume[i],
                             0, 256);
+                    }
+                    if (audio_changed) {
+                        apply_audio_gains();
                     }
                     ImGui::EndTabItem();
                 }
@@ -1912,7 +2092,7 @@ private:
         case 0: open_save_load(UiMode::save); break;
         case 1: open_save_load(UiMode::load); break;
         case 2: message_visible_ = !message_visible_; break;
-        case 3: open_config(UiMode::game); break;
+        case 3: open_config(); break;
         case 4: break;
         }
     }
@@ -2122,7 +2302,7 @@ private:
             open_save_load(UiMode::load);
             break;
         case 2:
-            open_config(UiMode::title);
+            open_config();
             break;
         case 4:
             begin_title_exit(false);
@@ -2532,7 +2712,10 @@ private:
 
         for (int i = 0; i < static_cast<int>(std::size(btns)); ++i) {
             const auto& button = btns[i];
-            const float state_x = i == sidebar_hover_ ? 44.0f : 22.0f;
+            const bool active =
+                (i == 4 && auto_mode_) || (i == 5 && skip_mode_);
+            const float state_x = active ? 66.0f
+                : (i == sidebar_hover_ ? 44.0f : 22.0f);
             const SDL_FRect src{
                 state_x, static_cast<float>(button.source_y),
                 22.0f, static_cast<float>(button.h)};
@@ -2616,9 +2799,15 @@ private:
                 save_snapshot_ = capture_frame_pixels();
                 open_save_load(UiMode::load);
                 break;
-            case 4: auto_mode_ = !auto_mode_; break;
-            case 5: skip_mode_ = !skip_mode_; break;
-            case 6: open_config(UiMode::game); break;
+            case 4:
+                auto_mode_ = !auto_mode_;
+                if (auto_mode_) skip_mode_ = false;
+                break;
+            case 5:
+                skip_mode_ = !skip_mode_;
+                if (skip_mode_) auto_mode_ = false;
+                break;
+            case 6: open_config(); break;
             case 7:
                 save_snapshot_ = capture_frame_pixels();
                 save(0);
