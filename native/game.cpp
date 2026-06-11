@@ -8,6 +8,7 @@
 #include "message.hpp"
 #include "player_name.hpp"
 #include "script_runtime.hpp"
+#include "video.hpp"
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -127,7 +128,8 @@ public:
         : scripts_(data / "SDT.PAK"), graphics_(data / "GRP.PAK"),
           backgrounds_(data / "bak.pak"), fonts_(data / "FNT.PAK"),
           bgm_archive_(data / "bgm.PAK"), se_archive_(data / "SE.PAK"),
-          voice_archive_(data / "voice.pak"), runtime_(scripts_), font_(fonts_),
+          voice_archive_(data / "voice.pak"), movie_archive_(data / "mov.pak"),
+          runtime_(scripts_), font_(fonts_),
           config_(th2::load_config(config_path_))
     {
         default_player_name_ =
@@ -191,6 +193,7 @@ public:
             SDL_SetTextureBlendMode(title_masked_.get(), SDL_BLENDMODE_BLEND);
         }
         title_started_ = std::chrono::steady_clock::now();
+        start_movie(3, 0, false);
     }
 
     ~Game()
@@ -220,6 +223,40 @@ public:
                 }
                 SDL_ConvertEventToRenderCoordinates(renderer_, &event);
                 imgui_->process_event(event);
+                if (movie_) {
+                    const bool skip_key = event.type == SDL_EVENT_KEY_DOWN
+                        && (event.key.key == SDLK_ESCAPE
+                            || event.key.key == SDLK_SPACE
+                            || event.key.key == SDLK_RETURN);
+                    const bool skip_mouse = event.type
+                        == SDL_EVENT_MOUSE_BUTTON_DOWN;
+                    const bool locked = (movie_mode_ == 0
+                            && runtime_.game_flag(98) == 0)
+                        || (movie_mode_ == 1
+                            && runtime_.game_flag(80) == 0)
+                        || (movie_mode_ == 2
+                            && runtime_.game_flag(99) == 0);
+                    if ((skip_key || skip_mouse) && !locked) {
+                        const int skipped_mode = movie_mode_;
+                        movie_.reset();
+                        movie_bytes_.clear();
+                        movie_mode_ = -1;
+                        if (skipped_mode != 3) {
+                            bgm_.stop();
+                            bgm_track_ = -1;
+                        }
+                        if (movie_resume_script_) {
+                            movie_resume_script_ = false;
+                            advance();
+                        } else if (skipped_mode == 3
+                                   && runtime_.game_flag(98) != 0) {
+                            start_movie(0, 0, false);
+                        } else {
+                            title_started_ = std::chrono::steady_clock::now();
+                        }
+                    }
+                    continue;
+                }
                 if (config_open_ || name_input_open_) {
                     if (event.type == SDL_EVENT_KEY_DOWN
                         && event.key.key == SDLK_ESCAPE && config_open_) {
@@ -356,6 +393,7 @@ public:
                 advance();
             }
             update_audio();
+            update_movie();
             update_playback_modes();
             update_title();
             imgui_->new_frame();
@@ -423,6 +461,7 @@ private:
     th2::Archive bgm_archive_;
     th2::Archive se_archive_;
     th2::Archive voice_archive_;
+    th2::Archive movie_archive_;
     th2::ScriptRuntime runtime_;
     th2::GameFont font_;
     const std::filesystem::path config_path_{"toheart2-config.ini"};
@@ -453,6 +492,10 @@ private:
     std::array<int, 8> voice_scenario_{};  // scenario for voice filename
     std::array<int, 8> voice_volume_{};
     std::array<bool, 8> voice_loop_{};
+    std::vector<std::uint8_t> movie_bytes_;
+    std::unique_ptr<th2::VideoPlayer> movie_;
+    bool movie_resume_script_ = false;
+    int movie_mode_ = -1;
 
     float bgm_gain(int volume) const
     {
@@ -509,6 +552,72 @@ private:
         for (std::size_t i = 0; i < voice_channels_.size(); ++i) {
             voice_channels_[i].set_gain(
                 voice_gain(voice_volume_[i], voice_character_[i]));
+        }
+    }
+
+    void start_movie(int mode, int number, bool resume_script)
+    {
+        std::string name;
+        SDL_FRect destination{0.0f, 0.0f, 800.0f, 600.0f};
+        switch (mode) {
+        case 0:
+            name = "TH2_OP_800x448_5M.avi";
+            destination = {0.0f, 76.0f, 800.0f, 448.0f};
+            break;
+        case 1:
+            name = std::format("TH2_ED_{:02d}_800_3M.avi", number);
+            break;
+        case 2:
+            name = "TH2_TR_800x600_5M.avi";
+            break;
+        case 3:
+            name = "Leaf_800x600_5M.avi";
+            break;
+        default:
+            throw std::runtime_error("unsupported movie mode");
+        }
+        const auto* entry = movie_archive_.find(name);
+        if (!entry) {
+            throw std::runtime_error("movie not found: " + name);
+        }
+        movie_bytes_ = movie_archive_.read(*entry);
+        movie_ = std::make_unique<th2::VideoPlayer>(
+            renderer_, movie_bytes_, destination);
+        movie_resume_script_ = resume_script;
+        movie_mode_ = mode;
+        if (mode == 0) {
+            play_bgm(0, false, 255);
+        } else if (mode == 1) {
+            play_bgm(50, false, 255);
+        } else if (mode == 2) {
+            play_bgm(99, false, 255);
+        }
+    }
+
+    void update_movie()
+    {
+        if (!movie_) {
+            return;
+        }
+        movie_->update();
+        if (!movie_->finished()) {
+            return;
+        }
+        const int completed_mode = movie_mode_;
+        movie_.reset();
+        movie_bytes_.clear();
+        movie_mode_ = -1;
+        if (completed_mode != 3) {
+            bgm_.stop();
+            bgm_track_ = -1;
+        }
+        if (movie_resume_script_) {
+            movie_resume_script_ = false;
+            advance();
+        } else if (completed_mode == 3 && runtime_.game_flag(98) != 0) {
+            start_movie(0, 0, false);
+        } else {
+            title_started_ = std::chrono::steady_clock::now();
         }
     }
 
@@ -1261,6 +1370,8 @@ private:
             const int frames = std::max<std::int32_t>(0, number(event, 0));
             wake_time_ = std::chrono::steady_clock::now()
                 + std::chrono::milliseconds(frames * 1000 / 60);
+        } else if (name == "SetMovie") {
+            start_movie(number(event, 0), 0, true);
         } else if (name == "BD") {
             background_.reset();
             bg_scene_ = -1;
@@ -1428,7 +1539,8 @@ private:
 
     void advance(bool skipping = false)
     {
-        if (wake_time_ || audio_wait_ || transition_ || background_fade_) {
+        if (wake_time_ || audio_wait_ || transition_ || background_fade_
+            || movie_) {
             return;
         }
         if (waiting_for_input_) {
@@ -2538,6 +2650,11 @@ private:
         }
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
         SDL_RenderClear(renderer_);
+        if (movie_) {
+            movie_->draw();
+            SDL_RenderPresent(renderer_);
+            return;
+        }
         if (title_background_) {
             SDL_SetTextureColorModFloat(
                 title_background_.get(), brightness, brightness, brightness);

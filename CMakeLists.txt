@@ -10,6 +10,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(SDL3 CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
+pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
+    libavformat libavcodec libavutil libswscale libswresample)
 
 add_library(th2_archive
     native/archive.cpp
@@ -145,9 +147,11 @@ add_executable(toheart2
     native/image.cpp
     native/imgui_layer.cpp
     native/message.cpp
+    native/video.cpp
 )
 target_link_libraries(toheart2 PRIVATE SDL3::SDL3 th2_runtime)
 target_link_libraries(toheart2 PRIVATE th2_audio th2_character th2_config imgui)
+target_link_libraries(toheart2 PRIVATE PkgConfig::FFMPEG)
 
 if(BUILD_TESTING)
     add_executable(th2-character-test
