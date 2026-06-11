@@ -20,5 +20,12 @@ int main()
         || !loaded.read_lines.contains("010301000.sdt:42")) {
         return 1;
     }
+    if (th2::auto_delay_ms(loaded, false, true, true)
+            != loaded.auto_line_ms
+        || th2::auto_delay_ms(loaded, false, false, true)
+            != loaded.auto_page_ms
+        || th2::auto_delay_ms(loaded, true, false, true) != 40) {
+        return 2;
+    }
     return 0;
 }

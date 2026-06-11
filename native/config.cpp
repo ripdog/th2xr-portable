@@ -97,4 +97,14 @@ void save_config(const std::filesystem::path& path, const GameConfig& config)
     }
 }
 
+int auto_delay_ms(const GameConfig& config, bool text_is_read,
+                  bool has_hidden_segments, bool message_ends_block)
+{
+    if (config.auto_skip_read && text_is_read) {
+        return 40;
+    }
+    return !has_hidden_segments && message_ends_block
+        ? config.auto_page_ms : config.auto_line_ms;
+}
+
 }  // namespace th2

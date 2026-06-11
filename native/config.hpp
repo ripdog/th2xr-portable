@@ -25,5 +25,7 @@ struct GameConfig {
 
 GameConfig load_config(const std::filesystem::path& path);
 void save_config(const std::filesystem::path& path, const GameConfig& config);
+int auto_delay_ms(const GameConfig& config, bool text_is_read,
+                  bool has_hidden_segments, bool message_ends_block);
 
 }  // namespace th2

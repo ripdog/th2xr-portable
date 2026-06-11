@@ -621,10 +621,9 @@ private:
             return;
         }
         if (!auto_next_time_) {
-            const int delay = config_.auto_skip_read && current_text_is_read()
-                ? 40
-                : (message_ends_block_
-                    ? config_.auto_page_ms : config_.auto_line_ms);
+            const int delay = th2::auto_delay_ms(
+                config_, current_text_is_read(),
+                message_.has_hidden_segments(), message_ends_block_);
             auto_next_time_ = now + std::chrono::milliseconds(delay);
         } else if (now >= *auto_next_time_) {
             auto_next_time_.reset();
