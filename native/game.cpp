@@ -425,7 +425,6 @@ private:
     bool bg_is_visual_ = false;
     std::array<Texture, 32> overlays_{};
     std::array<int, 32> overlay_layers_{};
-    std::array<bool, 32> overlay_is_transition_mask_{};
     th2::Characters characters_;
     std::array<CharacterTexture, 32> character_textures_{};
     th2::AudioChannel bgm_;
@@ -918,8 +917,7 @@ private:
             static_cast<const std::uint8_t*>(transition.previous_pixels->pixels);
         const auto* next =
             static_cast<const std::uint8_t*>(transition.next_pixels->pixels);
-        const int vague = transition.type == 178
-            ? 1 : std::clamp(transition.vague, 1, 256);
+        const int vague = std::clamp(transition.vague, 1, 256);
         const int blend_offset = static_cast<int>(
             progress * static_cast<float>(256 + vague));
 
@@ -941,10 +939,8 @@ private:
                 const auto output_offset =
                     (static_cast<std::size_t>(y) * width + x) * 4;
                 for (int channel = 0; channel < 3; ++channel) {
-                    const int previous_value = transition.type == 178
-                        ? 0 : previous[previous_offset + channel];
                     pixels[output_offset + channel] = static_cast<std::uint8_t>(
-                        (previous_value * (255 - alpha)
+                        (previous[previous_offset + channel] * (255 - alpha)
                          + next[source_offset + channel] * alpha)
                         / 255);
                 }
@@ -1270,22 +1266,15 @@ private:
                 const auto& archive = text(event, 6) == "bak" ? backgrounds_ : graphics_;
                 overlays_[slot] = load_texture(renderer_, archive, text(event, 2));
                 overlay_layers_[slot] = number(event, 3);
-                const auto filename = text(event, 2);
-                overlay_is_transition_mask_[slot] =
-                    filename.size() == 9
-                    && (filename[0] == 'f' || filename[0] == 'F')
-                    && filename[1] == '0';
             }
         } else if (name == "ResetBmp") {
             const auto slot = static_cast<std::size_t>(number(event, 0));
             if (slot < overlays_.size()) {
                 overlays_[slot].reset();
-                overlay_is_transition_mask_[slot] = false;
             }
         } else if (name == "ResetBmpAll") {
-            for (std::size_t i = 0; i < overlays_.size(); ++i) {
-                overlays_[i].reset();
-                overlay_is_transition_mask_[i] = false;
+            for (auto& overlay : overlays_) {
+                overlay.reset();
             }
         } else if (name == "C" || name == "CW" || name == "SetChar") {
             set_character(event);
@@ -3246,13 +3235,16 @@ private:
             }
         }
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
-            if (overlays_[i] && overlay_layers_[i] <= 0
-                && !overlay_is_transition_mask_[i]) {
+            if (overlays_[i] && overlay_layers_[i] <= 0) {
                 SDL_RenderTexture(renderer_, overlays_[i].get(), nullptr, nullptr);
             }
         }
         if (background_) {
             SDL_RenderTexture(renderer_, background_.get(), nullptr, nullptr);
+        } else if (bg_scene_ == 0) {
+            SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+            const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
+            SDL_RenderFillRect(renderer_, &game_area);
         }
         for (const auto& character : characters_.ordered()) {
             auto& loaded = character_texture(character.number);
@@ -3272,8 +3264,7 @@ private:
             SDL_RenderTexture(renderer_, loaded.texture.get(), nullptr, &destination);
         }
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
-            if (overlays_[i] && overlay_layers_[i] > 0
-                && !overlay_is_transition_mask_[i]) {
+            if (overlays_[i] && overlay_layers_[i] > 0) {
                 SDL_RenderTexture(renderer_, overlays_[i].get(), nullptr, nullptr);
             }
         }
