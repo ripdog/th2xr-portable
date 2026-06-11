@@ -23,7 +23,6 @@
 #include <exception>
 #include <fstream>
 #include <filesystem>
-#include <filesystem>
 #include <format>
 #include <iostream>
 #include <limits>
@@ -395,6 +394,9 @@ private:
         std::chrono::milliseconds duration;
         int type = 1;
         bool resume_script = false;
+        std::uint64_t debug_id = 0;
+        int last_dumped_frame = -1;
+        bool debug_metadata_written = false;
     };
 
     struct BackgroundFade {
@@ -539,6 +541,7 @@ private:
     std::chrono::steady_clock::time_point skip_next_time_{};
     std::optional<std::chrono::steady_clock::time_point> auto_next_time_;
     std::string current_line_key_;
+    std::uint64_t next_transition_debug_id_ = 1;
 
     th2::AudioChannel& waited_audio_channel()
     {
@@ -859,6 +862,9 @@ private:
             std::chrono::milliseconds(effective_frames * 1000 / 60),
             type,
             resume_script,
+            next_transition_debug_id_++,
+            -1,
+            false,
         };
         if (type >= 0x80) {
             transition.mask = load_transition_mask(
@@ -947,6 +953,57 @@ private:
         }
         SDL_RenderTexture(
             renderer_, transition.composite.get(), nullptr, nullptr);
+    }
+
+    void dump_transition_frame(float progress)
+    {
+        if (!config_.dump_transition_frames || !transition_) {
+            return;
+        }
+        const int frame_count = std::max(
+            1, static_cast<int>(transition_->duration.count() * 60 / 1000));
+        const int frame = std::clamp(
+            static_cast<int>(progress * frame_count), 0, frame_count);
+        if (frame == transition_->last_dumped_frame) {
+            return;
+        }
+        transition_->last_dumped_frame = frame;
+
+        const auto directory = std::filesystem::path("debug/transitions")
+            / std::format("{:06}_{}_{}", transition_->debug_id,
+                          runtime_.script_name(), runtime_.vm_pc());
+        std::filesystem::create_directories(directory);
+        auto surface = capture_frame_pixels();
+        const auto path = directory / std::format("frame_{:04}.bmp", frame);
+        if (!SDL_SaveBMP(surface.get(), path.string().c_str())) {
+            std::cerr << "transition dump: " << SDL_GetError() << '\n';
+        }
+        if (!transition_->debug_metadata_written) {
+            transition_->debug_metadata_written = true;
+            std::ofstream metadata(directory / "transition.txt");
+            metadata << "script=" << runtime_.script_name() << '\n'
+                     << "vm_pc=" << runtime_.vm_pc() << '\n'
+                     << "type=" << transition_->type << '\n'
+                     << "vague=" << transition_->vague << '\n'
+                     << "duration_ms=" << transition_->duration.count() << '\n'
+                     << "mask_width=" << transition_->mask_width << '\n'
+                     << "mask_height=" << transition_->mask_height << '\n';
+        }
+    }
+
+    void draw_script_position()
+    {
+        if (!config_.show_script_position || ui_mode_ != UiMode::game) {
+            return;
+        }
+        const auto position = std::format(
+            "{}:{}  line={}", runtime_.script_name(), runtime_.vm_pc(),
+            current_line_key_.empty() ? "-" : current_line_key_);
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 190);
+        const SDL_FRect background{8.0f, 8.0f, 760.0f, 25.0f};
+        SDL_RenderFillRect(renderer_, &background);
+        font_.draw(renderer_, 12.0f, 10.0f, position, 255, 190, 80);
     }
 
     void begin_background_fade(float target, int frames)
@@ -2227,6 +2284,15 @@ private:
                     ImGui::Checkbox(
                         "Mouse wheel opens backlog",
                         &config_.wheel_opens_backlog);
+                    ImGui::SeparatorText("Debug");
+                    ImGui::Checkbox(
+                        "Show script position",
+                        &config_.show_script_position);
+                    ImGui::Checkbox(
+                        "Dump transition frames",
+                        &config_.dump_transition_frames);
+                    ImGui::TextDisabled(
+                        "Dumps are written to debug/transitions/");
                     ImGui::EndTabItem();
                 }
                 ImGui::EndTabBar();
@@ -3313,7 +3379,9 @@ private:
                 SDL_RenderTexture(
                     renderer_, transition_->previous.get(), nullptr, nullptr);
             }
+            dump_transition_frame(progress);
         }
+        draw_script_position();
         imgui_->render();
         SDL_RenderPresent(renderer_);
     }

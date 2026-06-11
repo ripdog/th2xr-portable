@@ -66,6 +66,10 @@ GameConfig load_config(const std::filesystem::path& path)
             config.wheel_opens_backlog = parse_bool(value);
         } else if (key == "fullscreen") {
             config.fullscreen = parse_bool(value);
+        } else if (key == "show_script_position") {
+            config.show_script_position = parse_bool(value);
+        } else if (key == "dump_transition_frames") {
+            config.dump_transition_frames = parse_bool(value);
         } else if (key == "name_family") {
             config.player_name.family = value;
         } else if (key == "name_given") {
@@ -116,6 +120,8 @@ void save_config(const std::filesystem::path& path, const GameConfig& config)
            << "skip_unread=" << config.skip_unread << '\n'
            << "wheel_opens_backlog=" << config.wheel_opens_backlog << '\n'
            << "fullscreen=" << config.fullscreen << '\n'
+           << "show_script_position=" << config.show_script_position << '\n'
+           << "dump_transition_frames=" << config.dump_transition_frames << '\n'
            << "name_family=" << config.player_name.family << '\n'
            << "name_given=" << config.player_name.given << '\n'
            << "name_family_reading=" << config.player_name.family_reading << '\n'

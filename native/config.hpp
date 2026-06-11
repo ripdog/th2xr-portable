@@ -26,6 +26,8 @@ struct GameConfig {
     bool skip_unread = false;
     bool wheel_opens_backlog = true;
     bool fullscreen = false;
+    bool show_script_position = false;
+    bool dump_transition_frames = false;
     PlayerName player_name;
     std::unordered_set<std::string> read_lines;
 };
