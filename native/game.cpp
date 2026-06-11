@@ -28,6 +28,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -212,7 +213,7 @@ public:
     int run()
     {
         constexpr auto frame_duration = std::chrono::nanoseconds(
-            1'000'000'000 / 60);
+            1'000'000'000 / 120);
         auto next_frame = std::chrono::steady_clock::now();
         while (running_) {
             SDL_Event event;
@@ -438,10 +439,10 @@ private:
         int mask_width = 0;
         int mask_height = 0;
         int vague = 128;
-        int frame = 0;
         int frames = 1;
         int type = 1;
         bool resume_script = false;
+        std::chrono::steady_clock::time_point started;
         std::uint64_t debug_id = 0;
         int last_dumped_frame = -1;
         bool debug_metadata_written = false;
@@ -838,7 +839,11 @@ private:
         }
         if (transition_) {
             if (force_unread) {
-                transition_->frame = transition_->frames;
+                transition_->started = std::chrono::steady_clock::now()
+                    - std::chrono::duration_cast<
+                        std::chrono::steady_clock::duration>(
+                        std::chrono::duration<double>(
+                            transition_->frames / 60.0));
             }
             return;
         }
@@ -977,10 +982,10 @@ private:
             0,
             0,
             vague >= 0 ? vague : 128,
-            0,
             effective_frames,
             type,
             resume_script,
+            std::chrono::steady_clock::now(),
             next_transition_debug_id_++,
             -1,
             false,
@@ -997,8 +1002,11 @@ private:
         if (!transition_) {
             return;
         }
-        ++transition_->frame;
-        if (transition_->frame < transition_->frames) {
+        const auto elapsed = std::chrono::steady_clock::now()
+            - transition_->started;
+        const auto duration = std::chrono::duration<double>(
+            static_cast<double>(transition_->frames) / 60.0);
+        if (elapsed < duration) {
             return;
         }
         const bool resume_script = transition_->resume_script;
@@ -1071,6 +1079,285 @@ private:
         }
         SDL_RenderTexture(
             renderer_, transition.composite.get(), nullptr, nullptr);
+    }
+
+    void ensure_transition_target()
+    {
+        auto& transition = *transition_;
+        if (transition.next_pixels) {
+            return;
+        }
+        transition.next_pixels = capture_frame_pixels();
+        if (transition.next_pixels->w != transition.previous_pixels->w
+            || transition.next_pixels->h != transition.previous_pixels->h) {
+            throw std::runtime_error("transition frame size changed");
+        }
+        transition.composite.reset(SDL_CreateTexture(
+            renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
+            transition.next_pixels->w, transition.next_pixels->h));
+        if (!transition.composite) {
+            throw std::runtime_error(SDL_GetError());
+        }
+    }
+
+    void draw_pixel_transition(float progress)
+    {
+        ensure_transition_target();
+        auto& transition = *transition_;
+        const int width = transition.next_pixels->w;
+        const int height = transition.next_pixels->h;
+        const int rate = std::clamp(static_cast<int>(progress * 256.0f), 0, 256);
+        std::vector<std::uint8_t> pixels(
+            static_cast<std::size_t>(width) * height * 4);
+        const auto* previous =
+            static_cast<const std::uint8_t*>(transition.previous_pixels->pixels);
+        const auto* next =
+            static_cast<const std::uint8_t*>(transition.next_pixels->pixels);
+
+        auto source_alpha = [&](int x, int y) {
+            switch (transition.type) {
+            case 2: {
+                const int edge = (height + 255) * (256 - rate) / 256;
+                return std::clamp((y - edge + 255) * 256 / 255, 0, 256);
+            }
+            case 3: {
+                const int edge = (height + 255) * rate / 256;
+                return std::clamp((edge - y) * 256 / 255, 0, 256);
+            }
+            case 4: {
+                const int edge = (width + 255) * (256 - rate) / 256;
+                return std::clamp((x - edge + 255) * 256 / 255, 0, 256);
+            }
+            case 5: {
+                const int edge = (width + 255) * rate / 256;
+                return std::clamp((edge - x) * 256 / 255, 0, 256);
+            }
+            case 6: {
+                const int edge = (width / 2 + 127) * (256 - rate) / 256;
+                return std::clamp(
+                    (width / 2 - std::abs(x - width / 2) - edge + 127)
+                        * 256 / 127,
+                    0, 256);
+            }
+            case 7: {
+                const int edge = (width / 2 + 127) * rate / 256;
+                return std::clamp(
+                    (std::abs(x - width / 2) - width / 2 + edge)
+                        * 256 / 127,
+                    0, 256);
+            }
+            case 8:
+            case 9:
+            case 10: {
+                const int shift = transition.type - 8;
+                const int mask = 0x3f >> shift;
+                const int half = 32 >> shift;
+                const int extent = (96 >> shift) * rate / 256 - half;
+                const bool inside = std::abs((x & mask) - half)
+                    < std::abs((y & mask) - half) + extent;
+                return inside ? 16 + rate * rate / 512 : 0;
+            }
+            case 21: {
+                std::uint32_t value = static_cast<std::uint32_t>(
+                    x + y * width + transition.debug_id * 0x9e3779b9U);
+                value ^= value >> 16;
+                value *= 0x7feb352dU;
+                value ^= value >> 15;
+                return static_cast<int>(value & 0xff) < rate ? 256 : 0;
+            }
+            default:
+                return rate;
+            }
+        };
+
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const int alpha = source_alpha(x, y);
+                const auto old_offset =
+                    static_cast<std::size_t>(y) * transition.previous_pixels->pitch
+                    + static_cast<std::size_t>(x) * 4;
+                const auto new_offset =
+                    static_cast<std::size_t>(y) * transition.next_pixels->pitch
+                    + static_cast<std::size_t>(x) * 4;
+                const auto output_offset =
+                    (static_cast<std::size_t>(y) * width + x) * 4;
+                for (int channel = 0; channel < 3; ++channel) {
+                    pixels[output_offset + channel] =
+                        static_cast<std::uint8_t>(
+                            (previous[old_offset + channel] * (256 - alpha)
+                             + next[new_offset + channel] * alpha)
+                            / 256);
+                }
+                pixels[output_offset + 3] = 255;
+            }
+        }
+        if (!SDL_UpdateTexture(
+                transition.composite.get(), nullptr, pixels.data(), width * 4)) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        SDL_RenderTexture(
+            renderer_, transition.composite.get(), nullptr, nullptr);
+    }
+
+    void draw_geometric_transition(float progress)
+    {
+        ensure_transition_target();
+        auto& transition = *transition_;
+        if (!SDL_UpdateTexture(
+                transition.composite.get(), nullptr,
+                transition.next_pixels->pixels,
+                transition.next_pixels->pitch)) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        const int rate = std::clamp(static_cast<int>(progress * 256.0f), 0, 256);
+        auto draw_old = [&](SDL_FRect destination, float alpha = 1.0f) {
+            SDL_SetTextureAlphaModFloat(transition.previous.get(), alpha);
+            SDL_RenderTexture(
+                renderer_, transition.previous.get(), nullptr, &destination);
+        };
+        const SDL_FRect full{0.0f, 0.0f, 800.0f, 600.0f};
+
+        switch (transition.type) {
+        case 11: {
+            int zoom = 256 - rate * rate / 256;
+            const float scale = (zoom + 256.0f) / 256.0f;
+            SDL_FRect rectangle{
+                400.0f - 400.0f * scale, 300.0f - 300.0f * scale,
+                800.0f * scale, 600.0f * scale};
+            SDL_RenderTexture(renderer_, transition.previous.get(), nullptr, nullptr);
+            SDL_SetTextureAlphaModFloat(
+                transition.composite.get(), (128.0f - zoom / 2.0f) / 128.0f);
+            SDL_RenderTexture(
+                renderer_, transition.composite.get(), nullptr, &rectangle);
+            break;
+        }
+        case 12: {
+            const int inverse = 256 - rate;
+            const int eased = 256 - inverse * inverse / 256;
+            const float scale = (eased * 2.0f + 256.0f) / 256.0f;
+            SDL_FRect rectangle{
+                400.0f - 400.0f * scale, 300.0f - 300.0f * scale,
+                800.0f * scale, 600.0f * scale};
+            draw_old(rectangle);
+            SDL_SetTextureAlphaModFloat(
+                transition.composite.get(), eased / 256.0f);
+            SDL_RenderTexture(
+                renderer_, transition.composite.get(), nullptr, nullptr);
+            break;
+        }
+        case 13: {
+            const int inverse = 256 - rate;
+            const int eased = inverse * inverse / 256;
+            const float scale = 0.5f + eased / 512.0f;
+            SDL_FRect rectangle{
+                400.0f - 400.0f * scale, 300.0f - 300.0f * scale,
+                800.0f * scale, 600.0f * scale};
+            draw_old(rectangle, eased / 256.0f);
+            break;
+        }
+        case 14: {
+            const int inverse = 256 - rate;
+            const int zoom = -(inverse * inverse / 256) / 2;
+            const float scale = (zoom + 256.0f) / 256.0f;
+            SDL_FRect rectangle{
+                400.0f - 400.0f * scale, 300.0f - 300.0f * scale,
+                800.0f * scale, 600.0f * scale};
+            SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+            SDL_RenderClear(renderer_);
+            SDL_SetTextureAlphaModFloat(
+                transition.composite.get(), (32.0f - inverse / 8.0f) / 32.0f);
+            SDL_RenderTexture(
+                renderer_, transition.composite.get(), nullptr, &rectangle);
+            break;
+        }
+        case 15: {
+            const float x = 800.0f * rate / 256.0f;
+            SDL_FRect left{-x, 0.0f, 800.0f, 600.0f};
+            SDL_FRect right{x, 0.0f, 800.0f, 600.0f};
+            draw_old(left, 0.5f);
+            draw_old(right, 0.5f);
+            break;
+        }
+        case 16:
+        case 17:
+        case 18:
+        case 19: {
+            const int inverse = 256 - rate;
+            const float x = 800.0f
+                - 800.0f * inverse * inverse / (256.0f * 256.0f);
+            const float y = 600.0f
+                - 600.0f * inverse * inverse / (256.0f * 256.0f);
+            SDL_FRect rectangle = full;
+            if (transition.type == 16) rectangle.y = y;
+            if (transition.type == 17) rectangle.y = -y;
+            if (transition.type == 18) rectangle.x = -x;
+            if (transition.type == 19) rectangle.x = x;
+            draw_old(rectangle, 1.0f - rate / 256.0f);
+            break;
+        }
+        case 20: {
+            const int amplitude = std::min(255, rate);
+            for (int y = 0; y < 600; ++y) {
+                const float offset = amplitude
+                    * std::sin((y * 480.0f / 600.0f + rate * 2.0f)
+                               * std::numbers::pi_v<float> / 128.0f)
+                    / 10.0f;
+                const SDL_FRect source{
+                    std::max(0.0f, offset), static_cast<float>(y),
+                    800.0f - std::abs(offset), 1.0f};
+                SDL_FRect destination{
+                    std::max(0.0f, -offset), static_cast<float>(y),
+                    source.w, 1.0f};
+                SDL_RenderTexture(
+                    renderer_, transition.previous.get(), &source, &destination);
+            }
+            break;
+        }
+        case 22: {
+            for (int y = 0; y < 600; ++y) {
+                const float offset = rate
+                    * std::sin((y + rate * 2.0f)
+                               * std::numbers::pi_v<float> / 128.0f)
+                    / 10.0f;
+                const SDL_FRect source{
+                    0.0f, static_cast<float>(
+                        std::clamp(y + static_cast<int>(offset), 0, 599)),
+                    800.0f, 1.0f};
+                const SDL_FRect destination{
+                    0.0f, static_cast<float>(y), 800.0f, 1.0f};
+                SDL_SetTextureAlphaModFloat(
+                    transition.previous.get(), 32.0f / 256.0f);
+                SDL_RenderTexture(
+                    renderer_, transition.previous.get(), &source, &destination);
+            }
+            break;
+        }
+        case 23: {
+            int tv = 150 - 150 * rate / 256;
+            tv = 150 - tv * tv * tv / (150 * 150);
+            const float h = std::max(0.0f, 600.0f - 600.0f * tv / 120.0f);
+            SDL_FRect rectangle{0.0f, (600.0f - h) / 2.0f, 800.0f, h};
+            draw_old(rectangle);
+            break;
+        }
+        case 24: {
+            const float roll = 128.0f * rate / 256.0f;
+            const float angle = roll * 360.0f / 256.0f;
+            const float scale = (roll + 256.0f) / 256.0f;
+            SDL_FRect rectangle{
+                400.0f - 400.0f * scale, 300.0f - 300.0f * scale,
+                800.0f * scale, 600.0f * scale};
+            SDL_SetTextureAlphaModFloat(
+                transition.previous.get(),
+                std::clamp((128.0f - roll) / 128.0f, 0.0f, 1.0f));
+            SDL_RenderTextureRotated(
+                renderer_, transition.previous.get(), nullptr, &rectangle,
+                angle, nullptr, SDL_FLIP_NONE);
+            break;
+        }
+        default:
+            break;
+        }
     }
 
     void dump_transition_frame(float progress)
@@ -3451,15 +3738,12 @@ private:
             draw_sidebar();
         }
         if (transition_) {
+            const auto elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - transition_->started);
             const float progress = std::clamp(
-                static_cast<float>(transition_->frame + 1)
-                    / transition_->frames,
+                static_cast<float>(
+                    elapsed.count() * 60.0 / transition_->frames),
                 0.0f, 1.0f);
-            auto draw_previous = [&](const SDL_FRect& rectangle) {
-                SDL_RenderTexture(
-                    renderer_, transition_->previous.get(),
-                    &rectangle, &rectangle);
-            };
             if (transition_->type >= 0x80) {
                 draw_pattern_transition(progress);
             } else if (transition_->type == 0) {
@@ -3477,29 +3761,12 @@ private:
                     static_cast<Uint8>(
                         std::clamp(midpoint, 0.0f, 1.0f) * 255.0f));
                 SDL_RenderFillRect(renderer_, nullptr);
-            } else if (transition_->type >= 2 && transition_->type <= 7) {
-                SDL_SetTextureAlphaModFloat(transition_->previous.get(), 1.0f);
-                const float width = 800.0f;
-                const float height = 600.0f;
-                if (transition_->type == 2) {
-                    draw_previous({0.0f, 0.0f, width, height * (1.0f - progress)});
-                } else if (transition_->type == 3) {
-                    const float y = height * progress;
-                    draw_previous({0.0f, y, width, height - y});
-                } else if (transition_->type == 4) {
-                    const float x = width * progress;
-                    draw_previous({x, 0.0f, width - x, height});
-                } else if (transition_->type == 5) {
-                    draw_previous({0.0f, 0.0f, width * (1.0f - progress), height});
-                } else if (transition_->type == 6) {
-                    const float side = width * (1.0f - progress) / 2.0f;
-                    draw_previous({0.0f, 0.0f, side, height});
-                    draw_previous({width - side, 0.0f, side, height});
-                } else {
-                    const float middle = width * (1.0f - progress);
-                    const float x = (width - middle) / 2.0f;
-                    draw_previous({x, 0.0f, middle, height});
-                }
+            } else if ((transition_->type >= 2 && transition_->type <= 10)
+                       || transition_->type == 21) {
+                draw_pixel_transition(progress);
+            } else if (transition_->type >= 11
+                       && transition_->type <= 24) {
+                draw_geometric_transition(progress);
             } else {
                 SDL_SetTextureAlphaModFloat(
                     transition_->previous.get(), 1.0f - progress);
