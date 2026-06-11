@@ -19,6 +19,9 @@ std::vector<std::string> split_segments(std::string_view source)
         }
         segments.back().push_back(source[position++]);
     }
+    if (segments.size() > 1 && segments.back().empty()) {
+        segments.pop_back();
+    }
     return segments;
 }
 

@@ -38,4 +38,11 @@ int main()
         || message.visible() != "firstsecond") {
         return 6;
     }
+
+    message.set("single checkpoint\\k");
+    if (message.visible() != "single checkpoint"
+        || message.has_hidden_segments()
+        || message.reveal_next()) {
+        return 7;
+    }
 }
