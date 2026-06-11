@@ -2277,7 +2277,13 @@ private:
     void handle_save_load_input(const SDL_Event& event)
     {
         if (event.type == SDL_EVENT_MOUSE_MOTION) {
-            save_hover_ = save_load_hit(event.motion.x, event.motion.y);
+            const int hovered = save_load_hit(event.motion.x, event.motion.y);
+            if (hovered != save_hover_) {
+                save_hover_ = hovered;
+                if (save_hover_ >= 0) {
+                    play_se(-1, 9108, false, 255);
+                }
+            }
         } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
             if (event.button.button == SDL_BUTTON_RIGHT) {
                 if (save_confirm_slot_ >= 0) {
@@ -2314,6 +2320,7 @@ private:
         const int dst_w[5] = {400, 400, 400, 400, 188};
         const int dst_h[5] = {82, 82, 82, 82, 32};
 
+        const int previous_highlight = menu_highlight_;
         if (event.type == SDL_EVENT_KEY_DOWN) {
             if (event.key.key == SDLK_ESCAPE) {
                 close_system_menu();
@@ -2349,6 +2356,9 @@ private:
                     break;
                 }
             }
+        }
+        if (menu_highlight_ != previous_highlight) {
+            play_se(-1, 9108, false, 255);
         }
     }
 
@@ -2426,6 +2436,7 @@ private:
 
     void update_sidebar_hover(float x, float y)
     {
+        const int previous_hover = sidebar_hover_;
         sidebar_hover_ = -1;
         if (x < 776.0f || x >= 798.0f) {
             return;
@@ -2439,6 +2450,9 @@ private:
         for (int i = 0; i < static_cast<int>(button_y.size()); ++i) {
             if (y >= button_y[i] && y < button_y[i] + button_h[i]) {
                 sidebar_hover_ = i;
+                if (sidebar_hover_ != previous_hover) {
+                    play_se(-1, 9108, false, 255);
+                }
                 return;
             }
         }
