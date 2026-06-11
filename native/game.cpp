@@ -255,7 +255,7 @@ public:
                         if (event.key.key == SDLK_RETURN
                             || event.key.key == SDLK_SPACE) {
                             choice_selected_ = choice_highlight_;
-                            advance();
+                            manual_advance();
                         } else if (event.key.key == SDLK_UP) {
                             if (choice_highlight_ > 0) {
                                 --choice_highlight_;
@@ -284,7 +284,7 @@ public:
                             th2::save_config(config_path_, config_);
                         } else if (event.key.key == SDLK_RETURN
                                    || event.key.key == SDLK_SPACE) {
-                            advance();
+                            manual_advance();
                         }
                     }
                 } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
@@ -300,13 +300,13 @@ public:
                                  i < static_cast<int>(choices_.size()); ++i) {
                                 if (mouse_y >= y && mouse_y < y + 31.0f) {
                                     choice_selected_ = i;
-                                    advance();
+                                    manual_advance();
                                     break;
                                 }
                                 y += 31.0f;
                             }
                         } else {
-                            advance();
+                            manual_advance();
                         }
                     }
                 } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
@@ -314,7 +314,7 @@ public:
                         && config_.wheel_opens_backlog) {
                         open_backlog();
                     } else if (event.wheel.y < 0) {
-                        advance();
+                        manual_advance();
                     }
                 } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
                     update_sidebar_hover(event.motion.x, event.motion.y);
@@ -581,6 +581,14 @@ private:
         if (!key.empty() && config_.read_lines.insert(key).second) {
             th2::save_config(config_path_, config_);
         }
+    }
+
+    void manual_advance()
+    {
+        auto_mode_ = false;
+        skip_mode_ = false;
+        auto_next_time_.reset();
+        advance();
     }
 
     bool voice_playing() const
