@@ -103,13 +103,17 @@ std::vector<std::string> display_lines(std::string_view source)
     std::string line;
     bool just_wrapped = false;
     for (std::size_t position = 0; position < source.size();) {
-        if (source[position] == '\n') {
+        const bool escaped_newline =
+            source[position] == '\\'
+            && position + 1 < source.size()
+            && source[position + 1] == 'n';
+        if (source[position] == '\n' || escaped_newline) {
             if (!line.empty() || !just_wrapped) {
                 lines.push_back(line);
             }
             line.clear();
             just_wrapped = false;
-            ++position;
+            position += escaped_newline ? 2 : 1;
             continue;
         }
         line.push_back(source[position++]);
