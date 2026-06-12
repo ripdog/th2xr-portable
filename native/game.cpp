@@ -517,6 +517,13 @@ private:
         std::chrono::milliseconds duration;
     };
 
+    struct ScriptContinuation {
+        std::string script_name;
+        std::size_t pc = 0;
+        std::array<std::int32_t, 50> registers{};
+        std::vector<std::int32_t> stack;
+    };
+
     th2::Archive scripts_;
     th2::Archive graphics_;
     th2::Archive backgrounds_;
@@ -783,6 +790,7 @@ private:
     bool auto_mode_ = false;
     bool skip_mode_ = false;
     bool section_ending_ = false;
+    std::optional<ScriptContinuation> choice_continuation_;
 
     std::string current_read_key() const
     {
@@ -1921,6 +1929,13 @@ private:
             choice_highlight_ = 0;
             choice_selected_ = -1;
         } else if (name == "SetSelectEx") {
+            ScriptContinuation continuation{
+                runtime_.script_name(), runtime_.vm_pc()};
+            std::ranges::copy(
+                runtime_.vm_registers(), continuation.registers.begin());
+            continuation.stack.assign(
+                runtime_.vm_stack().begin(), runtime_.vm_stack().end());
+            choice_continuation_ = std::move(continuation);
             choice_result_register_ = -1;
             choice_ex_ = true;
             choosing_ = true;
@@ -1964,6 +1979,16 @@ private:
         while (running_ && !waiting_for_input_ && !choosing_) {
             const auto step = runtime_.run();
             if (step.reason == th2::VmYield::ended) {
+                if (choice_continuation_) {
+                    auto continuation = std::move(*choice_continuation_);
+                    choice_continuation_.reset();
+                    runtime_.load(continuation.script_name);
+                    runtime_.vm_restore(
+                        continuation.registers, continuation.stack,
+                        continuation.pc);
+                    section_ending_ = false;
+                    continue;
+                }
                 if (!section_ending_ || !load_next_section()) {
                     return_to_title();
                     break;
@@ -2023,6 +2048,7 @@ private:
 
     void save(int slot)
     {
+        std::filesystem::create_directories("save");
         const auto path = save_path(slot);
         std::ofstream file(path, std::ios::binary);
         if (!file) {
@@ -2045,17 +2071,20 @@ private:
 
     std::filesystem::path save_path(int slot) const
     {
-        return std::format("save_{:02d}.sav", slot);
+        return std::filesystem::path("save")
+            / std::format("save_{:02d}.sav", slot);
     }
 
     std::filesystem::path thumbnail_path(int slot) const
     {
-        return std::format("save_{:02d}.bmp", slot);
+        return std::filesystem::path("save")
+            / std::format("save_{:02d}.bmp", slot);
     }
 
     std::filesystem::path metadata_path(int slot) const
     {
-        return std::format("save_{:02d}.meta", slot);
+        return std::filesystem::path("save")
+            / std::format("save_{:02d}.meta", slot);
     }
 
     void save_preview(int slot)
@@ -2129,7 +2158,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 5);  // native version
+        write_u32(out, 6);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -2274,6 +2303,22 @@ private:
         write_i32(out, choice_selected_);
         write_i32(out, choice_result_register_);
         write_i32(out, choice_ex_ ? 1 : 0);
+        write_i32(out, choice_continuation_.has_value() ? 1 : 0);
+        if (choice_continuation_) {
+            write_str(out, choice_continuation_->script_name, 64);
+            write_u32(
+                out, static_cast<std::uint32_t>(
+                    choice_continuation_->pc));
+            for (const auto value : choice_continuation_->registers) {
+                write_i32(out, value);
+            }
+            write_u32(
+                out, static_cast<std::uint32_t>(
+                    choice_continuation_->stack.size()));
+            for (const auto value : choice_continuation_->stack) {
+                write_i32(out, value);
+            }
+        }
 
         // Backlog state. Depth 0 is the current message; 1 is newest history.
         write_u32(out, static_cast<std::uint32_t>(backlog_.size()));
@@ -2492,6 +2537,21 @@ private:
         choice_selected_ = read_i32(in);
         choice_result_register_ = read_i32(in);
         choice_ex_ = read_i32(in) != 0;
+        choice_continuation_.reset();
+        if (read_i32(in) != 0) {
+            ScriptContinuation continuation;
+            continuation.script_name = read_str(in, 64);
+            continuation.pc = read_u32(in);
+            for (auto& value : continuation.registers) {
+                value = read_i32(in);
+            }
+            const auto stack_size = read_u32(in);
+            continuation.stack.reserve(stack_size);
+            for (std::uint32_t i = 0; i < stack_size; ++i) {
+                continuation.stack.push_back(read_i32(in));
+            }
+            choice_continuation_ = std::move(continuation);
+        }
 
         backlog_.clear();
         backlog_depth_ = 0;
@@ -2626,6 +2686,7 @@ private:
     void open_system_menu()
     {
         if (choosing_) return;
+        play_se(-1, 9104, false, 255);
         save_snapshot_ = capture_frame_pixels();
         begin_transition(1, 12, 128, false);
         ui_mode_ = UiMode::system_menu;
@@ -2946,6 +3007,7 @@ private:
     void open_backlog()
     {
         if (choosing_) return;
+        play_se(-1, 9012, false, 140);
         ui_mode_ = UiMode::backlog;
         backlog_depth_ = std::min(
             1, static_cast<int>(backlog_.size()));
@@ -3168,6 +3230,8 @@ private:
 
     void activate_title_item()
     {
+        play_se(
+            -1, title_highlight_ == 0 ? 9111 : 9104, false, 255);
         switch (title_highlight_) {
         case 0:
             begin_title_exit(true);
@@ -3411,6 +3475,7 @@ private:
             if (ui_mode_ == UiMode::load && !visible_saves_[item].exists) {
                 return;
             }
+            play_se(-1, 9104, false, 255);
             if (ui_mode_ == UiMode::save && !visible_saves_[item].exists) {
                 save(slot);
                 close_save_load();
@@ -3419,11 +3484,14 @@ private:
                 save_hover_ = 14;
             }
         } else if (item == 10 || item == 11) {
+            play_se(-1, 9104, false, 255);
             save_page_ = (save_page_ + (item == 10 ? 9 : 1)) % 10;
             refresh_save_page();
         } else if (item == 12) {
+            play_se(-1, 9104, false, 255);
             close_save_load();
         } else if (item == 13 && save_confirm_slot_ >= 0) {
+            play_se(-1, 9104, false, 255);
             const int slot = save_confirm_slot_;
             if (ui_mode_ == UiMode::save) {
                 save(slot);
@@ -3434,6 +3502,7 @@ private:
                 ui_mode_ = UiMode::game;
             }
         } else if (item == 14) {
+            play_se(-1, 9104, false, 255);
             save_confirm_slot_ = -1;
             save_hover_ = -1;
         }
@@ -3451,6 +3520,7 @@ private:
             }
         } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
             if (event.button.button == SDL_BUTTON_RIGHT) {
+                play_se(-1, 9107, false, 255);
                 if (save_confirm_slot_ >= 0) {
                     save_confirm_slot_ = -1;
                 } else {
@@ -3462,6 +3532,7 @@ private:
             }
         } else if (event.type == SDL_EVENT_KEY_DOWN) {
             if (event.key.key == SDLK_ESCAPE) {
+                play_se(-1, 9107, false, 255);
                 if (save_confirm_slot_ >= 0) {
                     save_confirm_slot_ = -1;
                 } else {
@@ -3488,8 +3559,10 @@ private:
         const int previous_highlight = menu_highlight_;
         if (event.type == SDL_EVENT_KEY_DOWN) {
             if (event.key.key == SDLK_ESCAPE) {
+                play_se(-1, 9107, false, 255);
                 close_system_menu();
             } else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_SPACE) {
+                play_se(-1, 9014, false, 255);
                 const int item = menu_highlight_;
                 close_system_menu();
                 execute_menu_item(item);
@@ -3500,12 +3573,14 @@ private:
             }
         } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
             if (event.button.button == SDL_BUTTON_RIGHT) {
+                play_se(-1, 9107, false, 255);
                 close_system_menu();
             } else if (event.button.button == SDL_BUTTON_LEFT) {
                 const float mx = event.button.x; const float my = event.button.y;
                 for (int i = 0; i < 5; ++i) {
                     if (mx >= dst_x[i] && mx < dst_x[i] + dst_w[i]
                         && my >= dst_y[i] && my < dst_y[i] + dst_h[i]) {
+                        play_se(-1, 9014, false, 255);
                         close_system_menu();
                         execute_menu_item(i);
                         break;
@@ -3652,12 +3727,14 @@ private:
             }
             switch (i) {
             case 0:
+                play_se(-1, 9012, false, 140);
                 if (backlog_depth_ < static_cast<int>(backlog_.size())) {
                     ++backlog_depth_;
                     ui_mode_ = UiMode::backlog;
                 }
                 break;
             case 1:
+                play_se(-1, 9104, false, 255);
                 if (backlog_depth_ > 1) {
                     --backlog_depth_;
                 } else if (backlog_depth_ == 1) {
@@ -3667,23 +3744,31 @@ private:
                 }
                 break;
             case 2:
+                play_se(-1, 9104, false, 255);
                 save_snapshot_ = capture_frame_pixels();
                 open_save_load(UiMode::save);
                 break;
             case 3:
+                play_se(-1, 9104, false, 255);
                 save_snapshot_ = capture_frame_pixels();
                 open_save_load(UiMode::load);
                 break;
             case 4:
+                play_se(-1, 9104, false, 255);
                 auto_mode_ = !auto_mode_;
                 if (auto_mode_) skip_mode_ = false;
                 break;
             case 5:
+                play_se(-1, 9104, false, 255);
                 skip_mode_ = !skip_mode_;
                 if (skip_mode_) auto_mode_ = false;
                 break;
-            case 6: open_config(); break;
+            case 6:
+                play_se(-1, 9104, false, 255);
+                open_config();
+                break;
             case 7:
+                play_se(-1, 9104, false, 255);
                 save_snapshot_ = capture_frame_pixels();
                 save(0);
                 break;

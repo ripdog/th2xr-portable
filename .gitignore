@@ -4,3 +4,6 @@
 
 # Save files
 save_*.sav
+save_*.bmp
+save_*.meta
+/save/
