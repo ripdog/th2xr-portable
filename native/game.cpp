@@ -791,6 +791,7 @@ private:
     bool skip_mode_ = false;
     bool section_ending_ = false;
     std::optional<ScriptContinuation> choice_continuation_;
+    std::optional<int> choice_section_group_;
 
     std::string current_read_key() const
     {
@@ -844,6 +845,48 @@ private:
             return false;
         }
         runtime_.load(*std::next(found));
+        section_ending_ = false;
+        return true;
+    }
+
+    bool load_choice_section(int selected)
+    {
+        const int current = scenario_number(runtime_.script_name());
+        if (current % 100 != 0) {
+            return false;
+        }
+        const int branch = current + selected + 1;
+        const auto name = std::format("{:09d}.SDT", branch);
+        if (!scripts_.find(name)) {
+            return false;
+        }
+        choice_section_group_ = current;
+        runtime_.load(name);
+        section_ending_ = false;
+        return true;
+    }
+
+    bool load_after_choice_group()
+    {
+        if (!choice_section_group_) {
+            return false;
+        }
+        const auto group_end =
+            std::format("{:09d}.SDT", *choice_section_group_ + 99);
+        choice_section_group_.reset();
+        std::vector<std::string> names;
+        for (const auto& entry : scripts_.entries()) {
+            if (!entry.name.empty()
+                && std::isdigit(static_cast<unsigned char>(entry.name[0]))) {
+                names.push_back(entry.name);
+            }
+        }
+        std::ranges::sort(names);
+        const auto next = std::ranges::upper_bound(names, group_end);
+        if (next == names.end()) {
+            return false;
+        }
+        runtime_.load(*next);
         section_ending_ = false;
         return true;
     }
@@ -1964,6 +2007,7 @@ private:
             }
             if (choice_ex_) {
                 runtime_.load(choices_.at(choice_selected_).sno);
+            } else if (load_choice_section(choice_selected_)) {
             } else if (choice_result_register_ >= 0) {
                 runtime_.set_reg(
                     static_cast<std::size_t>(choice_result_register_),
@@ -1987,6 +2031,13 @@ private:
                         continuation.registers, continuation.stack,
                         continuation.pc);
                     section_ending_ = false;
+                    continue;
+                }
+                if (choice_section_group_) {
+                    if (!load_after_choice_group()) {
+                        return_to_title();
+                        break;
+                    }
                     continue;
                 }
                 if (!section_ending_ || !load_next_section()) {
@@ -2319,6 +2370,7 @@ private:
                 write_i32(out, value);
             }
         }
+        write_i32(out, choice_section_group_.value_or(-1));
 
         // Backlog state. Depth 0 is the current message; 1 is newest history.
         write_u32(out, static_cast<std::uint32_t>(backlog_.size()));
@@ -2552,6 +2604,10 @@ private:
             }
             choice_continuation_ = std::move(continuation);
         }
+        const int choice_section_group = read_i32(in);
+        choice_section_group_ = choice_section_group >= 0
+            ? std::optional<int>(choice_section_group)
+            : std::nullopt;
 
         backlog_.clear();
         backlog_depth_ = 0;
