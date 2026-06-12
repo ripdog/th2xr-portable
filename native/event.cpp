@@ -3,7 +3,10 @@
 #include "event_metadata.h"
 #include "expression.hpp"
 
+#include <cerrno>
+#include <iconv.h>
 #include <stdexcept>
+#include <string>
 
 namespace th2 {
 namespace {
@@ -45,6 +48,29 @@ std::int32_t number(
     return registers[raw];
 }
 
+std::string decode_script_text(
+    const std::uint8_t* bytes, std::size_t length)
+{
+    iconv_t converter = iconv_open("UTF-8", "CP932");
+    if (converter == reinterpret_cast<iconv_t>(-1)) {
+        throw std::runtime_error("CP932 converter is unavailable");
+    }
+    std::string output(length * 3 + 1, '\0');
+    char* input = reinterpret_cast<char*>(
+        const_cast<std::uint8_t*>(bytes));
+    std::size_t input_left = length;
+    char* destination = output.data();
+    std::size_t output_left = output.size();
+    const auto result = iconv(
+        converter, &input, &input_left, &destination, &output_left);
+    iconv_close(converter);
+    if (result == static_cast<std::size_t>(-1) || input_left != 0) {
+        throw std::runtime_error("invalid CP932 script text");
+    }
+    output.resize(output.size() - output_left);
+    return output;
+}
+
 }  // namespace
 
 Event decode_event(
@@ -81,16 +107,16 @@ Event decode_event(
             break;
         case TH2_PARAMETER_STRING8: {
             const auto length = bytes[position++];
-            event.arguments.emplace_back(std::string(
-                reinterpret_cast<const char*>(bytes.data() + position), length));
+            event.arguments.emplace_back(
+                decode_script_text(bytes.data() + position, length));
             position += length;
             break;
         }
         case TH2_PARAMETER_STRING16: {
             const auto length = read_u16(bytes, position);
             position += 2;
-            event.arguments.emplace_back(std::string(
-                reinterpret_cast<const char*>(bytes.data() + position), length));
+            event.arguments.emplace_back(
+                decode_script_text(bytes.data() + position, length));
             position += length;
             break;
         }
