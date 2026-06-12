@@ -901,6 +901,16 @@ private:
             1, display_lines(choice.text).size()) * 31.0f;
     }
 
+    std::vector<std::string> choice_lines(
+        const Choice& choice, int index) const
+    {
+        auto lines = display_lines(choice.text);
+        if (!lines.empty()) {
+            lines.front() = std::format("{}. {}", index + 1, lines.front());
+        }
+        return lines;
+    }
+
     void skip(bool force_unread = false)
     {
         if (choosing_) {
@@ -3920,16 +3930,16 @@ private:
             float y = choice_y_start();
             for (int i = 0; i < static_cast<int>(choices_.size()); ++i) {
                 const auto highlighted = i == choice_highlight_;
-                const auto label =
-                    std::format("{}. {}", i + 1, choices_[i].text);
-                font_.draw(
-                    renderer_, 34.0f, y + 2.0f, label, 0, 0, 0);
-                font_.draw(
-                    renderer_, 32.0f, y, label,
-                    highlighted ? 255 : 128,
-                    highlighted ? 255 : 128,
-                    highlighted ? 255 : 128);
-                y += choice_height(choices_[i]);
+                for (const auto& line : choice_lines(choices_[i], i)) {
+                    font_.draw(
+                        renderer_, 34.0f, y + 2.0f, line, 0, 0, 0);
+                    font_.draw(
+                        renderer_, 32.0f, y, line,
+                        highlighted ? 255 : 128,
+                        highlighted ? 255 : 128,
+                        highlighted ? 255 : 128);
+                    y += 31.0f;
+                }
             }
         }
         if (ui_mode_ == UiMode::game) {
