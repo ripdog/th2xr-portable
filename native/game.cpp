@@ -792,6 +792,7 @@ private:
     bool section_ending_ = false;
     std::optional<ScriptContinuation> choice_continuation_;
     std::optional<int> choice_section_group_;
+    std::optional<int> pending_choice_group_;
 
     std::string current_read_key() const
     {
@@ -845,23 +846,6 @@ private:
             return false;
         }
         runtime_.load(*std::next(found));
-        section_ending_ = false;
-        return true;
-    }
-
-    bool load_choice_section(int selected)
-    {
-        const int current = scenario_number(runtime_.script_name());
-        if (current % 100 != 0) {
-            return false;
-        }
-        const int branch = current + selected + 1;
-        const auto name = std::format("{:09d}.SDT", branch);
-        if (!scripts_.find(name)) {
-            return false;
-        }
-        choice_section_group_ = current;
-        runtime_.load(name);
         section_ending_ = false;
         return true;
     }
@@ -2007,8 +1991,10 @@ private:
             }
             if (choice_ex_) {
                 runtime_.load(choices_.at(choice_selected_).sno);
-            } else if (load_choice_section(choice_selected_)) {
             } else if (choice_result_register_ >= 0) {
+                const int scenario =
+                    scenario_number(runtime_.script_name());
+                pending_choice_group_ = scenario / 100 * 100;
                 runtime_.set_reg(
                     static_cast<std::size_t>(choice_result_register_),
                     choice_selected_);
@@ -2021,7 +2007,17 @@ private:
             choice_ex_ = false;
         }
         while (running_ && !waiting_for_input_ && !choosing_) {
+            const auto previous_script = runtime_.script_name();
             const auto step = runtime_.run();
+            if (pending_choice_group_) {
+                const int loaded =
+                    scenario_number(runtime_.script_name());
+                if (runtime_.script_name() != previous_script
+                    && loaded / 100 * 100 == *pending_choice_group_) {
+                    choice_section_group_ = *pending_choice_group_;
+                }
+                pending_choice_group_.reset();
+            }
             if (step.reason == th2::VmYield::ended) {
                 if (choice_continuation_) {
                     auto continuation = std::move(*choice_continuation_);
