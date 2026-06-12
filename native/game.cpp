@@ -3120,22 +3120,35 @@ private:
             // These compatibility opcodes are explicit no-ops in the original.
         } else if (name == "M") {
             const int music = number(event, 0);
+            const int fade = number(event, 1) < 0 ? 0 : number(event, 1);
             if (music < 0) {
-                bgm_.stop();
+                bgm_.fade_to(
+                    0.0f, std::chrono::milliseconds(fade * 1000 / 60), true);
                 bgm_track_ = -1;
             } else {
                 const int loop = number(event, 2) < 0 ? 1 : number(event, 2);
                 const int volume = number(event, 3) < 0 ? 255 : number(event, 3);
                 play_bgm(music, loop != 0, volume);
+                if (fade > 0) {
+                    bgm_.set_gain(0.0f);
+                    bgm_.fade_to(
+                        bgm_gain(volume),
+                        std::chrono::milliseconds(fade * 1000 / 60));
+                }
             }
         } else if (name == "MS") {
-            bgm_.stop();
+            const int fade = number(event, 0) < 0 ? 0 : number(event, 0);
+            bgm_.fade_to(
+                0.0f, std::chrono::milliseconds(fade * 1000 / 60), true);
             bgm_track_ = -1;
         } else if (name == "MP") {
             bgm_.pause(number(event, 0) != 0);
         } else if (name == "MV") {
             bgm_volume_ = number(event, 0);
-            bgm_.set_gain(bgm_gain(bgm_volume_));
+            const int fade = number(event, 1) < 0 ? 0 : number(event, 1);
+            bgm_.fade_to(
+                bgm_gain(bgm_volume_),
+                std::chrono::milliseconds(fade * 1000 / 60));
         } else if (name == "MW") {
             if (bgm_.playing()) {
                 audio_wait_ = AudioWait{AudioWaitKind::bgm, 0};
@@ -3150,14 +3163,19 @@ private:
         } else if (name == "SES") {
             const auto channel = number(event, 0);
             if (channel >= 0 && static_cast<std::size_t>(channel) < se_channels_.size()) {
-                se_channels_[channel].stop();
+                const int fade = number(event, 1) < 0 ? 0 : number(event, 1);
+                se_channels_[channel].fade_to(
+                    0.0f, std::chrono::milliseconds(fade * 1000 / 60), true);
                 se_sound_[channel] = -1;
             }
         } else if (name == "SEV") {
             const auto channel = number(event, 0);
             if (channel >= 0 && static_cast<std::size_t>(channel) < se_channels_.size()) {
                 se_volume_[channel] = number(event, 1);
-                se_channels_[channel].set_gain(se_gain(se_volume_[channel]));
+                const int fade = number(event, 2) < 0 ? 0 : number(event, 2);
+                se_channels_[channel].fade_to(
+                    se_gain(se_volume_[channel]),
+                    std::chrono::milliseconds(fade * 1000 / 60));
             }
         } else if (name == "SEW" || name == "SEVW") {
             const auto channel = number(event, 0);
@@ -3178,7 +3196,9 @@ private:
         } else if (name == "VS") {
             const auto channel = number(event, 1) < 0 ? 0 : number(event, 1);
             if (channel >= 0 && static_cast<std::size_t>(channel) < voice_channels_.size()) {
-                voice_channels_[channel].stop();
+                const int fade = number(event, 0) < 0 ? 0 : number(event, 0);
+                voice_channels_[channel].fade_to(
+                    0.0f, std::chrono::milliseconds(fade * 1000 / 60), true);
                 voice_sound_[channel] = -1;
             }
         } else if (name == "VW") {

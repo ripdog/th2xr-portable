@@ -34,6 +34,8 @@ public:
     void stop();
     void pause(bool paused);
     void set_gain(float gain);
+    void fade_to(float gain, std::chrono::milliseconds duration,
+                 bool stop_after = false);
     void update();
     bool playing() const;
 
@@ -43,6 +45,12 @@ private:
     AudioClip loop_clip_{};
     bool loop_ = false;
     bool active_ = false;
+    float gain_ = 1.0f;
+    float fade_from_ = 1.0f;
+    float fade_to_ = 1.0f;
+    bool fade_stop_ = false;
+    std::optional<std::chrono::steady_clock::time_point> fade_started_;
+    std::chrono::milliseconds fade_duration_{0};
     std::chrono::steady_clock::time_point playback_end_{};
     std::optional<std::chrono::steady_clock::time_point> paused_at_;
 

@@ -108,6 +108,10 @@ AudioChannel::AudioChannel(AudioChannel&& other) noexcept
     : stream_(std::exchange(other.stream_, nullptr)),
       clip_(std::move(other.clip_)), loop_clip_(std::move(other.loop_clip_)),
       loop_(other.loop_), active_(other.active_),
+      gain_(other.gain_), fade_from_(other.fade_from_),
+      fade_to_(other.fade_to_), fade_stop_(other.fade_stop_),
+      fade_started_(std::move(other.fade_started_)),
+      fade_duration_(other.fade_duration_),
       playback_end_(other.playback_end_),
       paused_at_(std::move(other.paused_at_))
 {
@@ -124,6 +128,12 @@ AudioChannel& AudioChannel::operator=(AudioChannel&& other) noexcept
         loop_clip_ = std::move(other.loop_clip_);
         loop_ = other.loop_;
         active_ = other.active_;
+        gain_ = other.gain_;
+        fade_from_ = other.fade_from_;
+        fade_to_ = other.fade_to_;
+        fade_stop_ = other.fade_stop_;
+        fade_started_ = std::move(other.fade_started_);
+        fade_duration_ = other.fade_duration_;
         playback_end_ = other.playback_end_;
         paused_at_ = std::move(other.paused_at_);
         other.active_ = false;
@@ -155,6 +165,9 @@ void AudioChannel::play(AudioClip clip, bool loop, float gain)
         throw std::runtime_error(SDL_GetError());
     }
     active_ = true;
+    gain_ = std::clamp(gain, 0.0f, 1.0f);
+    fade_started_.reset();
+    fade_stop_ = false;
     paused_at_.reset();
     set_playback_end();
 }
@@ -190,6 +203,8 @@ void AudioChannel::stop()
     loop_clip_ = {};
     loop_ = false;
     active_ = false;
+    fade_started_.reset();
+    fade_stop_ = false;
     paused_at_.reset();
 }
 
@@ -214,13 +229,52 @@ void AudioChannel::pause(bool paused)
 
 void AudioChannel::set_gain(float gain)
 {
+    gain_ = std::clamp(gain, 0.0f, 1.0f);
+    fade_started_.reset();
+    fade_stop_ = false;
     if (stream_) {
-        SDL_SetAudioStreamGain(stream_, std::clamp(gain, 0.0f, 1.0f));
+        SDL_SetAudioStreamGain(stream_, gain_);
     }
+}
+
+void AudioChannel::fade_to(
+    float gain, std::chrono::milliseconds duration, bool stop_after)
+{
+    if (!stream_ || duration <= std::chrono::milliseconds::zero()) {
+        if (stop_after) {
+            stop();
+        } else {
+            set_gain(gain);
+        }
+        return;
+    }
+    fade_from_ = gain_;
+    fade_to_ = std::clamp(gain, 0.0f, 1.0f);
+    fade_stop_ = stop_after;
+    fade_duration_ = duration;
+    fade_started_ = std::chrono::steady_clock::now();
 }
 
 void AudioChannel::update()
 {
+    if (stream_ && fade_started_) {
+        const auto elapsed = std::chrono::steady_clock::now() - *fade_started_;
+        const float progress = std::clamp(
+            std::chrono::duration<float>(elapsed).count()
+                / std::chrono::duration<float>(fade_duration_).count(),
+            0.0f, 1.0f);
+        gain_ = fade_from_ + (fade_to_ - fade_from_) * progress;
+        SDL_SetAudioStreamGain(stream_, gain_);
+        if (progress >= 1.0f) {
+            const bool stop_after = fade_stop_;
+            fade_started_.reset();
+            fade_stop_ = false;
+            if (stop_after) {
+                stop();
+                return;
+            }
+        }
+    }
     if (!stream_ || !active_ || paused_at_
         || std::chrono::steady_clock::now() < playback_end_) {
         return;
