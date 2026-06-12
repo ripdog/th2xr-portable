@@ -26,6 +26,7 @@
 #include <fstream>
 #include <filesystem>
 #include <format>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -34,6 +35,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -611,6 +613,8 @@ private:
     std::array<int, 8> voice_scenario_{};  // scenario for voice filename
     std::array<int, 8> voice_volume_{};
     std::array<bool, 8> voice_loop_{};
+    int vi_event_voice_no_ = -1;
+    int vi_event_voice_no_all_ = -1;
     std::vector<std::uint8_t> movie_bytes_;
     std::unique_ptr<th2::VideoPlayer> movie_;
     bool movie_resume_script_ = false;
@@ -1983,18 +1987,13 @@ private:
         const int voice = number(event, 3);
         const int channel = number(event, 4) < 0 ? 0 : number(event, 4);
         int scenario = scenario_number(runtime_.script_name());
+        if (vi_event_voice_no_all_ >= 0) {
+            scenario = vi_event_voice_no_all_;
+        } else if (vi_event_voice_no_ >= 0) {
+            scenario = scenario / 100 * 100 + vi_event_voice_no_;
+        }
         auto name = std::format(
             "K{:09d}_{:03d}{:03d}.OGG", scenario, voice, character);
-        if (!voice_archive_.find(name)) {
-            const int parent_scenario = scenario / 100 * 100;
-            const auto parent_name = std::format(
-                "K{:09d}_{:03d}{:03d}.OGG",
-                parent_scenario, voice, character);
-            if (voice_archive_.find(parent_name)) {
-                scenario = parent_scenario;
-                name = parent_name;
-            }
-        }
         if (channel >= 0 && static_cast<std::size_t>(channel) < voice_channels_.size()) {
             voice_channels_[channel].play(
                 load_audio(voice_archive_, name), loop,
@@ -2079,7 +2078,7 @@ private:
         }
     }
 
-    void handle(const th2::Event& event)
+    bool handle(const th2::Event& event)
     {
         const auto name = event.instruction.name;
         if (name == "B" || name == "BT" || name == "BC" || name == "BCT") {
@@ -2109,6 +2108,16 @@ private:
             const int frames = std::max<std::int32_t>(0, number(event, 0));
             wake_time_ = std::chrono::steady_clock::now()
                 + std::chrono::milliseconds(frames * 1000 / 60);
+        } else if (name == "WaitTime") {
+            const auto now = static_cast<std::uint32_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count());
+            const auto deadline = static_cast<std::uint32_t>(number(event, 0));
+            const auto remaining = static_cast<std::int32_t>(deadline - now);
+            if (remaining > 0) {
+                wake_time_ = std::chrono::steady_clock::now()
+                    + std::chrono::milliseconds(remaining);
+            }
         } else if (name == "SetMovie") {
             start_movie(number(event, 0), 0, true);
         } else if (name == "BD") {
@@ -2207,7 +2216,7 @@ private:
             }
         } else if (name == "SE") {
             play_se(-1, number(event, 0), false,
-                    number(event, 1) < 0 ? 255 : number(event, 1), true);
+                    number(event, 1) < 0 ? 255 : number(event, 1));
         } else if (name == "SEP") {
             play_se(
                 number(event, 0), number(event, 1), number(event, 3) != 0,
@@ -2234,6 +2243,12 @@ private:
         } else if (name == "VV" || name == "VA" || name == "VB"
                    || name == "VC") {
             play_voice(event);
+        } else if (name == "VI") {
+            if (number(event, 2) != -1) {
+                vi_event_voice_no_all_ = number(event, 2);
+            } else if (number(event, 1) != -1) {
+                vi_event_voice_no_ = number(event, 1);
+            }
         } else if (name == "VS") {
             const auto channel = number(event, 1) < 0 ? 0 : number(event, 1);
             if (channel >= 0 && static_cast<std::size_t>(channel) < voice_channels_.size()) {
@@ -2279,7 +2294,66 @@ private:
             map_events_.push_back(MapEvent{
                 number(event, 0), number(event, 1), number(event, 2),
                 text(event, 3)});
+        } else {
+            return false;
         }
+        return true;
+    }
+
+    std::filesystem::path dump_engine_error(
+        const th2::ScriptStep& step, std::string_view error)
+    {
+        std::filesystem::create_directories("logs");
+        const auto now = std::chrono::system_clock::now();
+        const auto stamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now.time_since_epoch()).count();
+        const auto path = std::filesystem::path("logs")
+            / std::format("engine-error-{}.log", stamp);
+        std::ofstream output(path);
+        output << "error=" << error << '\n'
+               << "script=" << step.script_name << '\n'
+               << "pc=" << step.event.instruction.offset << '\n'
+               << "next_pc=" << runtime_.vm_pc() << '\n'
+               << "opcode=" << step.event.instruction.opcode << '\n'
+               << "instruction=" << step.event.instruction.name << '\n'
+               << "arguments=";
+        for (std::size_t i = 0; i < step.event.arguments.size(); ++i) {
+            if (i != 0) {
+                output << ", ";
+            }
+            std::visit([&](const auto& argument) {
+                using T = std::decay_t<decltype(argument)>;
+                if constexpr (std::is_same_v<T, std::int32_t>) {
+                    output << argument;
+                } else if constexpr (std::is_same_v<T, std::string>) {
+                    output << std::quoted(argument);
+                } else if constexpr (std::is_same_v<T, th2::RegisterTarget>) {
+                    output << "register[" << static_cast<int>(argument.index) << ']';
+                } else {
+                    output << "compare(register["
+                           << static_cast<int>(argument.register_index)
+                           << "], op=" << static_cast<int>(argument.operation)
+                           << ", value=" << argument.value << ')';
+                }
+            }, step.event.arguments[i]);
+        }
+        output << "\nregisters=";
+        for (const auto value : runtime_.vm_registers()) {
+            output << value << ' ';
+        }
+        output << "\nstack=";
+        for (const auto value : runtime_.vm_stack()) {
+            output << value << ' ';
+        }
+        output << "\nbackground=" << bg_scene_
+               << "\nvisual=" << bg_is_visual_
+               << "\ntone=" << tone_
+               << "\nweather=" << weather_
+               << "\nbgm=" << bgm_track_
+               << "\nvoice_event=" << vi_event_voice_no_
+               << "\nvoice_event_all=" << vi_event_voice_no_all_
+               << "\nmessage=" << std::quoted(message_.visible()) << '\n';
+        return path;
     }
 
     void advance(bool skipping = false)
@@ -2344,11 +2418,17 @@ private:
             }
             if (step.reason == th2::VmYield::event) {
                 try {
-                    handle(step.event);
+                    if (!handle(step.event)) {
+                        throw std::runtime_error(std::format(
+                            "unimplemented event opcode: {}",
+                            step.event.instruction.name));
+                    }
                 } catch (const std::exception& error) {
-                    std::cerr << step.script_name << ": "
-                              << step.event.instruction.name << ": "
-                              << error.what() << '\n';
+                    const auto dump = dump_engine_error(step, error.what());
+                    throw std::runtime_error(std::format(
+                        "{}:{}: {} (state dumped to {})",
+                        step.script_name, step.event.instruction.offset,
+                        error.what(), dump.string()));
                 }
                 if (audio_wait_) {
                     if (skipping) {
@@ -2489,12 +2569,14 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 8);  // native version
+        write_u32(out, 9);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
         write_i32(out, tone_);
         write_i32(out, weather_);
+        write_i32(out, vi_event_voice_no_);
+        write_i32(out, vi_event_voice_no_all_);
 
         // VM state
         write_u32(out, static_cast<std::uint32_t>(runtime_.vm_pc()));
@@ -2685,7 +2767,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 8) {
+        if (version != 9) {
             return;
         }
 
@@ -2705,6 +2787,8 @@ private:
         runtime_.load(script_name);
         tone_ = read_i32(in);
         weather_ = read_i32(in);
+        vi_event_voice_no_ = read_i32(in);
+        vi_event_voice_no_all_ = read_i32(in);
 
         // VM state
         const auto pc = read_u32(in);

@@ -1,7 +1,10 @@
 #include "script_runtime.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
+#include <cmath>
+#include <ctime>
 #include <stdexcept>
 
 namespace th2 {
@@ -33,6 +36,12 @@ std::int32_t integer(const Event& event, std::size_t index)
 RegisterTarget target(const Event& event, std::size_t index)
 {
     return std::get<RegisterTarget>(event.arguments.at(index));
+}
+
+std::int32_t loop(std::int32_t value, std::int32_t limit)
+{
+    const auto result = value % limit;
+    return result < 0 ? result + limit : result;
 }
 
 }  // namespace
@@ -149,6 +158,49 @@ bool ScriptRuntime::handle(const Event& event)
             name.insert(name.begin(), 5 - name.size(), '0');
         }
         load(name);
+        return true;
+    }
+    if (event.instruction.name == "Mov2") {
+        vm_->set_reg(target(event, 0).index, integer(event, 1));
+        return true;
+    }
+    if (event.instruction.name == "Sin"
+        || event.instruction.name == "Cos") {
+        constexpr double pi = 3.14159265358979323846;
+        const auto angle = loop(integer(event, 1), 3600) * pi / 1800.0;
+        const auto scale = integer(event, 2) < 0 ? 4096 : integer(event, 2);
+        const auto value = event.instruction.name == "Sin"
+            ? std::sin(angle) : std::cos(angle);
+        vm_->set_reg(
+            target(event, 0).index,
+            static_cast<std::int32_t>(value * scale));
+        return true;
+    }
+    if (event.instruction.name == "Abs") {
+        vm_->set_reg(target(event, 0).index, std::abs(integer(event, 1)));
+        return true;
+    }
+    if (event.instruction.name == "GetTime") {
+        const auto milliseconds = std::chrono::duration_cast<
+            std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+        vm_->set_reg(
+            target(event, 0).index,
+            static_cast<std::int32_t>(
+                static_cast<std::uint32_t>(milliseconds)));
+        return true;
+    }
+    if (event.instruction.name == "GetSystemTime") {
+        const auto now = std::time(nullptr);
+        std::tm local{};
+        localtime_r(&now, &local);
+        vm_->set_reg(target(event, 0).index, local.tm_hour);
+        vm_->set_reg(target(event, 1).index, local.tm_mday);
+        vm_->set_reg(target(event, 2).index, local.tm_mon + 1);
+        vm_->set_reg(target(event, 3).index, local.tm_year + 1900);
+        return true;
+    }
+    if (event.instruction.name == "VIB") {
         return true;
     }
     return false;
