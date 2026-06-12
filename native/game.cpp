@@ -507,6 +507,30 @@ private:
         Texture texture;
     };
 
+    struct OverlayState {
+        std::string name;
+        std::string archive;
+        bool visible = true;
+        int layer = 0;
+        int parameter = 0;
+        int parameter_value = 0;
+        int reverse = 0;
+        int red = 128;
+        int green = 128;
+        int blue = 128;
+        int destination_x = 0;
+        int destination_y = 0;
+        int destination_width = 0;
+        int destination_height = 0;
+        int source_x = 0;
+        int source_y = 0;
+        int source_width = 0;
+        int source_height = 0;
+        int zoom_center_x = 0;
+        int zoom_center_y = 0;
+        int zoom = 0;
+    };
+
     struct Transition {
         Texture previous;
         Surface previous_pixels;
@@ -594,7 +618,7 @@ private:
     int bg_scene_ = -1;
     bool bg_is_visual_ = false;
     std::array<Texture, 32> overlays_{};
-    std::array<int, 32> overlay_layers_{};
+    std::array<OverlayState, 32> overlay_states_{};
     th2::Characters characters_;
     std::array<CharacterTexture, 32> character_textures_{};
     th2::AudioChannel bgm_;
@@ -2078,6 +2102,35 @@ private:
         }
     }
 
+    std::optional<std::size_t> overlay_index(int requested) const
+    {
+        if (requested == -1) {
+            return overlays_.size() - 1;
+        }
+        if (requested < 0
+            || static_cast<std::size_t>(requested) >= overlays_.size()) {
+            return std::nullopt;
+        }
+        return static_cast<std::size_t>(requested);
+    }
+
+    void load_overlay(std::size_t slot, std::string name, std::string archive)
+    {
+        const auto& source = archive == "bak" ? backgrounds_ : graphics_;
+        overlays_[slot] = load_texture(renderer_, source, name);
+        auto& state = overlay_states_[slot];
+        state = {};
+        state.name = std::move(name);
+        state.archive = std::move(archive);
+        float width = 0.0f;
+        float height = 0.0f;
+        SDL_GetTextureSize(overlays_[slot].get(), &width, &height);
+        state.destination_width = static_cast<int>(width * 640.0f / 800.0f);
+        state.destination_height = static_cast<int>(height * 448.0f / 600.0f);
+        state.source_width = state.destination_width;
+        state.source_height = state.destination_height;
+    }
+
     bool handle(const th2::Event& event)
     {
         const auto name = event.instruction.name;
@@ -2128,20 +2181,78 @@ private:
         } else if (name == "SetWeatherMode") {
             weather_ = std::max<std::int32_t>(0, number(event, 0));
         } else if (name == "SetBmpEx") {
-            const auto slot = static_cast<std::size_t>(number(event, 0));
-            if (slot < overlays_.size()) {
-                const auto& archive = text(event, 6) == "bak" ? backgrounds_ : graphics_;
-                overlays_[slot] = load_texture(renderer_, archive, text(event, 2));
-                overlay_layers_[slot] = number(event, 3);
+            if (const auto slot = overlay_index(number(event, 0))) {
+                load_overlay(*slot, text(event, 2), text(event, 6));
+                overlay_states_[*slot].layer = number(event, 3);
             }
         } else if (name == "ResetBmp") {
-            const auto slot = static_cast<std::size_t>(number(event, 0));
-            if (slot < overlays_.size()) {
-                overlays_[slot].reset();
+            if (const auto slot = overlay_index(number(event, 0))) {
+                overlays_[*slot].reset();
+                overlay_states_[*slot] = {};
             }
         } else if (name == "ResetBmpAll") {
-            for (auto& overlay : overlays_) {
-                overlay.reset();
+            for (std::size_t i = 0; i < overlays_.size(); ++i) {
+                overlays_[i].reset();
+                overlay_states_[i] = {};
+            }
+        } else if (name == "SetBmpDisp") {
+            if (const auto slot = overlay_index(number(event, 0))) {
+                overlay_states_[*slot].visible = number(event, 1) != 0;
+            }
+        } else if (name == "SetBmpLayer") {
+            if (const auto slot = overlay_index(number(event, 0))) {
+                overlay_states_[*slot].layer = number(event, 1);
+            }
+        } else if (name == "SetBmpParam") {
+            if (const auto slot = overlay_index(number(event, 0))) {
+                overlay_states_[*slot].parameter = number(event, 1);
+                overlay_states_[*slot].parameter_value =
+                    number(event, 2) < 0 ? 0 : number(event, 2);
+            }
+        } else if (name == "SetBmpRevParam") {
+            if (const auto slot = overlay_index(number(event, 0))) {
+                overlay_states_[*slot].reverse = number(event, 1);
+            }
+        } else if (name == "SetBmpBright") {
+            if (const auto slot = overlay_index(number(event, 0))) {
+                auto& state = overlay_states_[*slot];
+                state.red = std::clamp(number(event, 1), 0, 255);
+                state.green = number(event, 2) < 0
+                    ? state.red : std::clamp(number(event, 2), 0, 255);
+                state.blue = number(event, 3) < 0
+                    ? state.red : std::clamp(number(event, 3), 0, 255);
+            }
+        } else if (name == "SetBmpMove") {
+            if (const auto slot = overlay_index(number(event, 0))) {
+                overlay_states_[*slot].destination_x = number(event, 1);
+                overlay_states_[*slot].destination_y = number(event, 2);
+            }
+        } else if (name == "SetBmpPos") {
+            if (const auto slot = overlay_index(number(event, 0))) {
+                auto& state = overlay_states_[*slot];
+                state.destination_x = number(event, 1);
+                state.destination_y = number(event, 2);
+                state.source_x = number(event, 3);
+                state.source_y = number(event, 4);
+                state.destination_width = state.source_width = number(event, 5);
+                state.destination_height = state.source_height = number(event, 6);
+                state.zoom = 0;
+            }
+        } else if (name == "SetBmpZoom") {
+            if (const auto slot = overlay_index(number(event, 0))) {
+                auto& state = overlay_states_[*slot];
+                state.destination_x = number(event, 1);
+                state.destination_y = number(event, 2);
+                state.destination_width = number(event, 3);
+                state.destination_height = number(event, 4);
+                state.zoom = 0;
+            }
+        } else if (name == "SetBmpZoom2") {
+            if (const auto slot = overlay_index(number(event, 0))) {
+                auto& state = overlay_states_[*slot];
+                state.zoom_center_x = number(event, 1);
+                state.zoom_center_y = number(event, 2);
+                state.zoom = number(event, 3);
             }
         } else if (name == "C" || name == "CW" || name == "SetChar") {
             set_character(event);
@@ -2569,7 +2680,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 9);  // native version
+        write_u32(out, 10);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -2622,6 +2733,34 @@ private:
             }
         }
         write_u32(out, overlay_count);
+        for (std::size_t i = 0; i < overlays_.size(); ++i) {
+            if (!overlays_[i]) {
+                continue;
+            }
+            const auto& state = overlay_states_[i];
+            write_u32(out, static_cast<std::uint32_t>(i));
+            write_str(out, state.name, 64);
+            write_str(out, state.archive, 16);
+            write_i32(out, state.visible ? 1 : 0);
+            write_i32(out, state.layer);
+            write_i32(out, state.parameter);
+            write_i32(out, state.parameter_value);
+            write_i32(out, state.reverse);
+            write_i32(out, state.red);
+            write_i32(out, state.green);
+            write_i32(out, state.blue);
+            write_i32(out, state.destination_x);
+            write_i32(out, state.destination_y);
+            write_i32(out, state.destination_width);
+            write_i32(out, state.destination_height);
+            write_i32(out, state.source_x);
+            write_i32(out, state.source_y);
+            write_i32(out, state.source_width);
+            write_i32(out, state.source_height);
+            write_i32(out, state.zoom_center_x);
+            write_i32(out, state.zoom_center_y);
+            write_i32(out, state.zoom);
+        }
 
         // BGM
         write_i32(out, bgm_track_);
@@ -2767,7 +2906,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 9) {
+        if (version != 10) {
             return;
         }
 
@@ -2832,9 +2971,43 @@ private:
             load_character_texture(ch);
         }
 
-        // Overlays - reset all
-        read_u32(in);
-        for (auto& ov : overlays_) { ov.reset(); }
+        // Overlays
+        for (std::size_t i = 0; i < overlays_.size(); ++i) {
+            overlays_[i].reset();
+            overlay_states_[i] = {};
+        }
+        const auto overlay_count = read_u32(in);
+        for (std::uint32_t i = 0; i < overlay_count; ++i) {
+            const auto slot = static_cast<std::size_t>(read_u32(in));
+            const auto name = read_str(in, 64);
+            const auto archive = read_str(in, 16);
+            OverlayState state;
+            state.name = name;
+            state.archive = archive;
+            state.visible = read_i32(in) != 0;
+            state.layer = read_i32(in);
+            state.parameter = read_i32(in);
+            state.parameter_value = read_i32(in);
+            state.reverse = read_i32(in);
+            state.red = read_i32(in);
+            state.green = read_i32(in);
+            state.blue = read_i32(in);
+            state.destination_x = read_i32(in);
+            state.destination_y = read_i32(in);
+            state.destination_width = read_i32(in);
+            state.destination_height = read_i32(in);
+            state.source_x = read_i32(in);
+            state.source_y = read_i32(in);
+            state.source_width = read_i32(in);
+            state.source_height = read_i32(in);
+            state.zoom_center_x = read_i32(in);
+            state.zoom_center_y = read_i32(in);
+            state.zoom = read_i32(in);
+            if (slot < overlays_.size()) {
+                load_overlay(slot, name, archive);
+                overlay_states_[slot] = std::move(state);
+            }
+        }
 
         // BGM
         bgm_track_ = read_i32(in);
@@ -4555,6 +4728,63 @@ private:
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     }
 
+    void draw_overlay(std::size_t slot)
+    {
+        if (!overlays_[slot] || !overlay_states_[slot].visible) {
+            return;
+        }
+        const auto& state = overlay_states_[slot];
+        auto* texture = overlays_[slot].get();
+        SDL_SetTextureColorMod(
+            texture,
+            static_cast<Uint8>(std::clamp(state.red * 2, 0, 255)),
+            static_cast<Uint8>(std::clamp(state.green * 2, 0, 255)),
+            static_cast<Uint8>(std::clamp(state.blue * 2, 0, 255)));
+        const int alpha = state.parameter == 11
+            ? std::clamp(state.parameter_value, 0, 256) * 255 / 256
+            : 255;
+        SDL_SetTextureAlphaMod(texture, static_cast<Uint8>(alpha));
+        if (state.parameter == 1) {
+            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_ADD);
+        } else if (state.parameter == 5) {
+            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_MOD);
+        } else {
+            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+        }
+
+        const auto scale_x = [](int value) {
+            return value * 800.0f / 640.0f;
+        };
+        const auto scale_y = [](int value) {
+            return value * 600.0f / 448.0f;
+        };
+        SDL_FRect source{
+            scale_x(state.source_x), scale_y(state.source_y),
+            scale_x(state.source_width), scale_y(state.source_height)};
+        SDL_FRect destination{
+            scale_x(state.destination_x), scale_y(state.destination_y),
+            scale_x(state.destination_width),
+            scale_y(state.destination_height)};
+        if (state.zoom != 0) {
+            const float scale = (256.0f + state.zoom) / 256.0f;
+            const float center_x = scale_x(state.zoom_center_x);
+            const float center_y = scale_y(state.zoom_center_y);
+            destination.x = center_x + (destination.x - center_x) * scale;
+            destination.y = center_y + (destination.y - center_y) * scale;
+            destination.w *= scale;
+            destination.h *= scale;
+        }
+        SDL_FlipMode flip = SDL_FLIP_NONE;
+        if ((state.reverse & 0x10) != 0) {
+            flip = static_cast<SDL_FlipMode>(flip | SDL_FLIP_HORIZONTAL);
+        }
+        if ((state.reverse & 0x20) != 0) {
+            flip = static_cast<SDL_FlipMode>(flip | SDL_FLIP_VERTICAL);
+        }
+        SDL_RenderTextureRotated(
+            renderer_, texture, &source, &destination, 0.0, nullptr, flip);
+    }
+
     void present_frame()
     {
         if (anime4k_active()) {
@@ -4605,8 +4835,8 @@ private:
             return;
         }
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
-            if (overlays_[i] && overlay_layers_[i] <= 0) {
-                SDL_RenderTexture(renderer_, overlays_[i].get(), nullptr, nullptr);
+            if (overlay_states_[i].layer < 1) {
+                draw_overlay(i);
             }
         }
         if (background_) {
@@ -4615,6 +4845,12 @@ private:
             SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
             const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
             SDL_RenderFillRect(renderer_, &game_area);
+        }
+        for (std::size_t i = 0; i < overlays_.size(); ++i) {
+            if (overlay_states_[i].layer >= 1
+                && overlay_states_[i].layer < 18) {
+                draw_overlay(i);
+            }
         }
         for (const auto& character : characters_.ordered()) {
             auto& loaded = character_texture(character.number);
@@ -4634,8 +4870,8 @@ private:
             SDL_RenderTexture(renderer_, loaded.texture.get(), nullptr, &destination);
         }
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
-            if (overlays_[i] && overlay_layers_[i] > 0) {
-                SDL_RenderTexture(renderer_, overlays_[i].get(), nullptr, nullptr);
+            if (overlay_states_[i].layer >= 18) {
+                draw_overlay(i);
             }
         }
         if (background_darkness_ > 0.0f) {
