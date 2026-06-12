@@ -7,6 +7,20 @@ std::vector<std::string> split_segments(std::string_view source)
 {
     std::vector<std::string> segments(1);
     for (std::size_t position = 0; position < source.size();) {
+        if (source[position] == '<') {
+            const auto end = source.find('>', position + 1);
+            if (end != std::string_view::npos && position + 1 < end) {
+                const char command = source[position + 1];
+                if (command == 's' || command == 'S'
+                    || command == 'w' || command == 'W'
+                    || command == 'c' || command == 'C'
+                    || command == 'f' || command == 'F'
+                    || command == 'd' || command == 'D') {
+                    position = end + 1;
+                    continue;
+                }
+            }
+        }
         if (source[position] == '\\' && position + 1 < source.size()) {
             const char command = source[position + 1];
             position += 2;

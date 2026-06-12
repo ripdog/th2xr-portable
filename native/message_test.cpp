@@ -45,4 +45,9 @@ int main()
         || message.reveal_next()) {
         return 7;
     }
+
+    message.set("<S10>Instant text<S5> normal text<W60>");
+    if (message.visible() != "Instant text normal text") {
+        return 8;
+    }
 }

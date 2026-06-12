@@ -100,14 +100,19 @@ std::vector<std::string> display_lines(std::string_view source)
 {
     std::vector<std::string> lines;
     std::string line;
+    bool just_wrapped = false;
     for (std::size_t position = 0; position < source.size();) {
         if (source[position] == '\n') {
-            lines.push_back(line);
+            if (!line.empty() || !just_wrapped) {
+                lines.push_back(line);
+            }
             line.clear();
+            just_wrapped = false;
             ++position;
             continue;
         }
         line.push_back(source[position++]);
+        just_wrapped = false;
         if (line.size() >= 58) {
             const auto space = line.find_last_of(' ');
             if (space != std::string::npos && space > 35) {
@@ -117,9 +122,12 @@ std::vector<std::string> display_lines(std::string_view source)
                 lines.push_back(line);
                 line.clear();
             }
+            just_wrapped = line.empty();
         }
     }
-    lines.push_back(line);
+    if (!line.empty() || lines.empty()) {
+        lines.push_back(line);
+    }
     return lines;
 }
 
