@@ -1,3 +1,4 @@
+#include "anime4k.hpp"
 #include "archive.hpp"
 #include "audio.hpp"
 #include "character.hpp"
@@ -152,13 +153,32 @@ public:
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
             throw std::runtime_error(SDL_GetError());
         }
-        if (!SDL_CreateWindowAndRenderer(
-                "ToHeart2 XRATED", 800, 600, SDL_WINDOW_RESIZABLE,
-                &window_, &renderer_)) {
+        window_ = SDL_CreateWindow(
+            "ToHeart2 XRATED", 1600, 1200, SDL_WINDOW_RESIZABLE);
+        SDL_PropertiesID renderer_properties = SDL_CreateProperties();
+        SDL_SetStringProperty(
+            renderer_properties, SDL_PROP_RENDERER_CREATE_NAME_STRING,
+            SDL_GPU_RENDERER);
+        SDL_SetPointerProperty(
+            renderer_properties, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER,
+            window_);
+        SDL_SetBooleanProperty(
+            renderer_properties,
+            SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true);
+        renderer_ = window_
+            ? SDL_CreateRendererWithProperties(renderer_properties) : nullptr;
+        SDL_DestroyProperties(renderer_properties);
+        if (!window_ || !renderer_) {
             throw std::runtime_error(SDL_GetError());
         }
         SDL_SetRenderLogicalPresentation(
             renderer_, 800, 600, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+        try {
+            anime4k_ = std::make_unique<th2::Anime4K>(
+                renderer_, TH2_ANIME4K_SHADER_DIR);
+        } catch (const std::exception& error) {
+            std::cerr << "Anime4K disabled: " << error.what() << '\n';
+        }
         if (config_.fullscreen) {
             SDL_SetWindowFullscreen(window_, true);
         }
@@ -481,6 +501,7 @@ private:
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     std::unique_ptr<th2::ImGuiLayer> imgui_;
+    std::unique_ptr<th2::Anime4K> anime4k_;
     Texture background_;
     int bg_scene_ = -1;
     bool bg_is_visual_ = false;
@@ -894,9 +915,16 @@ private:
         return character_textures_[number];
     }
 
-    Surface capture_frame_pixels()
+    Surface capture_frame_pixels(bool art_only = false)
     {
+        SDL_Texture* previous_target = SDL_GetRenderTarget(renderer_);
+        if (art_only && anime4k_active()) {
+            SDL_SetRenderTarget(renderer_, anime4k_->art_target());
+        }
         SDL_Surface* surface = SDL_RenderReadPixels(renderer_, nullptr);
+        if (art_only && anime4k_active()) {
+            SDL_SetRenderTarget(renderer_, previous_target);
+        }
         if (!surface) {
             throw std::runtime_error(SDL_GetError());
         }
@@ -982,7 +1010,7 @@ private:
             return;
         }
         const int effective_frames = frames > 0 ? frames : 30;
-        auto previous_pixels = capture_frame_pixels();
+        auto previous_pixels = capture_frame_pixels(true);
         auto previous = texture_from_surface(previous_pixels.get());
         Transition transition{
             std::move(previous),
@@ -2699,6 +2727,14 @@ private:
                     if (ImGui::Checkbox("Fullscreen", &config_.fullscreen)) {
                         SDL_SetWindowFullscreen(window_, config_.fullscreen);
                     }
+                    ImGui::BeginDisabled(!anime4k_ || !anime4k_->available());
+                    ImGui::Checkbox(
+                        "Anime4K art upscaling", &config_.anime4k);
+                    ImGui::EndDisabled();
+                    if (!anime4k_ || !anime4k_->available()) {
+                        ImGui::TextDisabled(
+                            "Anime4K requires SDL's GPU renderer with SPIR-V support.");
+                    }
                     ImGui::Checkbox(
                         "Mouse wheel opens backlog",
                         &config_.wheel_opens_backlog);
@@ -3639,20 +3675,59 @@ private:
         SDL_RenderTexture(renderer_, tex.get(), &src, &dst);
     }
 
+    bool anime4k_active() const
+    {
+        return config_.anime4k && anime4k_ && anime4k_->available();
+    }
+
+    void begin_overlay()
+    {
+        if (!anime4k_active()) {
+            return;
+        }
+        SDL_SetRenderTarget(renderer_, anime4k_->overlay_target());
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_NONE);
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
+        SDL_RenderClear(renderer_);
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    }
+
+    void present_frame()
+    {
+        if (anime4k_active()) {
+            anime4k_->present();
+        }
+        SDL_RenderPresent(renderer_);
+    }
+
     void draw()
     {
+        if (anime4k_active()) {
+            SDL_SetRenderTarget(renderer_, anime4k_->art_target());
+        } else {
+            SDL_SetRenderTarget(renderer_, nullptr);
+        }
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
         SDL_RenderClear(renderer_);
-        if (name_input_open_) {
+        if (movie_) {
+            movie_->draw();
+            begin_overlay();
             imgui_->render();
-            SDL_RenderPresent(renderer_);
+            present_frame();
+            return;
+        }
+        if (name_input_open_) {
+            begin_overlay();
+            imgui_->render();
+            present_frame();
             return;
         }
         if (ui_mode_ == UiMode::title) {
             draw_title();
             if (!transition_) {
+                begin_overlay();
                 imgui_->render();
-                SDL_RenderPresent(renderer_);
+                present_frame();
                 return;
             }
         }
@@ -3698,6 +3773,45 @@ private:
             const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
             SDL_RenderFillRect(renderer_, &game_area);
         }
+        if (transition_) {
+            const auto elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - transition_->started);
+            const float progress = std::clamp(
+                static_cast<float>(
+                    elapsed.count() * 60.0 / transition_->frames),
+                0.0f, 1.0f);
+            if (transition_->type >= 0x80) {
+                draw_pattern_transition(progress);
+            } else if (transition_->type == 0) {
+                if (progress < 0.5f) {
+                    SDL_SetTextureAlphaModFloat(
+                        transition_->previous.get(), 1.0f);
+                    SDL_RenderTexture(
+                        renderer_, transition_->previous.get(), nullptr, nullptr);
+                }
+                const float midpoint = progress < 0.5f
+                    ? progress * 2.0f : (1.0f - progress) * 2.0f;
+                SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+                SDL_SetRenderDrawColor(
+                    renderer_, 0, 0, 0,
+                    static_cast<Uint8>(
+                        std::clamp(midpoint, 0.0f, 1.0f) * 255.0f));
+                SDL_RenderFillRect(renderer_, nullptr);
+            } else if ((transition_->type >= 2 && transition_->type <= 10)
+                       || transition_->type == 21) {
+                draw_pixel_transition(progress);
+            } else if (transition_->type >= 11
+                       && transition_->type <= 24) {
+                draw_geometric_transition(progress);
+            } else {
+                SDL_SetTextureAlphaModFloat(
+                    transition_->previous.get(), 1.0f - progress);
+                SDL_RenderTexture(
+                    renderer_, transition_->previous.get(), nullptr, nullptr);
+            }
+            dump_transition_frame(progress);
+        }
+        begin_overlay();
         if (ui_mode_ != UiMode::backlog && message_visible_ && !message_.empty()) {
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 150);
@@ -3747,47 +3861,9 @@ private:
         if (ui_mode_ == UiMode::game || ui_mode_ == UiMode::backlog) {
             draw_sidebar();
         }
-        if (transition_) {
-            const auto elapsed = std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - transition_->started);
-            const float progress = std::clamp(
-                static_cast<float>(
-                    elapsed.count() * 60.0 / transition_->frames),
-                0.0f, 1.0f);
-            if (transition_->type >= 0x80) {
-                draw_pattern_transition(progress);
-            } else if (transition_->type == 0) {
-                if (progress < 0.5f) {
-                    SDL_SetTextureAlphaModFloat(
-                        transition_->previous.get(), 1.0f);
-                    SDL_RenderTexture(
-                        renderer_, transition_->previous.get(), nullptr, nullptr);
-                }
-                const float midpoint = progress < 0.5f
-                    ? progress * 2.0f : (1.0f - progress) * 2.0f;
-                SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-                SDL_SetRenderDrawColor(
-                    renderer_, 0, 0, 0,
-                    static_cast<Uint8>(
-                        std::clamp(midpoint, 0.0f, 1.0f) * 255.0f));
-                SDL_RenderFillRect(renderer_, nullptr);
-            } else if ((transition_->type >= 2 && transition_->type <= 10)
-                       || transition_->type == 21) {
-                draw_pixel_transition(progress);
-            } else if (transition_->type >= 11
-                       && transition_->type <= 24) {
-                draw_geometric_transition(progress);
-            } else {
-                SDL_SetTextureAlphaModFloat(
-                    transition_->previous.get(), 1.0f - progress);
-                SDL_RenderTexture(
-                    renderer_, transition_->previous.get(), nullptr, nullptr);
-            }
-            dump_transition_frame(progress);
-        }
         draw_script_position();
         imgui_->render();
-        SDL_RenderPresent(renderer_);
+        present_frame();
     }
 };
 

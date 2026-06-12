@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(SDL3 CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
     libavformat libavcodec libavutil libswscale libswresample)
@@ -142,6 +143,7 @@ add_executable(th2-image-info
 target_link_libraries(th2-image-info PRIVATE SDL3::SDL3 th2_archive)
 
 add_executable(toheart2
+    native/anime4k.cpp
     native/font.cpp
     native/game.cpp
     native/image.cpp
@@ -149,6 +151,31 @@ add_executable(toheart2
     native/message.cpp
     native/video.cpp
 )
+set(ANIME4K_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders/anime4k")
+set(ANIME4K_SHADERS apply)
+foreach(SHADER IN LISTS ANIME4K_SHADERS)
+    add_custom_command(
+        OUTPUT "${ANIME4K_SHADER_DIR}/${SHADER}.frag.spv"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${ANIME4K_SHADER_DIR}"
+        COMMAND "${GLSLANG_VALIDATOR}" -V
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/anime4k/${SHADER}.frag"
+            -o "${ANIME4K_SHADER_DIR}/${SHADER}.frag.spv"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/anime4k/${SHADER}.frag"
+        VERBATIM)
+    list(APPEND ANIME4K_SHADER_OUTPUTS
+        "${ANIME4K_SHADER_DIR}/${SHADER}.frag.spv")
+endforeach()
+add_custom_target(anime4k-shaders DEPENDS ${ANIME4K_SHADER_OUTPUTS})
+add_dependencies(toheart2 anime4k-shaders)
+target_compile_definitions(toheart2 PRIVATE
+    TH2_ANIME4K_SHADER_DIR="${ANIME4K_SHADER_DIR}")
+
+add_executable(th2-anime4k-test
+    native/anime4k.cpp
+    native/anime4k_test.cpp
+)
+add_dependencies(th2-anime4k-test anime4k-shaders)
+target_link_libraries(th2-anime4k-test PRIVATE SDL3::SDL3)
 target_link_libraries(toheart2 PRIVATE SDL3::SDL3 th2_runtime)
 target_link_libraries(toheart2 PRIVATE th2_audio th2_character th2_config imgui)
 target_link_libraries(toheart2 PRIVATE PkgConfig::FFMPEG)

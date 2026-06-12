@@ -10,6 +10,7 @@ int main()
     source.bgm_volume = 99;
     source.bgm_muted = true;
     source.auto_skip_read = true;
+    source.anime4k = false;
     source.character_voice_volume[3] = 17;
     source.character_voice_muted[3] = true;
     source.player_name.family = "Smith";
@@ -20,6 +21,7 @@ int main()
     std::filesystem::remove(path);
     if (loaded.bgm_volume != 99 || !loaded.bgm_muted
         || !loaded.auto_skip_read
+        || loaded.anime4k
         || loaded.character_voice_volume[3] != 17
         || !loaded.character_voice_muted[3]
         || loaded.player_name.family != "Smith"
