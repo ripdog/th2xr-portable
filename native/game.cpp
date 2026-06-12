@@ -478,6 +478,7 @@ public:
 
 private:
     enum class AudioWaitKind {
+        bgm,
         sound_effect,
         voice,
     };
@@ -517,11 +518,11 @@ private:
         std::chrono::milliseconds duration;
     };
 
-    struct ScriptContinuation {
-        std::string script_name;
-        std::size_t pc = 0;
-        std::array<std::int32_t, 50> registers{};
-        std::vector<std::int32_t> stack;
+    struct MapEvent {
+        int character = 0;
+        int position = 0;
+        int type = 0;
+        std::string script;
     };
 
     th2::Archive scripts_;
@@ -735,6 +736,9 @@ private:
 
     th2::AudioChannel& waited_audio_channel()
     {
+        if (audio_wait_->kind == AudioWaitKind::bgm) {
+            return bgm_;
+        }
         if (audio_wait_->kind == AudioWaitKind::voice) {
             return voice_channels_.at(audio_wait_->channel);
         }
@@ -789,10 +793,7 @@ private:
     std::array<char, 64> name_nickname_{};
     bool auto_mode_ = false;
     bool skip_mode_ = false;
-    bool section_ending_ = false;
-    std::optional<ScriptContinuation> choice_continuation_;
-    std::optional<int> choice_section_group_;
-    std::optional<int> pending_choice_group_;
+    std::vector<MapEvent> map_events_;
 
     std::string current_read_key() const
     {
@@ -825,53 +826,68 @@ private:
         advance();
     }
 
-    bool load_next_section()
+    bool load_scheduled_script()
     {
-        std::string current = runtime_.script_name();
-        std::ranges::transform(
-            current, current.begin(),
-            [](unsigned char byte) {
-                return static_cast<char>(std::toupper(byte));
-            });
-        std::vector<std::string> names;
-        for (const auto& entry : scripts_.entries()) {
-            if (entry.name.size() == current.size()
-                && std::isdigit(static_cast<unsigned char>(entry.name[0]))) {
-                names.push_back(entry.name);
-            }
-        }
-        std::ranges::sort(names);
-        const auto found = std::ranges::find(names, current);
-        if (found == names.end() || std::next(found) == names.end()) {
-            return false;
-        }
-        runtime_.load(*std::next(found));
-        section_ending_ = false;
-        return true;
-    }
+        constexpr std::size_t month_flag = 0;
+        constexpr std::size_t day_flag = 1;
+        constexpr std::size_t time_flag = 2;
+        constexpr std::size_t event_next_flag = 3;
+        constexpr std::size_t event_end_flag = 4;
 
-    bool load_after_choice_group()
-    {
-        if (!choice_section_group_) {
-            return false;
+        int month = runtime_.flag(month_flag);
+        int day = runtime_.flag(day_flag);
+        int time = runtime_.flag(time_flag);
+        const int event_next = runtime_.flag(event_next_flag);
+
+        if (time == 5 && !map_events_.empty()) {
+            const auto event = std::move(map_events_.front());
+            map_events_.clear();
+            runtime_.set_flag(event_end_flag, 1);
+            runtime_.load(event.script);
+            return true;
         }
-        const auto group_end =
-            std::format("{:09d}.SDT", *choice_section_group_ + 99);
-        choice_section_group_.reset();
-        std::vector<std::string> names;
-        for (const auto& entry : scripts_.entries()) {
-            if (!entry.name.empty()
-                && std::isdigit(static_cast<unsigned char>(entry.name[0]))) {
-                names.push_back(entry.name);
+        map_events_.clear();
+
+        if (runtime_.flag(event_end_flag) != 0) {
+            time = event_next == -1 ? time + 1 : event_next;
+            if (time >= 7) {
+                ++day;
+                time = 0;
+                if ((month == 3 && day >= 32)
+                    || (month == 4 && day >= 31)) {
+                    ++month;
+                    day = 1;
+                }
             }
         }
-        std::ranges::sort(names);
-        const auto next = std::ranges::upper_bound(names, group_end);
-        if (next == names.end()) {
+
+        const int weekday = month == 3 ? day % 7
+            : month == 4 ? (day + 3) % 7
+            : (day + 5) % 7;
+        const bool holiday =
+            (month == 3 && (day == 20 || day >= 25))
+            || (month == 4 && (day <= 7 || day == 29))
+            || (month == 5 && (day == 3 || day == 4 || day == 5));
+        if ((weekday == 0 || holiday) && time == 5) {
+            time = 6;
+        }
+
+        static constexpr std::array periods{
+            "MORNING", "INTERVAL", "LUNCH_BREAK", "SCHOOL_HOURS",
+            "AFTER_SCHOOL", "", "NIGHT",
+        };
+        if (time < 0 || time >= static_cast<int>(periods.size())
+            || periods[time][0] == '\0') {
             return false;
         }
-        runtime_.load(*next);
-        section_ending_ = false;
+
+        runtime_.set_flag(month_flag, month);
+        runtime_.set_flag(day_flag, day);
+        runtime_.set_flag(time_flag, time);
+        runtime_.set_flag(event_end_flag, 0);
+        runtime_.set_flag(event_next_flag, -1);
+        runtime_.load(std::format(
+            "EV_{:02d}{:02d}{}.SDT", month, day, periods[time]));
         return true;
     }
 
@@ -1890,7 +1906,9 @@ private:
             bgm_volume_ = number(event, 0);
             bgm_.set_gain(bgm_gain(bgm_volume_));
         } else if (name == "MW") {
-            section_ending_ = true;
+            if (bgm_.playing()) {
+                audio_wait_ = AudioWait{AudioWaitKind::bgm, 0};
+            }
         } else if (name == "SE") {
             play_se(-1, number(event, 0), false,
                     number(event, 1) < 0 ? 255 : number(event, 1), true);
@@ -1956,18 +1974,15 @@ private:
             choice_highlight_ = 0;
             choice_selected_ = -1;
         } else if (name == "SetSelectEx") {
-            ScriptContinuation continuation{
-                runtime_.script_name(), runtime_.vm_pc()};
-            std::ranges::copy(
-                runtime_.vm_registers(), continuation.registers.begin());
-            continuation.stack.assign(
-                runtime_.vm_stack().begin(), runtime_.vm_stack().end());
-            choice_continuation_ = std::move(continuation);
             choice_result_register_ = -1;
             choice_ex_ = true;
             choosing_ = true;
             choice_highlight_ = 0;
             choice_selected_ = -1;
+        } else if (name == "SetMapEvent") {
+            map_events_.push_back(MapEvent{
+                number(event, 0), number(event, 1), number(event, 2),
+                text(event, 3)});
         }
     }
 
@@ -1992,9 +2007,6 @@ private:
             if (choice_ex_) {
                 runtime_.load(choices_.at(choice_selected_).sno);
             } else if (choice_result_register_ >= 0) {
-                const int scenario =
-                    scenario_number(runtime_.script_name());
-                pending_choice_group_ = scenario / 100 * 100;
                 runtime_.set_reg(
                     static_cast<std::size_t>(choice_result_register_),
                     choice_selected_);
@@ -2007,36 +2019,9 @@ private:
             choice_ex_ = false;
         }
         while (running_ && !waiting_for_input_ && !choosing_) {
-            const auto previous_script = runtime_.script_name();
             const auto step = runtime_.run();
-            if (pending_choice_group_) {
-                const int loaded =
-                    scenario_number(runtime_.script_name());
-                if (runtime_.script_name() != previous_script
-                    && loaded / 100 * 100 == *pending_choice_group_) {
-                    choice_section_group_ = *pending_choice_group_;
-                }
-                pending_choice_group_.reset();
-            }
             if (step.reason == th2::VmYield::ended) {
-                if (choice_continuation_) {
-                    auto continuation = std::move(*choice_continuation_);
-                    choice_continuation_.reset();
-                    runtime_.load(continuation.script_name);
-                    runtime_.vm_restore(
-                        continuation.registers, continuation.stack,
-                        continuation.pc);
-                    section_ending_ = false;
-                    continue;
-                }
-                if (choice_section_group_) {
-                    if (!load_after_choice_group()) {
-                        return_to_title();
-                        break;
-                    }
-                    continue;
-                }
-                if (!section_ending_ || !load_next_section()) {
+                if (!load_scheduled_script()) {
                     return_to_title();
                     break;
                 }
@@ -2205,7 +2190,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 6);  // native version
+        write_u32(out, 7);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -2316,7 +2301,7 @@ private:
         }
         write_i32(out, audio_wait_.has_value() ? 1 : 0);
         if (audio_wait_) {
-            write_i32(out, audio_wait_->kind == AudioWaitKind::sound_effect ? 1 : 2);
+            write_i32(out, static_cast<int>(audio_wait_->kind));
             write_u32(out, static_cast<std::uint32_t>(audio_wait_->channel));
         }
 
@@ -2350,23 +2335,6 @@ private:
         write_i32(out, choice_selected_);
         write_i32(out, choice_result_register_);
         write_i32(out, choice_ex_ ? 1 : 0);
-        write_i32(out, choice_continuation_.has_value() ? 1 : 0);
-        if (choice_continuation_) {
-            write_str(out, choice_continuation_->script_name, 64);
-            write_u32(
-                out, static_cast<std::uint32_t>(
-                    choice_continuation_->pc));
-            for (const auto value : choice_continuation_->registers) {
-                write_i32(out, value);
-            }
-            write_u32(
-                out, static_cast<std::uint32_t>(
-                    choice_continuation_->stack.size()));
-            for (const auto value : choice_continuation_->stack) {
-                write_i32(out, value);
-            }
-        }
-        write_i32(out, choice_section_group_.value_or(-1));
 
         // Backlog state. Depth 0 is the current message; 1 is newest history.
         write_u32(out, static_cast<std::uint32_t>(backlog_.size()));
@@ -2408,7 +2376,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version < 1) {
+        if (version != 7) {
             return;
         }
 
@@ -2533,9 +2501,7 @@ private:
             const auto kind_int = read_i32(in);
             const auto channel = static_cast<std::size_t>(read_u32(in));
             audio_wait_ = AudioWait{
-                kind_int == 1 ? AudioWaitKind::sound_effect
-                              : AudioWaitKind::voice,
-                channel};
+                static_cast<AudioWaitKind>(kind_int), channel};
         } else {
             audio_wait_.reset();
         }
@@ -2585,25 +2551,6 @@ private:
         choice_selected_ = read_i32(in);
         choice_result_register_ = read_i32(in);
         choice_ex_ = read_i32(in) != 0;
-        choice_continuation_.reset();
-        if (read_i32(in) != 0) {
-            ScriptContinuation continuation;
-            continuation.script_name = read_str(in, 64);
-            continuation.pc = read_u32(in);
-            for (auto& value : continuation.registers) {
-                value = read_i32(in);
-            }
-            const auto stack_size = read_u32(in);
-            continuation.stack.reserve(stack_size);
-            for (std::uint32_t i = 0; i < stack_size; ++i) {
-                continuation.stack.push_back(read_i32(in));
-            }
-            choice_continuation_ = std::move(continuation);
-        }
-        const int choice_section_group = read_i32(in);
-        choice_section_group_ = choice_section_group >= 0
-            ? std::optional<int>(choice_section_group)
-            : std::nullopt;
 
         backlog_.clear();
         backlog_depth_ = 0;
@@ -2747,6 +2694,12 @@ private:
 
     void start_new_game()
     {
+        runtime_.set_flag(0, 3);
+        runtime_.set_flag(1, 1);
+        runtime_.set_flag(2, 0);
+        runtime_.set_flag(3, -1);
+        runtime_.set_flag(4, 0);
+        map_events_.clear();
         runtime_.load("EV_0301MORNING.SDT");
         ui_mode_ = UiMode::game;
         message_ = th2::Message{};
