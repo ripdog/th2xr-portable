@@ -331,6 +331,10 @@ public:
                     handle_save_load_input(event);
                     continue;
                 }
+                if (ui_mode_ == UiMode::map) {
+                    handle_map_input(event);
+                    continue;
+                }
                 if (ui_mode_ == UiMode::backlog) {
                     handle_backlog_input(event);
                     continue;
@@ -435,7 +439,14 @@ public:
             }
             const bool control_held =
                 (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
-            if (control_held) {
+            if (movie_) {
+                movie_->set_speed(control_held ? 4.0 : 1.0);
+            } else if (control_held && ui_mode_ == UiMode::title) {
+                title_started_ -= std::chrono::milliseconds(25);
+                if (title_exit_started_) {
+                    *title_exit_started_ -= std::chrono::milliseconds(25);
+                }
+            } else if (control_held && ui_mode_ == UiMode::game) {
                 const auto now = std::chrono::steady_clock::now();
                 if (now >= skip_next_time_) {
                     skip(true);
@@ -448,6 +459,7 @@ public:
             }
             update_audio();
             update_movie();
+            update_map();
             update_playback_modes();
             update_title();
             int output_width = 800;
@@ -524,6 +536,41 @@ private:
         int type = 0;
         std::string script;
     };
+
+    struct MapPosition {
+        int field;
+        int x;
+        int y;
+        int overlap;
+    };
+
+    struct MapSpritePart {
+        SDL_FRect source;
+        float x;
+        float y;
+    };
+
+    struct MapSpriteStep {
+        int frame;
+        int ticks;
+    };
+
+    struct MapCharacter {
+        Texture texture;
+        std::vector<std::vector<MapSpritePart>> frames;
+        std::vector<MapSpriteStep> steps;
+    };
+
+    static constexpr std::array<MapPosition, 22> map_positions_{{
+        {0, 280, 340, 0}, {2, 488, 210, 1}, {2, 326, 356, 2},
+        {3, 262, 304, 3}, {3, 464, 220, 4}, {4, 330, 216, 5},
+        {4, 490, 294, 6}, {1, 356, 412, 7}, {1, 288, 210, 8},
+        {1, 288, 210, 8}, {1, 288, 210, 8}, {1, 567, 326, 9},
+        {1, 288, 210, 8}, {1, 288, 210, 8}, {1, 288, 210, 8},
+        {1, 288, 210, 8}, {1, 288, 210, 8}, {1, 288, 210, 8},
+        {1, 288, 210, 8}, {1, 288, 210, 8}, {1, 288, 210, 8},
+        {1, 288, 210, 8},
+    }};
 
     th2::Archive scripts_;
     th2::Archive graphics_;
@@ -713,6 +760,11 @@ private:
     Texture ui_save_controls_;
     Texture title_background_;
     Texture title_menu_;
+    Texture map_frame_;
+    Texture map_arrows_;
+    Texture map_markers_;
+    std::array<Texture, 5> map_fields_;
+    std::vector<MapCharacter> map_characters_;
     Surface title_foreground_pixels_;
     Texture title_masked_;
     std::vector<std::uint8_t> title_mask_;
@@ -762,7 +814,7 @@ private:
     bool choice_ex_ = false;
 
     // --- UI State ---
-    enum class UiMode { title, game, system_menu, backlog, save, load };
+    enum class UiMode { title, game, system_menu, backlog, save, load, map };
     UiMode ui_mode_ = UiMode::title;
     UiMode save_return_mode_ = UiMode::game;
     int title_highlight_ = 0;
@@ -794,6 +846,14 @@ private:
     bool auto_mode_ = false;
     bool skip_mode_ = false;
     std::vector<MapEvent> map_events_;
+    int map_field_ = 1;
+    int map_previous_field_ = 1;
+    int map_hover_ = -1;
+    int map_slide_ticks_ = 0;
+    int map_fade_ticks_ = 0;
+    int map_selected_ = -1;
+    std::chrono::steady_clock::time_point map_tick_{};
+    std::chrono::steady_clock::time_point map_started_{};
 
     std::string current_read_key() const
     {
@@ -826,6 +886,242 @@ private:
         advance();
     }
 
+    int map_sakura_type() const
+    {
+        const int month = runtime_.flag(0);
+        const int day = runtime_.flag(1);
+        if (month == 3) {
+            return day <= 15 ? 4 : day <= 28 ? 2 : 0;
+        }
+        if (month == 4) {
+            return day <= 15 ? 0 : day <= 27 ? 2 : 3;
+        }
+        return 3;
+    }
+
+    static std::uint16_t map_u16(
+        std::span<const std::uint8_t> bytes, std::size_t offset)
+    {
+        return static_cast<std::uint16_t>(bytes[offset])
+            | static_cast<std::uint16_t>(bytes[offset + 1]) << 8;
+    }
+
+    static std::uint32_t map_u32(
+        std::span<const std::uint8_t> bytes, std::size_t offset)
+    {
+        return static_cast<std::uint32_t>(bytes[offset])
+            | static_cast<std::uint32_t>(bytes[offset + 1]) << 8
+            | static_cast<std::uint32_t>(bytes[offset + 2]) << 16
+            | static_cast<std::uint32_t>(bytes[offset + 3]) << 24;
+    }
+
+    MapCharacter load_map_character(const MapEvent& event)
+    {
+        const auto stem = std::format(
+            "mapc{:02d}{}", event.character, event.type);
+        const auto* animation_entry = graphics_.find(stem + ".ani");
+        if (!animation_entry) {
+            throw std::runtime_error("map animation not found: " + stem);
+        }
+        const auto bytes = graphics_.read(*animation_entry);
+        if (bytes.size() < 36 || map_u32(bytes, 0) != 0x53414e49) {
+            throw std::runtime_error("invalid map animation: " + stem);
+        }
+
+        const auto frame_count = map_u32(bytes, 24);
+        const auto sprite_count = map_u32(bytes, 28);
+        std::size_t offset = 36;
+        MapCharacter result;
+        struct Operation {
+            int code;
+            int first;
+            int second;
+        };
+        std::vector<Operation> operations;
+        result.frames.resize(frame_count);
+        for (std::size_t frame = 0; frame < frame_count; ++frame) {
+            if (offset + 24 > bytes.size()) {
+                throw std::runtime_error("truncated map animation frames");
+            }
+            const auto part_count = map_u32(bytes, offset + 20);
+            offset += 24;
+            for (std::size_t part = 0; part < part_count; ++part) {
+                if (offset + 40 > bytes.size()) {
+                    throw std::runtime_error(
+                        "truncated map animation parts");
+                }
+                if (bytes[offset] != 0) {
+                    result.frames[frame].push_back(MapSpritePart{
+                        SDL_FRect{
+                            static_cast<float>(map_u16(bytes, offset + 24)),
+                            static_cast<float>(map_u16(bytes, offset + 26)),
+                            static_cast<float>(map_u16(bytes, offset + 28)),
+                            static_cast<float>(map_u16(bytes, offset + 30)),
+                        },
+                        static_cast<float>(
+                            static_cast<std::int16_t>(
+                                map_u16(bytes, offset + 32))),
+                        static_cast<float>(
+                            static_cast<std::int16_t>(
+                                map_u16(bytes, offset + 34))),
+                    });
+                }
+                offset += 40;
+            }
+        }
+
+        for (std::size_t sprite = 0; sprite < sprite_count; ++sprite) {
+            if (offset + 8 > bytes.size()) {
+                throw std::runtime_error("truncated map animation sprites");
+            }
+            const auto operation_count = map_u32(bytes, offset + 4);
+            offset += 8;
+            for (std::size_t operation = 0;
+                 operation <= operation_count; ++operation) {
+                if (offset + 8 > bytes.size()) {
+                    throw std::runtime_error(
+                        "truncated map animation operations");
+                }
+                const auto code = map_u16(bytes, offset);
+                if (sprite == 0) {
+                    operations.push_back(Operation{
+                        static_cast<int>(code),
+                        static_cast<int>(map_u16(bytes, offset + 2)),
+                        static_cast<int>(map_u16(bytes, offset + 4)),
+                    });
+                }
+                offset += 8;
+            }
+        }
+        struct Loop {
+            std::size_t start;
+            int remaining;
+        };
+        std::vector<Loop> loops;
+        for (std::size_t pc = 0, guard = 0;
+             pc < operations.size() && guard < 10000; ++guard) {
+            const auto& operation = operations[pc];
+            if (operation.code == 0) {
+                break;
+            }
+            if (operation.code == 1) {
+                result.steps.push_back(MapSpriteStep{
+                    operation.first, operation.second + 1});
+                ++pc;
+            } else if (operation.code == 2) {
+                loops.push_back(Loop{
+                    pc + 1, operation.first + 1});
+                ++pc;
+            } else if (operation.code == 3 && !loops.empty()) {
+                auto& loop = loops.back();
+                if (--loop.remaining > 0) {
+                    pc = loop.start;
+                } else {
+                    loops.pop_back();
+                    ++pc;
+                }
+            } else {
+                ++pc;
+            }
+        }
+        if (result.steps.empty()) {
+            result.steps.push_back({0, 1});
+        }
+        result.texture =
+            load_texture(renderer_, graphics_, stem + ".tga");
+        return result;
+    }
+
+    std::string map_field_name(int field) const
+    {
+        const int variant = field == 1 || field == 4
+            ? map_sakura_type() : 0;
+        return std::format("map1{}{}.tga", field, variant);
+    }
+
+    void begin_map()
+    {
+        if (std::ranges::none_of(
+                map_events_, [](const MapEvent& event) {
+                    return event.position == 0;
+                })) {
+            map_events_.push_back(MapEvent{});
+        }
+        map_frame_ = load_texture(renderer_, graphics_, "map000.tga");
+        map_arrows_ = load_texture(renderer_, graphics_, "map010.tga");
+        map_markers_ = load_texture(renderer_, graphics_, "map011.tga");
+        std::array<bool, 5> present{};
+        present[1] = true;
+        for (const auto& event : map_events_) {
+            if (event.position >= 0
+                && event.position < static_cast<int>(map_positions_.size())) {
+                present[map_positions_[event.position].field] = true;
+            }
+        }
+        for (int field = 0; field < 5; ++field) {
+            map_fields_[field].reset();
+            if (present[field]) {
+                map_fields_[field] =
+                    load_texture(renderer_, graphics_, map_field_name(field));
+            }
+        }
+        map_characters_.clear();
+        map_characters_.resize(map_events_.size());
+        for (std::size_t i = 0; i < map_events_.size(); ++i) {
+            const auto& event = map_events_[i];
+            if (event.character == 0) {
+                continue;
+            }
+            const auto name = std::format(
+                "mapc{:02d}{}.ani", event.character, event.type);
+            if (graphics_.find(name)) {
+                map_characters_[i] = load_map_character(event);
+            }
+        }
+        map_field_ = 1;
+        map_previous_field_ = 1;
+        map_hover_ = -1;
+        map_slide_ticks_ = 0;
+        map_fade_ticks_ = 0;
+        map_selected_ = -1;
+        map_tick_ = std::chrono::steady_clock::now();
+        map_started_ = map_tick_;
+        play_bgm(10, true, 255);
+        ui_mode_ = UiMode::map;
+    }
+
+    void finish_map_selection(int selected)
+    {
+        map_selected_ = selected;
+        map_fade_ticks_ = 16;
+        play_se(-1, 9014, false, 255);
+    }
+
+    void complete_map_selection()
+    {
+        const auto selected = map_events_.at(map_selected_);
+        map_events_.clear();
+        map_characters_.clear();
+        map_frame_.reset();
+        map_arrows_.reset();
+        map_markers_.reset();
+        for (auto& field : map_fields_) {
+            field.reset();
+        }
+        runtime_.set_flag(4, 1);
+        ui_mode_ = UiMode::game;
+        if (selected.script.empty()) {
+            runtime_.set_flag(3, 6);
+            if (!load_scheduled_script()) {
+                return_to_title();
+                return;
+            }
+        } else {
+            runtime_.load(selected.script);
+        }
+        advance();
+    }
+
     bool load_scheduled_script()
     {
         constexpr std::size_t month_flag = 0;
@@ -838,15 +1134,6 @@ private:
         int day = runtime_.flag(day_flag);
         int time = runtime_.flag(time_flag);
         const int event_next = runtime_.flag(event_next_flag);
-
-        if (time == 5 && !map_events_.empty()) {
-            const auto event = std::move(map_events_.front());
-            map_events_.clear();
-            runtime_.set_flag(event_end_flag, 1);
-            runtime_.load(event.script);
-            return true;
-        }
-        map_events_.clear();
 
         if (runtime_.flag(event_end_flag) != 0) {
             time = event_next == -1 ? time + 1 : event_next;
@@ -871,6 +1158,15 @@ private:
         if ((weekday == 0 || holiday) && time == 5) {
             time = 6;
         }
+
+        if (time == 5) {
+            runtime_.set_flag(month_flag, month);
+            runtime_.set_flag(day_flag, day);
+            runtime_.set_flag(time_flag, time);
+            begin_map();
+            return true;
+        }
+        map_events_.clear();
 
         static constexpr std::array periods{
             "MORNING", "INTERVAL", "LUNCH_BREAK", "SCHOOL_HOURS",
@@ -2025,6 +2321,9 @@ private:
                     return_to_title();
                     break;
                 }
+                if (ui_mode_ == UiMode::map) {
+                    break;
+                }
                 continue;
             }
             if (step.reason == th2::VmYield::wait_frames
@@ -2190,7 +2489,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 7);  // native version
+        write_u32(out, 8);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -2336,6 +2635,16 @@ private:
         write_i32(out, choice_result_register_);
         write_i32(out, choice_ex_ ? 1 : 0);
 
+        // Pending after-school destinations survive saves made in a mandatory
+        // scene that runs before the map opens.
+        write_u32(out, static_cast<std::uint32_t>(map_events_.size()));
+        for (const auto& event : map_events_) {
+            write_i32(out, event.character);
+            write_i32(out, event.position);
+            write_i32(out, event.type);
+            write_str(out, event.script, 32);
+        }
+
         // Backlog state. Depth 0 is the current message; 1 is newest history.
         write_u32(out, static_cast<std::uint32_t>(backlog_.size()));
         for (const auto& entry : backlog_) {
@@ -2376,7 +2685,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 7) {
+        if (version != 8) {
             return;
         }
 
@@ -2551,6 +2860,16 @@ private:
         choice_selected_ = read_i32(in);
         choice_result_register_ = read_i32(in);
         choice_ex_ = read_i32(in) != 0;
+
+        map_events_.clear();
+        const auto map_event_count = read_u32(in);
+        map_events_.reserve(map_event_count);
+        for (std::uint32_t i = 0; i < map_event_count; ++i) {
+            map_events_.push_back(MapEvent{
+                read_i32(in), read_i32(in), read_i32(in),
+                read_str(in, 32),
+            });
+        }
 
         backlog_.clear();
         backlog_depth_ = 0;
@@ -3079,7 +3398,8 @@ private:
                 const SDL_FRect src{
                     static_cast<float>(column * 14),
                     static_cast<float>(row * 30), 14.0f, 30.0f};
-                const SDL_FRect dst{x, 12.0f, 14.0f, 30.0f};
+                const SDL_FRect dst{
+                    x, row == 0 ? -3.0f : 12.0f, 14.0f, 30.0f};
                 SDL_RenderTexture(
                     renderer_, ui_save_digits_.get(), &src, &dst);
                 x += 14.0f;
@@ -3149,6 +3469,145 @@ private:
                        menu_highlight_ == 4 ? 255 : 128,
                        menu_highlight_ == 4 ? 255 : 128,
                        menu_highlight_ == 4 ? 255 : 128);
+        }
+    }
+
+    void draw_map_layer(
+        int field, float x, float alpha,
+        bool draw_field, bool draw_events)
+    {
+        if (field < 0 || field >= 5 || !map_fields_[field]) {
+            return;
+        }
+        if (draw_field) {
+            SDL_SetTextureAlphaModFloat(map_fields_[field].get(), alpha);
+            const SDL_FRect field_dst{x + 80.0f, 76.0f, 640.0f, 480.0f};
+            SDL_RenderTexture(
+                renderer_, map_fields_[field].get(), nullptr, &field_dst);
+            SDL_SetTextureAlphaModFloat(map_fields_[field].get(), 1.0f);
+        }
+        if (!draw_events) {
+            return;
+        }
+
+        std::array<int, 10> overlaps{};
+        for (std::size_t i = 0; i < map_events_.size(); ++i) {
+            const auto& event = map_events_[i];
+            if (event.position < 0
+                || event.position >= static_cast<int>(map_positions_.size())) {
+                continue;
+            }
+            const auto& position = map_positions_[event.position];
+            const int overlap = ++overlaps[position.overlap];
+            int cx = position.x;
+            int cy = position.y;
+            if (overlap == 2) cx -= 200;
+            else if (overlap == 3) cx += 200;
+            else if (overlap == 4) { cx -= 100; cy += 160; }
+            if (position.field != field) {
+                continue;
+            }
+
+            if (map_markers_) {
+                int state = static_cast<int>(i) == map_hover_ ? 1 : 0;
+                if (static_cast<int>(i) == map_selected_) state = 2;
+                const SDL_FRect src{
+                    static_cast<float>(state * 130),
+                    static_cast<float>(event.position * 118),
+                    130.0f, 118.0f};
+                const SDL_FRect dst{
+                    x + cx + 20.0f, static_cast<float>(cy - 118),
+                    130.0f, 118.0f};
+                SDL_SetTextureAlphaModFloat(map_markers_.get(), alpha);
+                SDL_RenderTexture(
+                    renderer_, map_markers_.get(), &src, &dst);
+                SDL_SetTextureAlphaModFloat(map_markers_.get(), 1.0f);
+            }
+            if (i < map_characters_.size()
+                && map_characters_[i].texture) {
+                const auto& character = map_characters_[i];
+                const auto elapsed_ticks =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - map_started_)
+                        .count() * 60 / 1000;
+                int cycle_ticks = 0;
+                for (const auto& step : character.steps) {
+                    cycle_ticks += step.ticks;
+                }
+                int tick = cycle_ticks > 0
+                    ? static_cast<int>(elapsed_ticks % cycle_ticks) : 0;
+                int frame = character.steps.front().frame;
+                for (const auto& step : character.steps) {
+                    if (tick < step.ticks) {
+                        frame = step.frame;
+                        break;
+                    }
+                    tick -= step.ticks;
+                }
+                if (frame < 0
+                    || frame >= static_cast<int>(character.frames.size())) {
+                    continue;
+                }
+                SDL_SetTextureAlphaModFloat(
+                    character.texture.get(), alpha);
+                for (const auto& part : character.frames[frame]) {
+                    const SDL_FRect destination{
+                        x + cx + part.x, cy + part.y,
+                        part.source.w, part.source.h};
+                    SDL_RenderTexture(
+                        renderer_, character.texture.get(),
+                        &part.source, &destination);
+                }
+                SDL_SetTextureAlphaModFloat(
+                    character.texture.get(), 1.0f);
+            }
+        }
+    }
+
+    void draw_map(bool ui)
+    {
+        const float fade = map_fade_ticks_ > 0
+            ? map_fade_ticks_ / 16.0f
+            : std::min(1.0f,
+                    std::chrono::duration<float>(
+                    std::chrono::steady_clock::now() - map_started_).count()
+                    * 60.0f / 16.0f);
+        if (!ui && map_frame_) {
+            SDL_SetTextureAlphaModFloat(map_frame_.get(), fade);
+            SDL_RenderTexture(renderer_, map_frame_.get(), nullptr, nullptr);
+            SDL_SetTextureAlphaModFloat(map_frame_.get(), 1.0f);
+        }
+
+        if (map_slide_ticks_ == 0) {
+            draw_map_layer(map_field_, 0.0f, fade, !ui, ui);
+        } else {
+            const int ticks = std::abs(map_slide_ticks_);
+            const float square = static_cast<float>(ticks * ticks);
+            const float direction = map_slide_ticks_ > 0 ? 1.0f : -1.0f;
+            const float next_x = direction * 800.0f * square / 256.0f;
+            const float previous_x =
+                direction * 800.0f * (square - 256.0f) / 256.0f;
+            draw_map_layer(map_field_, next_x, fade, !ui, ui);
+            draw_map_layer(
+                map_previous_field_, previous_x, fade, !ui, ui);
+        }
+
+        if (ui && map_arrows_) {
+            const int left_state = map_hover_ == -2 ? 1 : 0;
+            const int right_state = map_hover_ == -3 ? 1 : 0;
+            const SDL_FRect left_src{
+                static_cast<float>(left_state * 112), 0.0f, 56.0f, 122.0f};
+            const SDL_FRect right_src{
+                static_cast<float>(right_state * 112 + 56), 0.0f,
+                56.0f, 122.0f};
+            const SDL_FRect left_dst{24.0f, 239.0f, 56.0f, 122.0f};
+            const SDL_FRect right_dst{720.0f, 239.0f, 56.0f, 122.0f};
+            SDL_SetTextureAlphaModFloat(map_arrows_.get(), fade);
+            SDL_RenderTexture(
+                renderer_, map_arrows_.get(), &left_src, &left_dst);
+            SDL_RenderTexture(
+                renderer_, map_arrows_.get(), &right_src, &right_dst);
+            SDL_SetTextureAlphaModFloat(map_arrows_.get(), 1.0f);
         }
     }
 
@@ -3632,6 +4091,114 @@ private:
         }
     }
 
+    void change_map_field(int direction)
+    {
+        if (map_slide_ticks_ != 0 || map_fade_ticks_ != 0) {
+            return;
+        }
+        map_previous_field_ = map_field_;
+        do {
+            map_field_ = (map_field_ + direction + 5) % 5;
+        } while (!map_fields_[map_field_]);
+        map_slide_ticks_ = direction > 0 ? 16 : -16;
+        map_hover_ = -1;
+        play_se(-1, 9015, false, 255);
+    }
+
+    void update_map_hover(float x, float y)
+    {
+        map_hover_ = -1;
+        if (x >= 24.0f && x < 80.0f && y >= 239.0f && y < 361.0f) {
+            map_hover_ = -2;
+            return;
+        }
+        if (x >= 720.0f && x < 776.0f && y >= 239.0f && y < 361.0f) {
+            map_hover_ = -3;
+            return;
+        }
+        std::array<int, 10> overlaps{};
+        for (std::size_t i = 0; i < map_events_.size(); ++i) {
+            const auto& event = map_events_[i];
+            if (event.position < 0
+                || event.position >= static_cast<int>(map_positions_.size())) {
+                continue;
+            }
+            const auto& position = map_positions_[event.position];
+            const int overlap = ++overlaps[position.overlap];
+            int cx = position.x;
+            int cy = position.y;
+            if (overlap == 2) cx -= 200;
+            else if (overlap == 3) cx += 200;
+            else if (overlap == 4) { cx -= 100; cy += 160; }
+            if (position.field == map_field_
+                && x >= cx + 20 && x < cx + 150
+                && y >= cy - 118 && y < cy) {
+                map_hover_ = static_cast<int>(i);
+                return;
+            }
+        }
+    }
+
+    void handle_map_input(const SDL_Event& event)
+    {
+        if (map_slide_ticks_ != 0 || map_fade_ticks_ != 0) {
+            return;
+        }
+        const int previous = map_hover_;
+        if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            update_map_hover(event.motion.x, event.motion.y);
+        } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                   && event.button.button == SDL_BUTTON_LEFT) {
+            update_map_hover(event.button.x, event.button.y);
+            if (map_hover_ == -2) {
+                change_map_field(1);
+            } else if (map_hover_ == -3) {
+                change_map_field(-1);
+            } else if (map_hover_ >= 0) {
+                finish_map_selection(map_hover_);
+            }
+        } else if (event.type == SDL_EVENT_KEY_DOWN) {
+            if (event.key.key == SDLK_PAGEUP
+                || event.key.key == SDLK_RIGHT) {
+                change_map_field(1);
+            } else if (event.key.key == SDLK_PAGEDOWN
+                       || event.key.key == SDLK_LEFT) {
+                change_map_field(-1);
+            } else if ((event.key.key == SDLK_RETURN
+                        || event.key.key == SDLK_SPACE)
+                       && map_hover_ >= 0) {
+                finish_map_selection(map_hover_);
+            }
+        }
+        if (map_hover_ != previous && map_hover_ != -1) {
+            play_se(-1, 9108, false, 255);
+        }
+    }
+
+    void update_map()
+    {
+        if (ui_mode_ != UiMode::map) {
+            return;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        constexpr auto tick = std::chrono::microseconds(1'000'000 / 60);
+        while (now - map_tick_ >= tick) {
+            map_tick_ += tick;
+            if (map_slide_ticks_ > 0) {
+                --map_slide_ticks_;
+            } else if (map_slide_ticks_ < 0) {
+                ++map_slide_ticks_;
+            }
+            if (map_fade_ticks_ > 0) {
+                --map_fade_ticks_;
+                if (map_fade_ticks_ == 0) {
+                    complete_map_selection();
+                    return;
+                }
+            }
+        }
+    }
+
     void draw_backlog()
     {
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
@@ -3943,6 +4510,15 @@ private:
                 present_frame();
                 return;
             }
+        }
+        if (ui_mode_ == UiMode::map) {
+            draw_map(false);
+            begin_overlay();
+            draw_map(true);
+            draw_script_position();
+            imgui_->render();
+            present_frame();
+            return;
         }
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
             if (overlays_[i] && overlay_layers_[i] <= 0) {

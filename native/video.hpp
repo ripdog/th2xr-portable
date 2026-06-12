@@ -21,6 +21,7 @@ public:
     void update();
     void draw() const;
     bool finished() const;
+    void set_speed(double speed);
 
 private:
     struct Impl;

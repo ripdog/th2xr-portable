@@ -61,6 +61,8 @@ struct VideoPlayer::Impl {
     std::size_t decoded_frames = 0;
     std::deque<VideoFrame> video_frames;
     std::chrono::steady_clock::time_point started;
+    double speed = 1.0;
+    double elapsed_offset = 0.0;
 
     static int read(void* opaque, std::uint8_t* destination, int size)
     {
@@ -266,6 +268,23 @@ struct VideoPlayer::Impl {
         }
     }
 
+    void set_speed(double next_speed)
+    {
+        next_speed = std::clamp(next_speed, 1.0, 8.0);
+        if (next_speed == speed) {
+            return;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        elapsed_offset += std::chrono::duration<double>(now - started).count()
+            * speed;
+        started = now;
+        speed = next_speed;
+        if (audio) {
+            SDL_SetAudioStreamFrequencyRatio(
+                audio, static_cast<float>(speed));
+        }
+    }
+
     void decode_packet(AVCodecContext* codec, bool video)
     {
         int result = avcodec_send_packet(codec, packet);
@@ -284,8 +303,9 @@ struct VideoPlayer::Impl {
 
     void update()
     {
-        const double elapsed = std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - started).count();
+        const double elapsed = elapsed_offset
+            + std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - started).count() * speed;
         while (!eof && (decoded_time < 0.0
                         || decoded_time < elapsed + 0.10)) {
             const int result = av_read_frame(format, packet);
@@ -341,6 +361,11 @@ void VideoPlayer::draw() const
 bool VideoPlayer::finished() const
 {
     return impl_->done;
+}
+
+void VideoPlayer::set_speed(double speed)
+{
+    impl_->set_speed(speed);
 }
 
 }  // namespace th2
