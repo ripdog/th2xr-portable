@@ -428,7 +428,16 @@ public:
             update_movie();
             update_playback_modes();
             update_title();
-            imgui_->new_frame();
+            int output_width = 800;
+            int output_height = 600;
+            SDL_GetRenderOutputSize(
+                renderer_, &output_width, &output_height);
+            const float scale_x = output_width / 800.0f;
+            const float scale_y = output_height / 600.0f;
+            imgui_->new_frame(scale_x, scale_y);
+            font_.configure(
+                config_.authentic_font, config_.font_family,
+                std::min(scale_x, scale_y));
             draw_config();
             draw_name_input();
             draw();
@@ -2735,6 +2744,22 @@ private:
                         ImGui::TextDisabled(
                             "Anime4K requires SDL's GPU renderer with SPIR-V support.");
                     }
+                    ImGui::SeparatorText("Text");
+                    ImGui::Checkbox(
+                        "Authentic bitmap font", &config_.authentic_font);
+                    ImGui::BeginDisabled(config_.authentic_font);
+                    std::array<char, 256> font_family{};
+                    std::snprintf(
+                        font_family.data(), font_family.size(), "%s",
+                        config_.font_family.c_str());
+                    if (ImGui::InputText(
+                            "Font family or file", font_family.data(),
+                            font_family.size())) {
+                        config_.font_family = font_family.data();
+                    }
+                    ImGui::EndDisabled();
+                    ImGui::TextDisabled(
+                        "Modern text is rasterized at the display resolution.");
                     ImGui::Checkbox(
                         "Mouse wheel opens backlog",
                         &config_.wheel_opens_backlog);

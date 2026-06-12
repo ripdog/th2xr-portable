@@ -1,7 +1,13 @@
 #include "font.hpp"
 
+#include <SDL3_ttf/SDL_ttf.h>
+#include <fontconfig/fontconfig.h>
+
 #include <array>
+#include <cmath>
+#include <filesystem>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace th2 {
 namespace {
@@ -24,6 +30,85 @@ int glyph_index(unsigned char character)
 
 }  // namespace
 
+struct GameFont::Modern {
+    struct TextureDeleter {
+        void operator()(SDL_Texture* texture) const
+        {
+            SDL_DestroyTexture(texture);
+        }
+    };
+
+    TTF_Font* font = nullptr;
+    std::string family;
+    float scale = 0.0f;
+    std::unordered_map<
+        std::string, std::unique_ptr<SDL_Texture, TextureDeleter>> textures;
+
+    ~Modern()
+    {
+        if (font) {
+            TTF_CloseFont(font);
+        }
+    }
+
+    void open(std::string_view requested_family, float requested_scale)
+    {
+        static const bool initialized = [] {
+            if (!TTF_Init()) {
+                throw std::runtime_error(SDL_GetError());
+            }
+            if (!FcInit()) {
+                throw std::runtime_error("fontconfig initialization failed");
+            }
+            return true;
+        }();
+        (void)initialized;
+        if (font && family == requested_family
+            && std::abs(scale - requested_scale) < 0.01f) {
+            return;
+        }
+        if (font) {
+            TTF_CloseFont(font);
+            font = nullptr;
+        }
+        textures.clear();
+
+        std::string path(requested_family);
+        if (!std::filesystem::is_regular_file(path)) {
+            FcPattern* pattern = FcNameParse(
+                reinterpret_cast<const FcChar8*>(path.c_str()));
+            if (!pattern) {
+                throw std::runtime_error("cannot parse font family");
+            }
+            FcConfigSubstitute(nullptr, pattern, FcMatchPattern);
+            FcDefaultSubstitute(pattern);
+            FcResult result = FcResultNoMatch;
+            FcPattern* match = FcFontMatch(nullptr, pattern, &result);
+            FcPatternDestroy(pattern);
+            FcChar8* matched_path = nullptr;
+            if (!match
+                || FcPatternGetString(
+                       match, FC_FILE, 0, &matched_path) != FcResultMatch) {
+                if (match) {
+                    FcPatternDestroy(match);
+                }
+                throw std::runtime_error(
+                    "font family not found: " + std::string(requested_family));
+            }
+            path = reinterpret_cast<const char*>(matched_path);
+            FcPatternDestroy(match);
+        }
+
+        font = TTF_OpenFont(path.c_str(), size * requested_scale);
+        if (!font) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        TTF_SetFontHinting(font, TTF_HINTING_LIGHT_SUBPIXEL);
+        family = requested_family;
+        scale = requested_scale;
+    }
+};
+
 GameFont::GameFont(const Archive& archive)
 {
     const auto* entry = archive.find("font24.fd0");
@@ -34,7 +119,10 @@ GameFont::GameFont(const Archive& archive)
     if (data_.size() < ascii_offset + 158 * half_glyph_bytes) {
         throw std::runtime_error("font24.fd0 is truncated");
     }
+    modern_ = std::make_unique<Modern>();
 }
+
+GameFont::~GameFont() = default;
 
 const std::uint8_t* GameFont::glyph(unsigned char character) const
 {
@@ -48,7 +136,15 @@ int GameFont::glyph_width(unsigned char character) const
     return glyph(character) ? width : 0;
 }
 
-void GameFont::draw(
+void GameFont::configure(
+    bool authentic, std::string_view family, float framebuffer_scale)
+{
+    authentic_ = authentic;
+    family_ = family.empty() ? "sans-serif" : std::string(family);
+    framebuffer_scale_ = std::max(framebuffer_scale, 1.0f);
+}
+
+void GameFont::draw_bitmap(
     SDL_Renderer* renderer, float x, float y, std::string_view text,
     std::uint8_t red, std::uint8_t green, std::uint8_t blue) const
 {
@@ -78,6 +174,57 @@ void GameFont::draw(
             }
         }
         x += width;
+    }
+}
+
+void GameFont::draw(
+    SDL_Renderer* renderer, float x, float y, std::string_view text,
+    std::uint8_t red, std::uint8_t green, std::uint8_t blue) const
+{
+    if (authentic_ || text.empty()) {
+        draw_bitmap(renderer, x, y, text, red, green, blue);
+        return;
+    }
+
+    try {
+        modern_->open(family_, framebuffer_scale_);
+        const SDL_Color color{red, green, blue, 255};
+        std::string key(text);
+        key.append({
+            static_cast<char>(red),
+            static_cast<char>(green),
+            static_cast<char>(blue),
+        });
+        auto found = modern_->textures.find(key);
+        if (found == modern_->textures.end()) {
+            auto* surface = TTF_RenderText_Blended(
+                modern_->font, text.data(), text.size(), color);
+            if (!surface) {
+                throw std::runtime_error(SDL_GetError());
+            }
+            auto* texture = SDL_CreateTextureFromSurface(renderer, surface);
+            SDL_DestroySurface(surface);
+            if (!texture) {
+                throw std::runtime_error(SDL_GetError());
+            }
+            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+            if (modern_->textures.size() >= 512) {
+                modern_->textures.clear();
+            }
+            found = modern_->textures.emplace(key, texture).first;
+        }
+        float texture_width = 0.0f;
+        float texture_height = 0.0f;
+        SDL_GetTextureSize(
+            found->second.get(), &texture_width, &texture_height);
+        const SDL_FRect destination{
+            x, y,
+            texture_width / framebuffer_scale_,
+            texture_height / framebuffer_scale_};
+        SDL_RenderTexture(
+            renderer, found->second.get(), nullptr, &destination);
+    } catch (const std::exception&) {
+        draw_bitmap(renderer, x, y, text, red, green, blue);
     }
 }
 

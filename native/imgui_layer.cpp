@@ -154,11 +154,13 @@ void ImGuiLayer::process_event(const SDL_Event& event)
     }
 }
 
-void ImGuiLayer::new_frame()
+void ImGuiLayer::new_frame(
+    float framebuffer_scale_x, float framebuffer_scale_y)
 {
     auto& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(800.0f, 600.0f);
-    io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+    io.DisplayFramebufferScale =
+        ImVec2(framebuffer_scale_x, framebuffer_scale_y);
     const auto ticks = SDL_GetTicks();
     io.DeltaTime = last_frame_ticks_ == 0
         ? 1.0f / 60.0f

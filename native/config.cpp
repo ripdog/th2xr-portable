@@ -68,6 +68,10 @@ GameConfig load_config(const std::filesystem::path& path)
             config.fullscreen = parse_bool(value);
         } else if (key == "anime4k") {
             config.anime4k = parse_bool(value);
+        } else if (key == "authentic_font") {
+            config.authentic_font = parse_bool(value);
+        } else if (key == "font_family") {
+            config.font_family = value;
         } else if (key == "show_script_position") {
             config.show_script_position = parse_bool(value);
         } else if (key == "dump_transition_frames") {
@@ -123,6 +127,8 @@ void save_config(const std::filesystem::path& path, const GameConfig& config)
            << "wheel_opens_backlog=" << config.wheel_opens_backlog << '\n'
            << "fullscreen=" << config.fullscreen << '\n'
            << "anime4k=" << config.anime4k << '\n'
+           << "authentic_font=" << config.authentic_font << '\n'
+           << "font_family=" << config.font_family << '\n'
            << "show_script_position=" << config.show_script_position << '\n'
            << "dump_transition_frames=" << config.dump_transition_frames << '\n'
            << "name_family=" << config.player_name.family << '\n'

@@ -15,7 +15,8 @@ public:
     ImGuiLayer& operator=(const ImGuiLayer&) = delete;
 
     void process_event(const SDL_Event& event);
-    void new_frame();
+    void new_frame(float framebuffer_scale_x = 1.0f,
+                   float framebuffer_scale_y = 1.0f);
     void render();
     bool wants_input() const;
 

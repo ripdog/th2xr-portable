@@ -11,6 +11,8 @@ find_package(SDL3 CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
+pkg_check_modules(SDL3_TTF REQUIRED IMPORTED_TARGET sdl3-ttf)
+pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
     libavformat libavcodec libavutil libswscale libswresample)
 
@@ -176,7 +178,8 @@ add_executable(th2-anime4k-test
 )
 add_dependencies(th2-anime4k-test anime4k-shaders)
 target_link_libraries(th2-anime4k-test PRIVATE SDL3::SDL3)
-target_link_libraries(toheart2 PRIVATE SDL3::SDL3 th2_runtime)
+target_link_libraries(toheart2 PRIVATE
+    SDL3::SDL3 PkgConfig::SDL3_TTF PkgConfig::FONTCONFIG th2_runtime)
 target_link_libraries(toheart2 PRIVATE th2_audio th2_character th2_config imgui)
 target_link_libraries(toheart2 PRIVATE PkgConfig::FFMPEG)
 

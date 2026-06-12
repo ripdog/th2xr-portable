@@ -11,6 +11,8 @@ int main()
     source.bgm_muted = true;
     source.auto_skip_read = true;
     source.anime4k = false;
+    source.authentic_font = true;
+    source.font_family = "Test Sans";
     source.character_voice_volume[3] = 17;
     source.character_voice_muted[3] = true;
     source.player_name.family = "Smith";
@@ -22,6 +24,8 @@ int main()
     if (loaded.bgm_volume != 99 || !loaded.bgm_muted
         || !loaded.auto_skip_read
         || loaded.anime4k
+        || !loaded.authentic_font
+        || loaded.font_family != "Test Sans"
         || loaded.character_voice_volume[3] != 17
         || !loaded.character_voice_muted[3]
         || loaded.player_name.family != "Smith"
