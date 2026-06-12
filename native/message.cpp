@@ -25,6 +25,9 @@ std::vector<std::string> split_segments(std::string_view source)
             const char command = source[position + 1];
             position += 2;
             if (command == 'k' || command == 'K') {
+                if (segments.back().find_first_not_of(" \t") == std::string::npos) {
+                    segments.back().clear();
+                }
                 segments.emplace_back();
             } else if (command == 'n' || command == 'N') {
                 segments.back().push_back('\n');

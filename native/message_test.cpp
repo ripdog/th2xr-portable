@@ -50,4 +50,10 @@ int main()
     if (message.visible() != "Instant text normal text") {
         return 8;
     }
+
+    message.set("spoken line");
+    message.append(" \\k");
+    if (message.visible() != "spoken line") {
+        return 9;
+    }
 }
