@@ -3685,7 +3685,12 @@ private:
         if (!anime4k_active()) {
             return;
         }
-        SDL_SetRenderTarget(renderer_, anime4k_->overlay_target());
+        auto* overlay = anime4k_->overlay_target();
+        SDL_SetRenderTarget(renderer_, overlay);
+        float width = 0.0f;
+        float height = 0.0f;
+        SDL_GetTextureSize(overlay, &width, &height);
+        SDL_SetRenderScale(renderer_, width / 800.0f, height / 600.0f);
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_NONE);
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
         SDL_RenderClear(renderer_);
@@ -3702,6 +3707,7 @@ private:
 
     void draw()
     {
+        SDL_SetRenderScale(renderer_, 1.0f, 1.0f);
         if (anime4k_active()) {
             SDL_SetRenderTarget(renderer_, anime4k_->art_target());
         } else {

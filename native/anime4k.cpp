@@ -123,12 +123,12 @@ struct Anime4K::Impl {
     void present()
     {
         ensure_overlay();
+        SDL_SetRenderScale(renderer, 1.0f, 1.0f);
         SDL_SetRenderTarget(renderer, nullptr);
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
         SDL_SetGPURenderState(renderer, states[0]);
         SDL_RenderTexture(renderer, art.get(), nullptr, nullptr);
-        SDL_SetGPURenderState(renderer, nullptr);
         SDL_SetGPURenderState(renderer, nullptr);
         SDL_RenderTexture(renderer, overlay.get(), nullptr, nullptr);
     }
