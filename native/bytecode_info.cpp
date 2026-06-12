@@ -58,8 +58,7 @@ int main(int argc, char** argv)
         std::ranges::sort(sorted, {}, &std::pair<std::string, std::size_t>::second);
         std::cout << instructions << " instructions, " << counts.size()
                   << " opcodes\n";
-        const auto shown = std::min<std::size_t>(sorted.size(), 25);
-        for (std::size_t index = 0; index < shown; ++index) {
+        for (std::size_t index = 0; index < sorted.size(); ++index) {
             const auto& [name, count] = sorted[sorted.size() - index - 1];
             std::cout << "  " << name << ": " << count << '\n';
         }
