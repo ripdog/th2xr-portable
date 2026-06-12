@@ -479,6 +479,9 @@ public:
             draw();
             update_transition();
             update_background_fade();
+            update_screen_flash();
+            update_shake();
+            update_background_scroll();
             next_frame += frame_duration;
             const auto now = std::chrono::steady_clock::now();
             if (next_frame > now) {
@@ -556,6 +559,48 @@ private:
         std::chrono::milliseconds duration;
     };
 
+    struct ScreenFlash {
+        int red = 255;
+        int green = 255;
+        int blue = 255;
+        int fade_in_frames = 1;
+        int fade_out_frames = 1;
+        std::chrono::steady_clock::time_point started;
+    };
+
+    struct ShakeState {
+        int type = 0;
+        int pitch = 0;
+        int frames = 0;
+        int direction = 0;
+        int swing = 256;
+        std::chrono::steady_clock::time_point started;
+    };
+
+    struct ShakeSample {
+        float x = 0.0f;
+        float y = 0.0f;
+        float scale = 1.0f;
+        double angle = 0.0;
+        bool text_only = false;
+        bool includes_text = false;
+    };
+
+    struct BackgroundView {
+        float x = 0.0f;
+        float y = 0.0f;
+        float width = 800.0f;
+        float height = 600.0f;
+    };
+
+    struct BackgroundScroll {
+        BackgroundView from;
+        BackgroundView to;
+        int frames = 1;
+        int easing = 0;
+        std::chrono::steady_clock::time_point started;
+    };
+
     struct MapEvent {
         int character = 0;
         int position = 0;
@@ -617,6 +662,8 @@ private:
     Texture background_;
     int bg_scene_ = -1;
     bool bg_is_visual_ = false;
+    BackgroundView background_view_;
+    std::optional<BackgroundScroll> background_scroll_;
     std::array<Texture, 32> overlays_{};
     std::array<OverlayState, 32> overlay_states_{};
     th2::Characters characters_;
@@ -808,6 +855,9 @@ private:
     std::optional<AudioWait> audio_wait_;
     std::optional<Transition> transition_;
     std::optional<BackgroundFade> background_fade_;
+    std::optional<ScreenFlash> screen_flash_;
+    std::optional<ShakeState> shake_;
+    Texture shake_target_;
     float background_darkness_ = 0.0f;
     std::chrono::steady_clock::time_point skip_next_time_{};
     std::optional<std::chrono::steady_clock::time_point> auto_next_time_;
@@ -1229,7 +1279,10 @@ private:
     void update_playback_modes()
     {
         if (config_open_ || ui_mode_ != UiMode::game || choosing_
-            || transition_ || background_fade_ || wake_time_ || audio_wait_) {
+            || transition_ || background_fade_ || screen_flash_
+            || (shake_ && shake_->frames > 0)
+            || background_scroll_
+            || wake_time_ || audio_wait_) {
             auto_next_time_.reset();
             return;
         }
@@ -1309,6 +1362,29 @@ private:
         if (background_fade_) {
             if (force_unread) {
                 background_fade_->started -= background_fade_->duration;
+            }
+            return;
+        }
+        if (screen_flash_) {
+            if (force_unread) {
+                const auto frames = screen_flash_->fade_in_frames
+                    + screen_flash_->fade_out_frames;
+                screen_flash_->started -= std::chrono::milliseconds(
+                    frames * 1000 / 60);
+            }
+            return;
+        }
+        if (shake_ && shake_->frames > 0) {
+            if (force_unread) {
+                shake_->started -= std::chrono::milliseconds(
+                    shake_->frames * 1000 / 60);
+            }
+            return;
+        }
+        if (background_scroll_) {
+            if (force_unread) {
+                background_scroll_->started -= std::chrono::milliseconds(
+                    background_scroll_->frames * 1000 / 60);
             }
             return;
         }
@@ -1916,6 +1992,183 @@ private:
         }
     }
 
+    void update_screen_flash()
+    {
+        if (!screen_flash_) {
+            return;
+        }
+        const int total_frames =
+            screen_flash_->fade_in_frames + screen_flash_->fade_out_frames;
+        const auto elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - screen_flash_->started).count();
+        if (elapsed * 60.0 >= total_frames) {
+            screen_flash_.reset();
+            advance();
+        }
+    }
+
+    float screen_flash_alpha() const
+    {
+        if (!screen_flash_) {
+            return 0.0f;
+        }
+        const float frame = static_cast<float>(
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now()
+                - screen_flash_->started).count() * 60.0);
+        if (frame < screen_flash_->fade_in_frames) {
+            return std::clamp(
+                frame / screen_flash_->fade_in_frames, 0.0f, 1.0f);
+        }
+        return std::clamp(
+            1.0f - (frame - screen_flash_->fade_in_frames)
+                / screen_flash_->fade_out_frames,
+            0.0f, 1.0f);
+    }
+
+    void update_shake()
+    {
+        if (!shake_ || shake_->frames == 0) {
+            return;
+        }
+        const auto elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - shake_->started).count();
+        if (elapsed * 60.0 >= shake_->frames) {
+            shake_.reset();
+            advance();
+        }
+    }
+
+    ShakeSample shake_sample() const
+    {
+        ShakeSample result;
+        if (!shake_) {
+            return result;
+        }
+        const float frame = static_cast<float>(
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - shake_->started).count()
+            * 60.0);
+        const float decay = shake_->frames > 0
+            ? std::clamp(1.0f - frame / shake_->frames, 0.0f, 1.0f)
+            : 1.0f;
+        const int phase = static_cast<int>(frame * shake_->swing / 8.0f);
+        float amount = static_cast<float>(shake_->pitch);
+        if (shake_->type == 0 || shake_->type == 3
+            || shake_->type == 6 || shake_->type == 15
+            || shake_->type == 16) {
+            amount *= static_cast<float>(
+                std::cos((phase % 3600) * std::numbers::pi / 1800.0));
+            amount *= decay;
+        } else if (shake_->type == 1 || shake_->type == 4
+                   || shake_->type == 7) {
+            amount *= (static_cast<int>(frame) & 1) ? 1.0f : -1.0f;
+        } else if (shake_->type == 9 || shake_->type == 10
+                   || shake_->type == 11) {
+            const auto value = static_cast<std::uint32_t>(frame) * 1103515245u
+                + 12345u;
+            result.x = static_cast<float>(
+                static_cast<int>((value >> 16) % 3) - 1) * amount;
+            result.y = static_cast<float>(
+                static_cast<int>((value >> 20) % 3) - 1) * amount;
+        } else if (shake_->type == 2) {
+            const float root = std::sqrt(std::max(0, shake_->pitch));
+            const float cycle = std::fmod(
+                frame * root * 2.0f / std::max(1, shake_->frames),
+                std::max(1.0f, root));
+            result.scale = 1.0f + cycle * cycle / 256.0f;
+        } else if (shake_->type == 12) {
+            const float eased = 1.0f - decay * decay;
+            float turn = std::fmod(eased * shake_->pitch / 2.0f, 256.0f);
+            if ((shake_->direction & 1) == 0) {
+                turn = 256.0f - turn;
+            }
+            result.angle = turn * 360.0 / 256.0;
+        } else if (shake_->type == 13) {
+            const float turn = -static_cast<float>(
+                std::cos((phase % 3600) * std::numbers::pi / 1800.0))
+                * shake_->pitch / 4096.0f * decay;
+            result.angle = turn * 360.0 / 256.0;
+        } else if (shake_->type == 14) {
+            static constexpr std::array<int, 4> steps{-1, 0, 1, 0};
+            result.angle = steps[static_cast<int>(frame) & 3]
+                * shake_->pitch * 360.0 / 256.0;
+        }
+
+        if (result.x == 0.0f && result.y == 0.0f
+            && result.scale == 1.0f && result.angle == 0.0) {
+            const bool left = shake_->direction == 1
+                || shake_->direction == 2 || shake_->direction == 3;
+            const bool right = shake_->direction == 5
+                || shake_->direction == 6 || shake_->direction == 7;
+            const bool up = shake_->direction == 3
+                || shake_->direction == 4 || shake_->direction == 5;
+            const bool down = shake_->direction == 0
+                || shake_->direction == 1 || shake_->direction == 7;
+            result.x = left ? -amount : right ? amount : 0.0f;
+            result.y = up ? -amount : down ? amount : 0.0f;
+        }
+        result.text_only = shake_->type == 3 || shake_->type == 4
+            || shake_->type == 10;
+        result.includes_text = shake_->type == 6 || shake_->type == 7
+            || shake_->type == 11 || shake_->type == 16;
+        return result;
+    }
+
+    BackgroundView current_background_view() const
+    {
+        if (!background_scroll_) {
+            return background_view_;
+        }
+        const float raw = std::clamp(
+            static_cast<float>(std::chrono::duration<double>(
+                std::chrono::steady_clock::now()
+                - background_scroll_->started).count()
+                * 60.0 / background_scroll_->frames),
+            0.0f, 1.0f);
+        const float progress = background_scroll_->easing == 1
+            ? raw * raw
+            : background_scroll_->easing == 2
+                ? 1.0f - (1.0f - raw) * (1.0f - raw)
+                : raw;
+        const auto mix = [progress](float from, float to) {
+            return from + (to - from) * progress;
+        };
+        return {
+            mix(background_scroll_->from.x, background_scroll_->to.x),
+            mix(background_scroll_->from.y, background_scroll_->to.y),
+            mix(background_scroll_->from.width, background_scroll_->to.width),
+            mix(background_scroll_->from.height, background_scroll_->to.height),
+        };
+    }
+
+    void update_background_scroll()
+    {
+        if (!background_scroll_) {
+            return;
+        }
+        const auto elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now()
+            - background_scroll_->started).count();
+        if (elapsed * 60.0 >= background_scroll_->frames) {
+            background_view_ = background_scroll_->to;
+            background_scroll_.reset();
+            advance();
+        }
+    }
+
+    void begin_background_scroll(
+        float x, float y, float width, float height, int frames, int type)
+    {
+        background_scroll_ = BackgroundScroll{
+            current_background_view(),
+            {x, y, width, height},
+            std::max(1, frames),
+            type % 3,
+            std::chrono::steady_clock::now(),
+        };
+    }
+
     void load_character_texture(const th2::CharacterState& character)
     {
         auto& loaded = character_texture(character.number);
@@ -2062,6 +2315,8 @@ private:
             + std::max<std::int32_t>(0, number(event, 2));
         bg_scene_ = scene;
         bg_is_visual_ = false;
+        background_view_ = {};
+        background_scroll_.reset();
         if (scene == 0) {
             background_.reset();
             characters_.clear();
@@ -2081,6 +2336,8 @@ private:
         }
         bg_scene_ = visual;
         bg_is_visual_ = true;
+        background_view_ = {};
+        background_scroll_.reset();
         background_ = load_texture(
             renderer_, graphics_, std::format("v{:06d}.tga", visual));
         const bool keep_characters = number(event, 4) > 0;
@@ -2162,6 +2419,36 @@ private:
                 number(event, 0) + number(event, 1) + number(event, 2))
                 / (3.0f * 128.0f);
             begin_background_fade(1.0f - average, number(event, 3));
+        } else if (name == "F" || name == "SetFlash") {
+            screen_flash_ = ScreenFlash{
+                std::clamp(number(event, 0), 0, 255),
+                std::clamp(number(event, 1), 0, 255),
+                std::clamp(number(event, 2), 0, 255),
+                std::max(1, number(event, 3)),
+                std::max(1, number(event, 4)),
+                std::chrono::steady_clock::now(),
+            };
+        } else if (name == "Q" || name == "SetShake") {
+            shake_ = ShakeState{
+                number(event, 0),
+                number(event, 1),
+                std::max(0, number(event, 2)),
+                number(event, 3),
+                event.arguments.size() > 4 && number(event, 4) >= 0
+                    ? number(event, 4) : 256,
+                std::chrono::steady_clock::now(),
+            };
+        } else if (name == "StopShake") {
+            shake_.reset();
+        } else if (name == "S") {
+            begin_background_scroll(
+                number(event, 0), number(event, 1), 800.0f, 600.0f,
+                number(event, 2), number(event, 3));
+        } else if (name == "Z") {
+            begin_background_scroll(
+                number(event, 0), number(event, 1),
+                number(event, 2), number(event, 3),
+                number(event, 4), number(event, 5) + 3);
         } else if (name == "WaitFrame") {
             const int frames = std::max<std::int32_t>(0, number(event, 0));
             wake_time_ = std::chrono::steady_clock::now()
@@ -2498,6 +2785,9 @@ private:
     void advance(bool skipping = false)
     {
         if (wake_time_ || audio_wait_ || transition_ || background_fade_
+            || screen_flash_
+            || (shake_ && shake_->frames > 0)
+            || background_scroll_
             || movie_) {
             return;
         }
@@ -2584,6 +2874,15 @@ private:
                     break;
                 }
                 if (background_fade_) {
+                    break;
+                }
+                if (screen_flash_) {
+                    break;
+                }
+                if (shake_ && shake_->frames > 0) {
+                    break;
+                }
+                if (background_scroll_) {
                     break;
                 }
                 if (ui_mode_ != UiMode::game) {
@@ -2711,7 +3010,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 11);  // native version
+        write_u32(out, 13);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -2721,6 +3020,18 @@ private:
         write_i32(out, vi_event_voice_no_all_);
         write_i32(out, demo_mode_ ? 1 : 0);
         write_i32(out, demo_delay_frames_);
+        write_i32(out, shake_.has_value() ? 1 : 0);
+        if (shake_) {
+            write_i32(out, shake_->type);
+            write_i32(out, shake_->pitch);
+            write_i32(out, shake_->frames);
+            write_i32(out, shake_->direction);
+            write_i32(out, shake_->swing);
+            const auto elapsed = std::chrono::duration_cast<
+                std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - shake_->started).count();
+            write_i64(out, elapsed);
+        }
 
         // VM state
         write_u32(out, static_cast<std::uint32_t>(runtime_.vm_pc()));
@@ -2745,6 +3056,10 @@ private:
         // Background
         write_i32(out, bg_scene_);
         write_i32(out, bg_is_visual_ ? 1 : 0);
+        write_i32(out, static_cast<std::int32_t>(background_view_.x));
+        write_i32(out, static_cast<std::int32_t>(background_view_.y));
+        write_i32(out, static_cast<std::int32_t>(background_view_.width));
+        write_i32(out, static_cast<std::int32_t>(background_view_.height));
 
         // Characters
         const auto ordered = characters_.ordered();
@@ -2939,7 +3254,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 11) {
+        if (version != 13) {
             return;
         }
 
@@ -2963,6 +3278,19 @@ private:
         vi_event_voice_no_all_ = read_i32(in);
         demo_mode_ = read_i32(in) != 0;
         demo_delay_frames_ = read_i32(in);
+        if (read_i32(in)) {
+            ShakeState state;
+            state.type = read_i32(in);
+            state.pitch = read_i32(in);
+            state.frames = read_i32(in);
+            state.direction = read_i32(in);
+            state.swing = read_i32(in);
+            state.started = std::chrono::steady_clock::now()
+                - std::chrono::milliseconds(read_i64(in));
+            shake_ = state;
+        } else {
+            shake_.reset();
+        }
 
         // VM state
         const auto pc = read_u32(in);
@@ -2988,6 +3316,11 @@ private:
         // Background
         bg_scene_ = read_i32(in);
         bg_is_visual_ = read_i32(in) != 0;
+        background_view_.x = static_cast<float>(read_i32(in));
+        background_view_.y = static_cast<float>(read_i32(in));
+        background_view_.width = static_cast<float>(read_i32(in));
+        background_view_.height = static_cast<float>(read_i32(in));
+        background_scroll_.reset();
         restore_background();
 
         // Characters
@@ -4828,13 +5161,33 @@ private:
         SDL_RenderPresent(renderer_);
     }
 
+    void ensure_shake_target()
+    {
+        if (shake_target_) {
+            return;
+        }
+        shake_target_.reset(SDL_CreateTexture(
+            renderer_, SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_TARGET, 800, 600));
+        if (!shake_target_) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        SDL_SetTextureBlendMode(shake_target_.get(), SDL_BLENDMODE_NONE);
+    }
+
     void draw()
     {
         SDL_SetRenderScale(renderer_, 1.0f, 1.0f);
-        if (anime4k_active()) {
-            SDL_SetRenderTarget(renderer_, anime4k_->art_target());
+        SDL_Texture* art_target =
+            anime4k_active() ? anime4k_->art_target() : nullptr;
+        const auto shake = shake_sample();
+        const bool shake_art = shake_ && ui_mode_ == UiMode::game
+            && !shake.text_only;
+        if (shake_art) {
+            ensure_shake_target();
+            SDL_SetRenderTarget(renderer_, shake_target_.get());
         } else {
-            SDL_SetRenderTarget(renderer_, nullptr);
+            SDL_SetRenderTarget(renderer_, art_target);
         }
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
         SDL_RenderClear(renderer_);
@@ -4875,7 +5228,12 @@ private:
             }
         }
         if (background_) {
-            SDL_RenderTexture(renderer_, background_.get(), nullptr, nullptr);
+            const auto view = current_background_view();
+            const SDL_FRect source{
+                view.x, view.y, view.width, view.height};
+            const SDL_FRect destination{0.0f, 0.0f, 800.0f, 600.0f};
+            SDL_RenderTexture(
+                renderer_, background_.get(), &source, &destination);
         } else if (bg_scene_ == 0) {
             SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
             const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
@@ -4955,8 +5313,27 @@ private:
             }
             dump_transition_frame(progress);
         }
+        if (shake_art) {
+            SDL_SetRenderTarget(renderer_, art_target);
+            SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+            SDL_RenderClear(renderer_);
+            SDL_FRect destination{
+                shake.x + 400.0f * (1.0f - shake.scale),
+                shake.y + 300.0f * (1.0f - shake.scale),
+                800.0f * shake.scale, 600.0f * shake.scale};
+            SDL_RenderTextureRotated(
+                renderer_, shake_target_.get(), nullptr, &destination,
+                shake.angle, nullptr, SDL_FLIP_NONE);
+        }
         begin_overlay();
-        if (ui_mode_ != UiMode::backlog && message_visible_ && !message_.empty()) {
+        if (shake_ && (shake.text_only || shake.includes_text)) {
+            const SDL_Rect viewport{
+                static_cast<int>(shake.x), static_cast<int>(shake.y),
+                800, 600};
+            SDL_SetRenderViewport(renderer_, &viewport);
+        }
+        if (!screen_flash_ && ui_mode_ != UiMode::backlog
+            && message_visible_ && !message_.empty()) {
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 150);
             SDL_RenderFillRect(renderer_, nullptr);
@@ -4971,7 +5348,7 @@ private:
                 }
             }
         }
-        if (ui_mode_ != UiMode::backlog
+        if (!screen_flash_ && ui_mode_ != UiMode::backlog
             && message_visible_ && choosing_ && !choices_.empty()) {
             float y = choice_y_start();
             for (int i = 0; i < static_cast<int>(choices_.size()); ++i) {
@@ -4988,6 +5365,7 @@ private:
                 }
             }
         }
+        SDL_SetRenderViewport(renderer_, nullptr);
         if (ui_mode_ == UiMode::game) {
             draw_click_indicator();
         }
@@ -5000,6 +5378,16 @@ private:
         }
         if (ui_mode_ == UiMode::game || ui_mode_ == UiMode::backlog) {
             draw_sidebar();
+        }
+        if (screen_flash_) {
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(
+                renderer_,
+                static_cast<Uint8>(screen_flash_->red),
+                static_cast<Uint8>(screen_flash_->green),
+                static_cast<Uint8>(screen_flash_->blue),
+                static_cast<Uint8>(screen_flash_alpha() * 255.0f));
+            SDL_RenderFillRect(renderer_, nullptr);
         }
         draw_script_position();
         imgui_->render();
