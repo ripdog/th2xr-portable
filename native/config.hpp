@@ -34,6 +34,7 @@ struct GameConfig {
     bool dump_transition_frames = false;
     PlayerName player_name;
     std::unordered_set<std::string> read_lines;
+    std::unordered_set<int> unlocked_replays;
 };
 
 GameConfig load_config(const std::filesystem::path& path);

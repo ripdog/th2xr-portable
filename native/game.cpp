@@ -873,6 +873,8 @@ private:
     std::array<char, 64> name_nickname_{};
     bool auto_mode_ = false;
     bool skip_mode_ = false;
+    bool demo_mode_ = false;
+    int demo_delay_frames_ = 0;
     std::vector<MapEvent> map_events_;
     int map_field_ = 1;
     int map_previous_field_ = 1;
@@ -1240,14 +1242,17 @@ private:
             }
             return;
         }
-        if (!auto_mode_ || !waiting_for_input_ || voice_playing()) {
+        if ((!auto_mode_ && !demo_mode_)
+            || !waiting_for_input_ || voice_playing()) {
             auto_next_time_.reset();
             return;
         }
         if (!auto_next_time_) {
-            const int delay = th2::auto_delay_ms(
-                config_, current_text_is_read(),
-                message_.has_hidden_segments(), message_ends_block_);
+            const int delay = demo_mode_
+                ? std::max(0, demo_delay_frames_) * 1000 / 60
+                : th2::auto_delay_ms(
+                    config_, current_text_is_read(),
+                    message_.has_hidden_segments(), message_ends_block_);
             auto_next_time_ = now + std::chrono::milliseconds(delay);
         } else if (now >= *auto_next_time_) {
             auto_next_time_.reset();
@@ -2173,6 +2178,21 @@ private:
             }
         } else if (name == "SetMovie") {
             start_movie(number(event, 0), 0, true);
+        } else if (name == "SetEnding") {
+            const int ending = number(event, 1) == 1 || number(event, 0) == 10
+                ? 0 : number(event, 0);
+            start_movie(1, ending, true);
+        } else if (name == "SetOpening") {
+            start_movie(0, 0, true);
+        } else if (name == "SetTitle" || name == "GameEnd") {
+            return_to_title();
+        } else if (name == "SetDemoFlag") {
+            demo_mode_ = number(event, 0) != 0;
+            demo_delay_frames_ = std::max(0, number(event, 1));
+            auto_next_time_.reset();
+        } else if (name == "SetReplayNo") {
+            config_.unlocked_replays.emplace(number(event, 0));
+            th2::save_config(config_path_, config_);
         } else if (name == "BD") {
             background_.reset();
             bg_scene_ = -1;
@@ -2303,6 +2323,14 @@ private:
             message_ends_block_ = number(event, 1) == 2;
             waiting_for_input_ = true;
             auto_next_time_.reset();
+        } else if (name == "T") {
+            message_visible_ = number(event, 0) != 0;
+        } else if (name == "K" || name == "WaitKey") {
+            waiting_for_input_ = true;
+            message_ends_block_ = true;
+            auto_next_time_.reset();
+        } else if (name == "W" || name == "WR") {
+            // These compatibility opcodes are explicit no-ops in the original.
         } else if (name == "M") {
             const int music = number(event, 0);
             if (music < 0) {
@@ -2558,6 +2586,9 @@ private:
                 if (background_fade_) {
                     break;
                 }
+                if (ui_mode_ != UiMode::game) {
+                    break;
+                }
                 if (skipping && waiting_for_input_) {
                     break;
                 }
@@ -2680,7 +2711,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 10);  // native version
+        write_u32(out, 11);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -2688,6 +2719,8 @@ private:
         write_i32(out, weather_);
         write_i32(out, vi_event_voice_no_);
         write_i32(out, vi_event_voice_no_all_);
+        write_i32(out, demo_mode_ ? 1 : 0);
+        write_i32(out, demo_delay_frames_);
 
         // VM state
         write_u32(out, static_cast<std::uint32_t>(runtime_.vm_pc()));
@@ -2906,7 +2939,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 10) {
+        if (version != 11) {
             return;
         }
 
@@ -2928,6 +2961,8 @@ private:
         weather_ = read_i32(in);
         vi_event_voice_no_ = read_i32(in);
         vi_event_voice_no_all_ = read_i32(in);
+        demo_mode_ = read_i32(in) != 0;
+        demo_delay_frames_ = read_i32(in);
 
         // VM state
         const auto pc = read_u32(in);

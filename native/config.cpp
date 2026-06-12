@@ -108,6 +108,11 @@ GameConfig load_config(const std::filesystem::path& path)
             }
         } else if (key == "read") {
             config.read_lines.emplace(value);
+        } else if (key == "replay") {
+            const auto replay = parse_int(value, -1, -1, 255);
+            if (replay >= 0) {
+                config.unlocked_replays.emplace(replay);
+            }
         }
     }
     return config;
@@ -150,6 +155,9 @@ void save_config(const std::filesystem::path& path, const GameConfig& config)
     }
     for (const auto& key : config.read_lines) {
         output << "read=" << key << '\n';
+    }
+    for (const auto replay : config.unlocked_replays) {
+        output << "replay=" << replay << '\n';
     }
 }
 
