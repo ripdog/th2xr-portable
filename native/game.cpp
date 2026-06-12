@@ -113,7 +113,10 @@ std::vector<std::string> display_lines(std::string_view source)
         }
         line.push_back(source[position++]);
         just_wrapped = false;
-        if (line.size() >= 58) {
+        // A leading separator after \k is visible immediately. The original
+        // renderer does not wrap until the next printable glyph establishes
+        // that the line is over width.
+        if (line.size() >= 58 && line.back() != ' ') {
             const auto space = line.find_last_of(' ');
             if (space != std::string::npos && space > 35) {
                 lines.push_back(line.substr(0, space));
