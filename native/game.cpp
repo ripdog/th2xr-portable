@@ -3071,6 +3071,31 @@ private:
             SDL_RenderFillRect(renderer_, nullptr);
         }
 
+        // The original renders "<month>A<day>B" with sys0230.tga at (138, 12).
+        // A and B are the month/day suffix glyphs on the sheet's second row.
+        if (ui_save_digits_) {
+            float x = 138.0f;
+            const auto draw_date_glyph = [&](int column, int row) {
+                const SDL_FRect src{
+                    static_cast<float>(column * 14),
+                    static_cast<float>(row * 30), 14.0f, 30.0f};
+                const SDL_FRect dst{x, 12.0f, 14.0f, 30.0f};
+                SDL_RenderTexture(
+                    renderer_, ui_save_digits_.get(), &src, &dst);
+                x += 14.0f;
+            };
+            const auto draw_number = [&](int value) {
+                const auto digits = std::to_string(value);
+                for (const char digit : digits) {
+                    draw_date_glyph(digit - '0', 0);
+                }
+            };
+            draw_number(runtime_.flag(0));
+            draw_date_glyph(1, 1);
+            draw_number(runtime_.flag(1));
+            draw_date_glyph(2, 1);
+        }
+
         // 4 main buttons from sys0110.tga
         // Layout: Save(0,0) Load(400,0) Hide(0,246) Settings(400,246)
         // Each: w=400, h=82, 3 states stacked vertically (0,82,164)
