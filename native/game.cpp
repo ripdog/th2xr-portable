@@ -275,6 +275,25 @@ public:
                         || event.type == SDL_EVENT_MOUSE_WHEEL)) {
                     continue;
                 }
+                if (clock_state_) {
+                    continue;
+                }
+                if (calendar_state_) {
+                    const bool dismiss =
+                        event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                        || event.type == SDL_EVENT_KEY_DOWN;
+                    const float frame = static_cast<float>(
+                        std::chrono::duration<double>(
+                            std::chrono::steady_clock::now()
+                            - calendar_state_->started).count() * 60.0);
+                    if (dismiss && !calendar_state_->dismissing
+                        && frame >= 16.0f) {
+                        calendar_state_->dismissing = true;
+                        calendar_state_->started =
+                            std::chrono::steady_clock::now();
+                    }
+                    continue;
+                }
                 if (movie_) {
                     const bool skip_key = event.type == SDL_EVENT_KEY_DOWN
                         && (event.key.key == SDLK_ESCAPE
@@ -482,6 +501,8 @@ public:
             update_screen_flash();
             update_shake();
             update_background_scroll();
+            update_clock_calendar();
+            update_sakura();
             next_frame += frame_duration;
             const auto now = std::chrono::steady_clock::now();
             if (next_frame > now) {
@@ -630,6 +651,44 @@ private:
         Texture texture;
         std::vector<std::vector<MapSpritePart>> frames;
         std::vector<MapSpriteStep> steps;
+    };
+
+    struct ClockState {
+        int target = 0;
+        int start_minutes = 0;
+        int target_minutes = 0;
+        int travel_frames = 0;
+        std::chrono::steady_clock::time_point started;
+    };
+
+    struct CalendarState {
+        int month = 0;
+        int day = 0;
+        int weekday = 0;
+        int holiday = -1;
+        bool dismissing = false;
+        std::chrono::steady_clock::time_point started;
+    };
+
+    struct SakuraPetal {
+        bool active = false;
+        int type = 0;
+        float x = 0.0f;
+        float y = 0.0f;
+        float axis_x = 0.0f;
+        float axis_y = 0.0f;
+        std::uint32_t counter = 0;
+    };
+
+    struct SakuraState {
+        std::array<SakuraPetal, 200> petals;
+        int amount = 0;
+        int target_amount = 0;
+        float wind = 1.0f;
+        int speed = 10;
+        int tick = 0;
+        int reset_frames = -1;
+        std::chrono::steady_clock::time_point updated;
     };
 
     static constexpr std::array<MapPosition, 22> map_positions_{{
@@ -840,6 +899,19 @@ private:
     Texture map_markers_;
     std::array<Texture, 5> map_fields_;
     std::vector<MapCharacter> map_characters_;
+    Texture clock_background_;
+    std::optional<MapCharacter> clock_animation_;
+    std::optional<ClockState> clock_state_;
+    Texture calendar_background_;
+    Texture calendar_labels_;
+    Texture calendar_days_;
+    std::optional<CalendarState> calendar_state_;
+    int skipped_month_ = 0;
+    int skipped_day_ = 0;
+    Texture sakura_large_;
+    Texture sakura_small_;
+    std::optional<SakuraState> sakura_;
+    std::uint32_t sakura_random_ = 0x13579bdfu;
     Surface title_foreground_pixels_;
     Texture title_masked_;
     std::vector<std::uint8_t> title_mask_;
@@ -995,10 +1067,8 @@ private:
             | static_cast<std::uint32_t>(bytes[offset + 3]) << 24;
     }
 
-    MapCharacter load_map_character(const MapEvent& event)
+    MapCharacter load_sprite_animation(const std::string& stem)
     {
-        const auto stem = std::format(
-            "mapc{:02d}{}", event.character, event.type);
         const auto* animation_entry = graphics_.find(stem + ".ani");
         if (!animation_entry) {
             throw std::runtime_error("map animation not found: " + stem);
@@ -1110,6 +1180,387 @@ private:
         result.texture =
             load_texture(renderer_, graphics_, stem + ".tga");
         return result;
+    }
+
+    MapCharacter load_map_character(const MapEvent& event)
+    {
+        return load_sprite_animation(std::format(
+            "mapc{:02d}{}", event.character, event.type));
+    }
+
+    static constexpr std::array<int, 20> clock_minutes_{
+        8 * 60 + 43, 9 * 60 + 5, 9 * 60 + 25, 9 * 60 + 35,
+        10 * 60, 10 * 60 + 20, 10 * 60 + 30, 10 * 60 + 55,
+        11 * 60 + 15, 11 * 60 + 25, 11 * 60 + 50, 12 * 60 + 10,
+        12 * 60 + 35, 13 * 60, 13 * 60 + 25, 13 * 60 + 45,
+        13 * 60 + 55, 14 * 60 + 20, 14 * 60 + 40, 14 * 60 + 50,
+    };
+
+    int weekday(int month, int day) const
+    {
+        if (month == 3) return day % 7;
+        if (month == 4) return (day + 3) % 7;
+        if (month == 5) return (day + 5) % 7;
+        return 0;
+    }
+
+    int calendar_holiday(int month, int day) const
+    {
+        struct Holiday {
+            int month;
+            int first;
+            int last;
+            int index;
+        };
+        static constexpr std::array holidays{
+            Holiday{3, 12, 12, 0}, Holiday{3, 20, 20, 1},
+            Holiday{3, 24, 24, 2}, Holiday{3, 25, 31, 3},
+            Holiday{4, 1, 7, 3}, Holiday{4, 8, 8, 4},
+            Holiday{4, 29, 29, 5}, Holiday{5, 3, 3, 6},
+            Holiday{5, 4, 4, 7}, Holiday{5, 5, 5, 8},
+        };
+        for (const auto& holiday : holidays) {
+            if (holiday.month == month
+                && day >= holiday.first && day <= holiday.last) {
+                return holiday.index;
+            }
+        }
+        return -1;
+    }
+
+    void begin_clock(int requested)
+    {
+        const int current = std::clamp(runtime_.flag(7), 0, 19);
+        int target = std::clamp(requested, 0, 19);
+        if (weekday(runtime_.flag(0), runtime_.flag(1)) == 6) {
+            target = std::min(target, 11);
+        }
+        if (current == target) {
+            return;
+        }
+        if (!clock_background_) {
+            clock_background_ =
+                load_texture(renderer_, graphics_, "clock98.tga");
+            clock_animation_ = load_sprite_animation("clock99");
+        }
+        const int start_minutes = clock_minutes_[current];
+        const int target_minutes = clock_minutes_[target];
+        clock_state_ = ClockState{
+            target, start_minutes, target_minutes,
+            std::max(0, (target_minutes - start_minutes + 5) / 6),
+            std::chrono::steady_clock::now(),
+        };
+    }
+
+    void begin_calendar(int month, int day)
+    {
+        if (skipped_month_ != 0) {
+            runtime_.set_flag(0, skipped_month_);
+            runtime_.set_flag(1, skipped_day_);
+            runtime_.set_flag(2, -1);
+            runtime_.set_flag(3, -1);
+            runtime_.set_flag(4, 0);
+            runtime_.set_flag(7, 0);
+            skipped_month_ = 0;
+            skipped_day_ = 0;
+        }
+        if (month < 0) {
+            month = runtime_.flag(0);
+            day = runtime_.flag(1);
+        }
+        calendar_background_ = load_texture(
+            renderer_, graphics_, std::format("cal00{}.tga", month));
+        if (!calendar_labels_) {
+            calendar_labels_ =
+                load_texture(renderer_, graphics_, "cal010.tga");
+            calendar_days_ =
+                load_texture(renderer_, graphics_, "cal011.tga");
+        }
+        background_.reset();
+        characters_.clear();
+        character_textures_ = {};
+        calendar_state_ = CalendarState{
+            month, day, weekday(month, day), calendar_holiday(month, day),
+            false, std::chrono::steady_clock::now(),
+        };
+    }
+
+    void update_clock_calendar()
+    {
+        if (clock_state_) {
+            const float frame = static_cast<float>(
+                std::chrono::duration<double>(
+                    std::chrono::steady_clock::now()
+                    - clock_state_->started).count() * 60.0);
+            if (frame >= 32 + clock_state_->travel_frames) {
+                runtime_.set_flag(7, clock_state_->target);
+                clock_state_.reset();
+                advance();
+            }
+        }
+        if (calendar_state_ && calendar_state_->dismissing) {
+            const float frame = static_cast<float>(
+                std::chrono::duration<double>(
+                    std::chrono::steady_clock::now()
+                    - calendar_state_->started).count() * 60.0);
+            if (frame >= 16.0f) {
+                calendar_state_.reset();
+                advance();
+            }
+        }
+    }
+
+    void draw_sprite_frame(
+        const MapCharacter& animation, int frame, float x, float y)
+    {
+        if (frame < 0
+            || static_cast<std::size_t>(frame) >= animation.frames.size()) {
+            return;
+        }
+        for (const auto& part : animation.frames[frame]) {
+            SDL_FRect destination{
+                x + part.x, y + part.y, part.source.w, part.source.h};
+            SDL_RenderTexture(
+                renderer_, animation.texture.get(),
+                &part.source, &destination);
+        }
+    }
+
+    void draw_clock_calendar()
+    {
+        if (clock_state_) {
+            const float frame = static_cast<float>(
+                std::chrono::duration<double>(
+                    std::chrono::steady_clock::now()
+                    - clock_state_->started).count() * 60.0);
+            float alpha = 1.0f;
+            if (frame < 16.0f) {
+                alpha = frame / 16.0f;
+            } else if (frame > 16.0f + clock_state_->travel_frames) {
+                alpha = 1.0f
+                    - (frame - 16.0f - clock_state_->travel_frames) / 16.0f;
+            }
+            const int minutes = std::min(
+                clock_state_->target_minutes,
+                clock_state_->start_minutes
+                    + std::max(0, static_cast<int>(frame) - 16) * 6);
+            SDL_SetTextureAlphaModFloat(
+                clock_background_.get(), std::clamp(alpha, 0.0f, 1.0f));
+            SDL_RenderTexture(
+                renderer_, clock_background_.get(), nullptr, nullptr);
+            SDL_SetTextureAlphaModFloat(
+                clock_animation_->texture.get(),
+                std::clamp(alpha, 0.0f, 1.0f));
+            draw_sprite_frame(
+                *clock_animation_,
+                (minutes / 60 % 12) * 10 + minutes % 60 / 6,
+                400.0f, 300.0f);
+            draw_sprite_frame(
+                *clock_animation_, 120 + minutes % 60 * 2,
+                400.0f, 300.0f);
+            return;
+        }
+        if (!calendar_state_) {
+            return;
+        }
+        const float frame = static_cast<float>(
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now()
+                - calendar_state_->started).count() * 60.0);
+        const float alpha = calendar_state_->dismissing
+            ? std::clamp(1.0f - frame / 16.0f, 0.0f, 1.0f)
+            : std::clamp(frame / 16.0f, 0.0f, 1.0f);
+        SDL_SetTextureAlphaModFloat(calendar_background_.get(), alpha);
+        SDL_SetTextureAlphaModFloat(calendar_labels_.get(), alpha);
+        SDL_SetTextureAlphaModFloat(calendar_days_.get(), alpha);
+        SDL_RenderTexture(
+            renderer_, calendar_background_.get(), nullptr, nullptr);
+
+        static constexpr std::array<int, 7> weekday_type{2, 0, 0, 0, 0, 0, 1};
+        int day_type = weekday_type[calendar_state_->weekday];
+        if (calendar_state_->holiday == 1
+            || calendar_state_->holiday >= 5) {
+            day_type = 2;
+        }
+        const SDL_FRect day_source{
+            static_cast<float>(day_type * 248),
+            static_cast<float>((calendar_state_->day - 1) * 144),
+            248.0f, 144.0f};
+        const SDL_FRect day_destination{256.0f, 240.0f, 248.0f, 144.0f};
+        SDL_RenderTexture(
+            renderer_, calendar_days_.get(),
+            &day_source, &day_destination);
+
+        const SDL_FRect weekday_source{
+            0.0f, static_cast<float>(calendar_state_->weekday * 32),
+            168.0f, 32.0f};
+        const SDL_FRect weekday_destination{88.0f, 352.0f, 168.0f, 32.0f};
+        SDL_RenderTexture(
+            renderer_, calendar_labels_.get(),
+            &weekday_source, &weekday_destination);
+        const SDL_FRect small_source{
+            168.0f, static_cast<float>(calendar_state_->weekday * 34),
+            34.0f, 34.0f};
+        const SDL_FRect small_destination{504.0f, 347.0f, 34.0f, 34.0f};
+        SDL_RenderTexture(
+            renderer_, calendar_labels_.get(),
+            &small_source, &small_destination);
+        const int holiday = calendar_state_->holiday;
+        const SDL_FRect holiday_source{
+            static_cast<float>(202 + (holiday < 0 ? 0 : holiday / 3 * 164)),
+            static_cast<float>((holiday < 0 ? 3 : holiday % 3) * 50),
+            164.0f, 50.0f};
+        const SDL_FRect holiday_destination{538.0f, 331.0f, 164.0f, 50.0f};
+        SDL_RenderTexture(
+            renderer_, calendar_labels_.get(),
+            &holiday_source, &holiday_destination);
+    }
+
+    std::uint32_t next_sakura_random()
+    {
+        sakura_random_ = sakura_random_ * 1103515245u + 12345u;
+        return sakura_random_;
+    }
+
+    void spawn_sakura_petals()
+    {
+        if (!sakura_ || sakura_->reset_frames >= 0) {
+            return;
+        }
+        while (sakura_->amount < sakura_->target_amount
+               && sakura_->amount < static_cast<int>(sakura_->petals.size())
+               && sakura_->tick % 5 == 0) {
+            auto& petal = sakura_->petals[sakura_->amount++];
+            petal.active = true;
+            petal.type = static_cast<int>(next_sakura_random() % 6);
+            petal.x = static_cast<float>(next_sakura_random() % 800);
+            petal.y = -static_cast<float>(next_sakura_random() % 100);
+            const int range = (6 - petal.type) * 100;
+            petal.axis_x =
+                (static_cast<float>(next_sakura_random() % range) / 100.0f
+                 + 1.0f) / 2.0f;
+            petal.axis_y =
+                (static_cast<float>(next_sakura_random() % range) / 100.0f
+                 + 1.0f) / 2.0f;
+            petal.counter = next_sakura_random() % 256;
+            break;
+        }
+    }
+
+    void update_sakura()
+    {
+        if (!sakura_) {
+            return;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        int steps = static_cast<int>(std::chrono::duration<double>(
+            now - sakura_->updated).count() * 60.0);
+        steps = std::clamp(steps, 0, 8);
+        if (steps == 0) {
+            return;
+        }
+        sakura_->updated += std::chrono::milliseconds(steps * 1000 / 60);
+        for (int step = 0; step < steps; ++step) {
+            ++sakura_->tick;
+            if (sakura_->reset_frames >= 0) {
+                ++sakura_->reset_frames;
+            }
+            spawn_sakura_petals();
+            for (int i = 0; i < sakura_->amount; ++i) {
+                auto& petal = sakura_->petals[i];
+                if (!petal.active) {
+                    continue;
+                }
+                petal.x += static_cast<float>(
+                    std::sin((petal.counter % 3600)
+                             * std::numbers::pi / 1800.0))
+                    * petal.axis_x + sakura_->wind;
+                petal.y += petal.axis_y;
+                if (petal.y > 600.0f) {
+                    if (sakura_->reset_frames >= 0) {
+                        petal.active = false;
+                    } else {
+                        petal.x =
+                            static_cast<float>(next_sakura_random() % 800);
+                        petal.y =
+                            -static_cast<float>(next_sakura_random() % 100);
+                    }
+                }
+                if (petal.x >= 800.0f) {
+                    petal.x -= 830.0f;
+                } else if (petal.x < -30.0f) {
+                    petal.x += 830.0f;
+                }
+                ++petal.counter;
+            }
+        }
+        if (sakura_->reset_frames >= 16) {
+            sakura_.reset();
+        }
+    }
+
+    void draw_sakura()
+    {
+        if (!sakura_) {
+            return;
+        }
+        const float alpha = sakura_->reset_frames < 0
+            ? 1.0f
+            : std::clamp(
+                1.0f - sakura_->reset_frames / 16.0f, 0.0f, 1.0f);
+        SDL_SetTextureAlphaModFloat(sakura_large_.get(), alpha);
+        SDL_SetTextureAlphaModFloat(sakura_small_.get(), alpha);
+        for (int i = 0; i < sakura_->amount; ++i) {
+            const auto& petal = sakura_->petals[i];
+            if (!petal.active) {
+                continue;
+            }
+            SDL_FRect source;
+            Texture* texture = nullptr;
+            if (petal.type == 0) {
+                const int frame = petal.counter / 2 % 23;
+                source = {
+                    static_cast<float>(40 * (frame % 10)),
+                    static_cast<float>(27 * (frame / 10)), 40.0f, 27.0f};
+                texture = &sakura_small_;
+            } else if (petal.type == 1) {
+                const int frame = petal.counter / 2 % 20;
+                source = {
+                    static_cast<float>(27 * (frame % 15)),
+                    static_cast<float>(80 + 20 * (frame / 15)),
+                    27.0f, 20.0f};
+                texture = &sakura_small_;
+            } else if (petal.type == 2) {
+                const int frame = petal.counter / 2 % 17;
+                source = {
+                    static_cast<float>(13 * (frame % 30)), 120.0f,
+                    13.0f, 13.0f};
+                texture = &sakura_small_;
+            } else if (petal.type == 3) {
+                const int frame = petal.counter / 2 % 23;
+                source = {
+                    static_cast<float>(30 * (frame % 10)),
+                    static_cast<float>(20 * (frame / 10)), 30.0f, 20.0f};
+                texture = &sakura_large_;
+            } else if (petal.type == 4) {
+                const int frame = petal.counter / 2 % 20;
+                source = {
+                    static_cast<float>(20 * (frame % 15)),
+                    static_cast<float>(60 + 15 * (frame / 15)),
+                    20.0f, 15.0f};
+                texture = &sakura_large_;
+            } else {
+                const int frame = petal.counter / 2 % 17;
+                source = {
+                    static_cast<float>(10 * (frame % 30)), 90.0f,
+                    10.0f, 10.0f};
+                texture = &sakura_large_;
+            }
+            const SDL_FRect destination{
+                petal.x, petal.y, source.w, source.h};
+            SDL_RenderTexture(
+                renderer_, texture->get(), &source, &destination);
+        }
     }
 
     std::string map_field_name(int field) const
@@ -1282,6 +1733,7 @@ private:
             || transition_ || background_fade_ || screen_flash_
             || (shake_ && shake_->frames > 0)
             || background_scroll_
+            || clock_state_ || calendar_state_
             || wake_time_ || audio_wait_) {
             auto_next_time_.reset();
             return;
@@ -1346,6 +1798,21 @@ private:
 
     void skip(bool force_unread = false)
     {
+        if (clock_state_) {
+            if (force_unread) {
+                clock_state_->started -= std::chrono::milliseconds(250);
+            }
+            return;
+        }
+        if (calendar_state_) {
+            if (!calendar_state_->dismissing) {
+                calendar_state_->dismissing = true;
+                calendar_state_->started = std::chrono::steady_clock::now();
+            } else if (force_unread) {
+                calendar_state_->started -= std::chrono::milliseconds(250);
+            }
+            return;
+        }
         if (choosing_) {
             return;
         }
@@ -2402,6 +2869,12 @@ private:
                     number(event, 0), number(event, 3), number(event, 6), true);
                 set_background(event);
             }
+        } else if (name == "H" || name == "HT") {
+            if (number(event, 1) >= 0) {
+                begin_transition(
+                    number(event, 0), number(event, 3), number(event, 7), true);
+                set_background(event);
+            }
         } else if (name == "V" || name == "VT") {
             begin_transition(
                 number(event, 0), number(event, 3), number(event, 7), true);
@@ -2480,6 +2953,33 @@ private:
         } else if (name == "SetReplayNo") {
             config_.unlocked_replays.emplace(number(event, 0));
             th2::save_config(config_path_, config_);
+        } else if (name == "ViewClock") {
+            begin_clock(number(event, 0));
+        } else if (name == "ViewCalender") {
+            begin_calendar(number(event, 0), number(event, 1));
+        } else if (name == "SkipDate") {
+            skipped_month_ = number(event, 0);
+            skipped_day_ = number(event, 1);
+        } else if (name == "SetSakura") {
+            if (!sakura_large_) {
+                sakura_large_ =
+                    load_texture(renderer_, graphics_, "sakura.bmp");
+                sakura_small_ =
+                    load_texture(renderer_, graphics_, "sakura2.bmp");
+            }
+            if (!sakura_) {
+                sakura_ = SakuraState{};
+                sakura_->updated = std::chrono::steady_clock::now();
+            }
+            sakura_->target_amount =
+                std::clamp(number(event, 0), 0, 200);
+            sakura_->wind = 1.0f;
+            sakura_->speed = 10;
+            sakura_->reset_frames = -1;
+        } else if (name == "StopSakura") {
+            if (sakura_ && sakura_->reset_frames < 0) {
+                sakura_->reset_frames = 0;
+            }
         } else if (name == "BD") {
             background_.reset();
             bg_scene_ = -1;
@@ -2788,6 +3288,7 @@ private:
             || screen_flash_
             || (shake_ && shake_->frames > 0)
             || background_scroll_
+            || clock_state_ || calendar_state_
             || movie_) {
             return;
         }
@@ -2883,6 +3384,9 @@ private:
                     break;
                 }
                 if (background_scroll_) {
+                    break;
+                }
+                if (clock_state_ || calendar_state_) {
                     break;
                 }
                 if (ui_mode_ != UiMode::game) {
@@ -3010,7 +3514,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 13);  // native version
+        write_u32(out, 15);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -3020,6 +3524,8 @@ private:
         write_i32(out, vi_event_voice_no_all_);
         write_i32(out, demo_mode_ ? 1 : 0);
         write_i32(out, demo_delay_frames_);
+        write_i32(out, skipped_month_);
+        write_i32(out, skipped_day_);
         write_i32(out, shake_.has_value() ? 1 : 0);
         if (shake_) {
             write_i32(out, shake_->type);
@@ -3031,6 +3537,28 @@ private:
                 std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - shake_->started).count();
             write_i64(out, elapsed);
+        }
+        write_i32(out, sakura_.has_value() ? 1 : 0);
+        write_u32(out, sakura_random_);
+        if (sakura_) {
+            write_i32(out, sakura_->amount);
+            write_i32(out, sakura_->target_amount);
+            write_i32(out, static_cast<std::int32_t>(sakura_->wind * 1000.0f));
+            write_i32(out, sakura_->speed);
+            write_i32(out, sakura_->tick);
+            write_i32(out, sakura_->reset_frames);
+            for (int i = 0; i < sakura_->amount; ++i) {
+                const auto& petal = sakura_->petals[i];
+                write_i32(out, petal.active ? 1 : 0);
+                write_i32(out, petal.type);
+                write_i32(out, static_cast<std::int32_t>(petal.x * 1000.0f));
+                write_i32(out, static_cast<std::int32_t>(petal.y * 1000.0f));
+                write_i32(
+                    out, static_cast<std::int32_t>(petal.axis_x * 1000.0f));
+                write_i32(
+                    out, static_cast<std::int32_t>(petal.axis_y * 1000.0f));
+                write_u32(out, petal.counter);
+            }
         }
 
         // VM state
@@ -3254,7 +3782,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 13) {
+        if (version != 15) {
             return;
         }
 
@@ -3278,6 +3806,8 @@ private:
         vi_event_voice_no_all_ = read_i32(in);
         demo_mode_ = read_i32(in) != 0;
         demo_delay_frames_ = read_i32(in);
+        skipped_month_ = read_i32(in);
+        skipped_day_ = read_i32(in);
         if (read_i32(in)) {
             ShakeState state;
             state.type = read_i32(in);
@@ -3290,6 +3820,39 @@ private:
             shake_ = state;
         } else {
             shake_.reset();
+        }
+        const bool has_sakura = read_i32(in) != 0;
+        sakura_random_ = read_u32(in);
+        if (has_sakura) {
+            SakuraState state;
+            state.amount = read_i32(in);
+            state.target_amount = read_i32(in);
+            state.wind = read_i32(in) / 1000.0f;
+            state.speed = read_i32(in);
+            state.tick = read_i32(in);
+            state.reset_frames = read_i32(in);
+            state.updated = std::chrono::steady_clock::now();
+            if (state.amount < 0
+                || state.amount > static_cast<int>(state.petals.size())) {
+                throw std::runtime_error("invalid sakura save state");
+            }
+            for (int i = 0; i < state.amount; ++i) {
+                auto& petal = state.petals[i];
+                petal.active = read_i32(in) != 0;
+                petal.type = read_i32(in);
+                petal.x = read_i32(in) / 1000.0f;
+                petal.y = read_i32(in) / 1000.0f;
+                petal.axis_x = read_i32(in) / 1000.0f;
+                petal.axis_y = read_i32(in) / 1000.0f;
+                petal.counter = read_u32(in);
+            }
+            sakura_large_ =
+                load_texture(renderer_, graphics_, "sakura.bmp");
+            sakura_small_ =
+                load_texture(renderer_, graphics_, "sakura2.bmp");
+            sakura_ = std::move(state);
+        } else {
+            sakura_.reset();
         }
 
         // VM state
@@ -5326,6 +5889,13 @@ private:
                 shake.angle, nullptr, SDL_FLIP_NONE);
         }
         begin_overlay();
+        if (clock_state_ || calendar_state_) {
+            draw_clock_calendar();
+            draw_script_position();
+            imgui_->render();
+            present_frame();
+            return;
+        }
         if (shake_ && (shake.text_only || shake.includes_text)) {
             const SDL_Rect viewport{
                 static_cast<int>(shake.x), static_cast<int>(shake.y),
@@ -5379,6 +5949,7 @@ private:
         if (ui_mode_ == UiMode::game || ui_mode_ == UiMode::backlog) {
             draw_sidebar();
         }
+        draw_sakura();
         if (screen_flash_) {
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(
