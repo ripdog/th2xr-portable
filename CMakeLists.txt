@@ -153,6 +153,13 @@ target_link_libraries(toheart2 PRIVATE SDL3::SDL3 th2_runtime)
 target_link_libraries(toheart2 PRIVATE th2_audio th2_character th2_config imgui)
 target_link_libraries(toheart2 PRIVATE PkgConfig::FFMPEG)
 
+add_executable(th2-video-test
+    native/video_test.cpp
+    native/video.cpp
+)
+target_link_libraries(th2-video-test PRIVATE
+    th2_archive SDL3::SDL3 PkgConfig::FFMPEG)
+
 if(BUILD_TESTING)
     add_executable(th2-character-test
         native/character_test.cpp

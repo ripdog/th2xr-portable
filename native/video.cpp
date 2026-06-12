@@ -10,6 +10,7 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <deque>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -31,6 +32,11 @@ struct TextureDeleter {
 }  // namespace
 
 struct VideoPlayer::Impl {
+    struct VideoFrame {
+        double time;
+        std::vector<std::uint8_t> pixels;
+    };
+
     SDL_Renderer* renderer;
     SDL_FRect destination;
     std::span<const std::uint8_t> bytes;
@@ -50,6 +56,10 @@ struct VideoPlayer::Impl {
     bool eof = false;
     bool done = false;
     double shown_time = -1.0;
+    double decoded_time = -1.0;
+    double frame_duration = 1.0 / 30.0;
+    std::size_t decoded_frames = 0;
+    std::deque<VideoFrame> video_frames;
     std::chrono::steady_clock::time_point started;
 
     static int read(void* opaque, std::uint8_t* destination, int size)
@@ -138,6 +148,11 @@ struct VideoPlayer::Impl {
             throw std::runtime_error("movie has no video stream");
         }
         video_codec = open_codec(video_stream);
+        const AVRational frame_rate =
+            av_guess_frame_rate(format, format->streams[video_stream], nullptr);
+        if (frame_rate.num > 0 && frame_rate.den > 0) {
+            frame_duration = av_q2d(av_inv_q(frame_rate));
+        }
         texture.reset(SDL_CreateTexture(
             renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
             video_codec->width, video_codec->height));
@@ -207,21 +222,48 @@ struct VideoPlayer::Impl {
         }
     }
 
-    void show_video(AVFrame* decoded)
+    double frame_time(const AVFrame* decoded) const
     {
-        void* pixels = nullptr;
-        int pitch = 0;
-        if (!SDL_LockTexture(texture.get(), nullptr, &pixels, &pitch)) {
-            throw std::runtime_error(SDL_GetError());
+        if (decoded->best_effort_timestamp == AV_NOPTS_VALUE) {
+            return decoded_frames * frame_duration;
         }
-        std::uint8_t* output[] = {static_cast<std::uint8_t*>(pixels)};
-        const int pitches[] = {pitch};
+        const auto* stream = format->streams[video_stream];
+        const std::int64_t start = stream->start_time == AV_NOPTS_VALUE
+            ? 0 : stream->start_time;
+        return (decoded->best_effort_timestamp - start)
+            * av_q2d(stream->time_base);
+    }
+
+    void queue_video(AVFrame* decoded)
+    {
+        VideoFrame output_frame{
+            frame_time(decoded),
+            std::vector<std::uint8_t>(
+                static_cast<std::size_t>(video_codec->width)
+                * video_codec->height * 4)};
+        std::uint8_t* output[] = {output_frame.pixels.data()};
+        const int pitches[] = {video_codec->width * 4};
         sws_scale(
             scaler, decoded->data, decoded->linesize, 0, video_codec->height,
             output, pitches);
-        SDL_UnlockTexture(texture.get());
-        shown_time = decoded->best_effort_timestamp
-            * av_q2d(format->streams[video_stream]->time_base);
+        decoded_time = output_frame.time;
+        ++decoded_frames;
+        video_frames.push_back(std::move(output_frame));
+    }
+
+    void present_due_frame(double elapsed)
+    {
+        while (!video_frames.empty()
+               && video_frames.front().time <= elapsed + 0.001) {
+            const auto& due = video_frames.front();
+            if (!SDL_UpdateTexture(
+                    texture.get(), nullptr, due.pixels.data(),
+                    video_codec->width * 4)) {
+                throw std::runtime_error(SDL_GetError());
+            }
+            shown_time = due.time;
+            video_frames.pop_front();
+        }
     }
 
     void decode_packet(AVCodecContext* codec, bool video)
@@ -231,7 +273,7 @@ struct VideoPlayer::Impl {
             throw ffmpeg_error("decode movie packet", result);
         }
         while ((result = avcodec_receive_frame(codec, frame)) >= 0) {
-            if (video) show_video(frame);
+            if (video) queue_video(frame);
             else queue_audio(frame);
             av_frame_unref(frame);
         }
@@ -244,13 +286,14 @@ struct VideoPlayer::Impl {
     {
         const double elapsed = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - started).count();
-        while (!eof && (shown_time < 0.0 || shown_time < elapsed + 0.05)) {
+        while (!eof && (decoded_time < 0.0
+                        || decoded_time < elapsed + 0.10)) {
             const int result = av_read_frame(format, packet);
             if (result < 0) {
                 eof = true;
                 avcodec_send_packet(video_codec, nullptr);
                 while (avcodec_receive_frame(video_codec, frame) >= 0) {
-                    show_video(frame);
+                    queue_video(frame);
                     av_frame_unref(frame);
                 }
                 break;
@@ -262,11 +305,12 @@ struct VideoPlayer::Impl {
             }
             av_packet_unref(packet);
         }
+        present_due_frame(elapsed);
         if (eof) {
             const double duration = format->duration > 0
                 ? format->duration / static_cast<double>(AV_TIME_BASE)
                 : shown_time;
-            done = elapsed >= duration
+            done = elapsed >= duration && video_frames.empty()
                 && (!audio || SDL_GetAudioStreamQueued(audio) == 0);
         }
     }

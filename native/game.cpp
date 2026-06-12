@@ -2939,7 +2939,6 @@ private:
         SDL_RenderClear(renderer_);
         if (movie_) {
             movie_->draw();
-            SDL_RenderPresent(renderer_);
             return;
         }
         if (title_background_) {
