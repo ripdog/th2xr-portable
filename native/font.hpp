@@ -19,7 +19,8 @@ public:
 
     int glyph_width(unsigned char character) const;
     void configure(bool authentic, std::string_view family,
-                   float framebuffer_scale);
+                   int font_size, float framebuffer_scale);
+    static const std::vector<std::string>& system_families();
     void draw(
         SDL_Renderer* renderer, float x, float y, std::string_view text,
         std::uint8_t red = 255, std::uint8_t green = 255,
@@ -33,6 +34,7 @@ private:
     std::unique_ptr<Modern> modern_;
     bool authentic_ = false;
     std::string family_;
+    int font_size_ = size;
     float framebuffer_scale_ = 1.0f;
 
     const std::uint8_t* glyph(unsigned char character) const;

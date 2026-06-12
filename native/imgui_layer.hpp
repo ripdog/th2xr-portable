@@ -19,6 +19,7 @@ public:
                    float framebuffer_scale_y = 1.0f);
     void render();
     bool wants_input() const;
+    bool wants_mouse() const;
 
 private:
     SDL_Window* window_;

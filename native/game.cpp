@@ -135,6 +135,16 @@ std::vector<std::string> display_lines(std::string_view source)
     return lines;
 }
 
+std::string interpret_newlines(std::string text)
+{
+    for (std::size_t position = 0;
+         (position = text.find("\\n", position)) != std::string::npos;) {
+        text.replace(position, 2, "\n");
+        ++position;
+    }
+    return text;
+}
+
 class Game {
 public:
     explicit Game(const std::filesystem::path& data)
@@ -255,6 +265,14 @@ public:
                 }
                 SDL_ConvertEventToRenderCoordinates(renderer_, &event);
                 imgui_->process_event(event);
+                if (config_.show_script_position
+                    && imgui_->wants_mouse()
+                    && (event.type == SDL_EVENT_MOUSE_MOTION
+                        || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                        || event.type == SDL_EVENT_MOUSE_BUTTON_UP
+                        || event.type == SDL_EVENT_MOUSE_WHEEL)) {
+                    continue;
+                }
                 if (movie_) {
                     const bool skip_key = event.type == SDL_EVENT_KEY_DOWN
                         && (event.key.key == SDLK_ESCAPE
@@ -377,12 +395,14 @@ public:
                             float y = choice_y_start();
                             for (int i = 0;
                                  i < static_cast<int>(choices_.size()); ++i) {
-                                if (mouse_y >= y && mouse_y < y + 31.0f) {
+                                const float height =
+                                    choice_height(choices_[i]);
+                                if (mouse_y >= y && mouse_y < y + height) {
                                     choice_selected_ = i;
                                     manual_advance();
                                     break;
                                 }
-                                y += 31.0f;
+                                y += height;
                             }
                         } else {
                             manual_advance();
@@ -402,11 +422,13 @@ public:
                         float y = choice_y_start();
                         for (int i = 0;
                              i < static_cast<int>(choices_.size()); ++i) {
-                            if (mouse_y >= y && mouse_y < y + 31.0f) {
+                            const float height =
+                                choice_height(choices_[i]);
+                            if (mouse_y >= y && mouse_y < y + height) {
                                 choice_highlight_ = i;
                                 break;
                             }
-                            y += 31.0f;
+                            y += height;
                         }
                     }
                 }
@@ -437,7 +459,7 @@ public:
             imgui_->new_frame(scale_x, scale_y);
             font_.configure(
                 config_.authentic_font, config_.font_family,
-                std::min(scale_x, scale_y));
+                config_.font_size, std::min(scale_x, scale_y));
             draw_config();
             draw_name_input();
             draw();
@@ -871,6 +893,12 @@ private:
             return 104.0f;
         }
         return 468.0f;
+    }
+
+    float choice_height(const Choice& choice) const
+    {
+        return std::max<std::size_t>(
+            1, display_lines(choice.text).size()) * 31.0f;
     }
 
     void skip(bool force_unread = false)
@@ -1451,11 +1479,20 @@ private:
         const auto position = std::format(
             "{}:{}  line={}", runtime_.script_name(), runtime_.vm_pc(),
             current_line_key_.empty() ? "-" : current_line_key_);
-        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 190);
-        const SDL_FRect background{8.0f, 8.0f, 760.0f, 25.0f};
-        SDL_RenderFillRect(renderer_, &background);
-        font_.draw(renderer_, 12.0f, 10.0f, position, 255, 190, 80);
+        ImGui::SetNextWindowPos(
+            ImVec2(8.0f, 8.0f), ImGuiCond_Always);
+        ImGui::SetNextWindowBgAlpha(0.75f);
+        ImGui::Begin(
+            "Script position", nullptr,
+            ImGuiWindowFlags_NoDecoration
+                | ImGuiWindowFlags_AlwaysAutoResize
+                | ImGuiWindowFlags_NoSavedSettings);
+        ImGui::TextUnformatted(position.c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Copy")) {
+            SDL_SetClipboardText(position.c_str());
+        }
+        ImGui::End();
     }
 
     void begin_background_fade(float target, int frames)
@@ -1588,9 +1625,19 @@ private:
         const bool loop = number(event, 2) > 0;
         const int voice = number(event, 3);
         const int channel = number(event, 4) < 0 ? 0 : number(event, 4);
-        const int scenario = scenario_number(runtime_.script_name());
-        const auto name = std::format(
+        int scenario = scenario_number(runtime_.script_name());
+        auto name = std::format(
             "K{:09d}_{:03d}{:03d}.OGG", scenario, voice, character);
+        if (!voice_archive_.find(name)) {
+            const int parent_scenario = scenario / 100 * 100;
+            const auto parent_name = std::format(
+                "K{:09d}_{:03d}{:03d}.OGG",
+                parent_scenario, voice, character);
+            if (voice_archive_.find(parent_name)) {
+                scenario = parent_scenario;
+                name = parent_name;
+            }
+        }
         if (channel >= 0 && static_cast<std::size_t>(channel) < voice_channels_.size()) {
             voice_channels_[channel].play(
                 load_audio(voice_archive_, name), loop,
@@ -1843,15 +1890,15 @@ private:
             }
         } else if (name == "SetSelectMes") {
             choices_.push_back(Choice{
-                th2::substitute_player_name(
-                    text(event, 0), config_.player_name),
+                interpret_newlines(th2::substitute_player_name(
+                    text(event, 0), config_.player_name)),
                 number(event, 1),
                 number(event, 2),
             });
         } else if (name == "SetSelectMesEx") {
             choices_.push_back(Choice{
-                th2::substitute_player_name(
-                    text(event, 0), config_.player_name),
+                interpret_newlines(th2::substitute_player_name(
+                    text(event, 0), config_.player_name)),
                 number(event, 2),
                 number(event, 3),
                 text(event, 1),
@@ -2748,18 +2795,28 @@ private:
                     ImGui::Checkbox(
                         "Authentic bitmap font", &config_.authentic_font);
                     ImGui::BeginDisabled(config_.authentic_font);
-                    std::array<char, 256> font_family{};
-                    std::snprintf(
-                        font_family.data(), font_family.size(), "%s",
-                        config_.font_family.c_str());
-                    if (ImGui::InputText(
-                            "Font family or file", font_family.data(),
-                            font_family.size())) {
-                        config_.font_family = font_family.data();
+                    const auto& families =
+                        th2::GameFont::system_families();
+                    if (ImGui::BeginCombo(
+                            "Font", config_.font_family.c_str())) {
+                        for (const auto& family : families) {
+                            const bool selected =
+                                family == config_.font_family;
+                            if (ImGui::Selectable(
+                                    family.c_str(), selected)) {
+                                config_.font_family = family;
+                            }
+                            if (selected) {
+                                ImGui::SetItemDefaultFocus();
+                            }
+                        }
+                        ImGui::EndCombo();
                     }
+                    ImGui::InputInt(
+                        "Font size", &config_.font_size, 1, 4);
+                    config_.font_size =
+                        std::clamp(config_.font_size, 12, 48);
                     ImGui::EndDisabled();
-                    ImGui::TextDisabled(
-                        "Modern text is rasterized at the display resolution.");
                     ImGui::Checkbox(
                         "Mouse wheel opens backlog",
                         &config_.wheel_opens_backlog);
@@ -3860,23 +3917,19 @@ private:
         }
         if (ui_mode_ != UiMode::backlog
             && message_visible_ && choosing_ && !choices_.empty()) {
-            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-            const float top = choice_y_start() - 8.0f;
-            const float height = choices_.size() * 31.0f + 16.0f;
-            SDL_FRect choice_bg{0.0f, top, 800.0f, height};
-            SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 180);
-            SDL_RenderFillRect(renderer_, &choice_bg);
             float y = choice_y_start();
             for (int i = 0; i < static_cast<int>(choices_.size()); ++i) {
                 const auto highlighted = i == choice_highlight_;
+                const auto label =
+                    std::format("{}. {}", i + 1, choices_[i].text);
                 font_.draw(
-                    renderer_, 54.0f, y + 2.0f, choices_[i].text, 0, 0, 0);
+                    renderer_, 34.0f, y + 2.0f, label, 0, 0, 0);
                 font_.draw(
-                    renderer_, 52.0f, y, choices_[i].text,
+                    renderer_, 32.0f, y, label,
                     highlighted ? 255 : 128,
                     highlighted ? 255 : 128,
                     highlighted ? 255 : 128);
-                y += 31.0f;
+                y += choice_height(choices_[i]);
             }
         }
         if (ui_mode_ == UiMode::game) {

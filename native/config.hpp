@@ -29,6 +29,7 @@ struct GameConfig {
     bool anime4k = true;
     bool authentic_font = false;
     std::string font_family = "Noto Sans";
+    int font_size = 24;
     bool show_script_position = false;
     bool dump_transition_frames = false;
     PlayerName player_name;

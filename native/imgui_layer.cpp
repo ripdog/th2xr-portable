@@ -241,4 +241,9 @@ bool ImGuiLayer::wants_input() const
     return io.WantCaptureKeyboard || io.WantCaptureMouse;
 }
 
+bool ImGuiLayer::wants_mouse() const
+{
+    return ImGui::GetIO().WantCaptureMouse;
+}
+
 }  // namespace th2

@@ -13,6 +13,7 @@ int main()
     source.anime4k = false;
     source.authentic_font = true;
     source.font_family = "Test Sans";
+    source.font_size = 31;
     source.character_voice_volume[3] = 17;
     source.character_voice_muted[3] = true;
     source.player_name.family = "Smith";
@@ -26,6 +27,7 @@ int main()
         || loaded.anime4k
         || !loaded.authentic_font
         || loaded.font_family != "Test Sans"
+        || loaded.font_size != 31
         || loaded.character_voice_volume[3] != 17
         || !loaded.character_voice_muted[3]
         || loaded.player_name.family != "Smith"

@@ -3,6 +3,7 @@
 #include <SDL3_ttf/SDL_ttf.h>
 #include <fontconfig/fontconfig.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -40,6 +41,7 @@ struct GameFont::Modern {
 
     TTF_Font* font = nullptr;
     std::string family;
+    int logical_size = 0;
     float scale = 0.0f;
     std::unordered_map<
         std::string, std::unique_ptr<SDL_Texture, TextureDeleter>> textures;
@@ -51,7 +53,9 @@ struct GameFont::Modern {
         }
     }
 
-    void open(std::string_view requested_family, float requested_scale)
+    void open(
+        std::string_view requested_family, int requested_size,
+        float requested_scale)
     {
         static const bool initialized = [] {
             if (!TTF_Init()) {
@@ -64,6 +68,7 @@ struct GameFont::Modern {
         }();
         (void)initialized;
         if (font && family == requested_family
+            && logical_size == requested_size
             && std::abs(scale - requested_scale) < 0.01f) {
             return;
         }
@@ -99,12 +104,13 @@ struct GameFont::Modern {
             FcPatternDestroy(match);
         }
 
-        font = TTF_OpenFont(path.c_str(), size * requested_scale);
+        font = TTF_OpenFont(path.c_str(), requested_size * requested_scale);
         if (!font) {
             throw std::runtime_error(SDL_GetError());
         }
         TTF_SetFontHinting(font, TTF_HINTING_LIGHT_SUBPIXEL);
         family = requested_family;
+        logical_size = requested_size;
         scale = requested_scale;
     }
 };
@@ -137,11 +143,44 @@ int GameFont::glyph_width(unsigned char character) const
 }
 
 void GameFont::configure(
-    bool authentic, std::string_view family, float framebuffer_scale)
+    bool authentic, std::string_view family, int font_size,
+    float framebuffer_scale)
 {
     authentic_ = authentic;
     family_ = family.empty() ? "sans-serif" : std::string(family);
+    font_size_ = std::clamp(font_size, 12, 48);
     framebuffer_scale_ = std::max(framebuffer_scale, 1.0f);
+}
+
+const std::vector<std::string>& GameFont::system_families()
+{
+    static const std::vector<std::string> families = [] {
+        std::vector<std::string> result;
+        if (!FcInit()) {
+            return result;
+        }
+        FcPattern* pattern = FcPatternCreate();
+        FcObjectSet* objects = FcObjectSetBuild(FC_FAMILY, nullptr);
+        FcFontSet* fonts = FcFontList(nullptr, pattern, objects);
+        if (fonts) {
+            for (int i = 0; i < fonts->nfont; ++i) {
+                FcChar8* family = nullptr;
+                if (FcPatternGetString(
+                        fonts->fonts[i], FC_FAMILY, 0, &family)
+                    == FcResultMatch) {
+                    result.emplace_back(
+                        reinterpret_cast<const char*>(family));
+                }
+            }
+            FcFontSetDestroy(fonts);
+        }
+        FcObjectSetDestroy(objects);
+        FcPatternDestroy(pattern);
+        std::ranges::sort(result);
+        result.erase(std::unique(result.begin(), result.end()), result.end());
+        return result;
+    }();
+    return families;
 }
 
 void GameFont::draw_bitmap(
@@ -185,9 +224,23 @@ void GameFont::draw(
         draw_bitmap(renderer, x, y, text, red, green, blue);
         return;
     }
+    if (text.find('\n') != std::string_view::npos) {
+        while (true) {
+            const auto newline = text.find('\n');
+            draw(
+                renderer, x, y, text.substr(0, newline),
+                red, green, blue);
+            if (newline == std::string_view::npos) {
+                break;
+            }
+            text.remove_prefix(newline + 1);
+            y += 31.0f;
+        }
+        return;
+    }
 
     try {
-        modern_->open(family_, framebuffer_scale_);
+        modern_->open(family_, font_size_, framebuffer_scale_);
         const SDL_Color color{red, green, blue, 255};
         std::string key(text);
         key.append({
