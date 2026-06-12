@@ -501,6 +501,7 @@ public:
             update_screen_flash();
             update_shake();
             update_background_scroll();
+            update_character_animations();
             update_clock_calendar();
             update_sakura();
             next_frame += frame_duration;
@@ -529,6 +530,31 @@ private:
     struct CharacterTexture {
         int pose = -1;
         Texture texture;
+    };
+
+    enum class CharacterAnimationKind {
+        none,
+        enter,
+        leave,
+        pose,
+        locate,
+        brightness,
+        alpha,
+    };
+
+    struct CharacterAnimation {
+        CharacterAnimationKind kind = CharacterAnimationKind::none;
+        int type = 0;
+        int frames = 1;
+        int from_locate = 1;
+        int to_locate = 1;
+        int from_brightness = 128;
+        int to_brightness = 128;
+        int from_alpha = 256;
+        int to_alpha = 256;
+        bool blocking = false;
+        Texture previous;
+        std::chrono::steady_clock::time_point started;
     };
 
     struct OverlayState {
@@ -727,6 +753,7 @@ private:
     std::array<OverlayState, 32> overlay_states_{};
     th2::Characters characters_;
     std::array<CharacterTexture, 32> character_textures_{};
+    std::array<CharacterAnimation, 32> character_animations_{};
     th2::AudioChannel bgm_;
     int bgm_track_ = -1;
     bool bgm_loop_ = false;
@@ -920,6 +947,8 @@ private:
     th2::Message message_;
     bool message_ends_block_ = true;
     int tone_ = 0;
+    int tone_back_ = -1;
+    int tone_char_ = -1;
     int weather_ = 0;
     bool running_ = true;
     bool waiting_for_input_ = false;
@@ -1732,7 +1761,7 @@ private:
         if (config_open_ || ui_mode_ != UiMode::game || choosing_
             || transition_ || background_fade_ || screen_flash_
             || (shake_ && shake_->frames > 0)
-            || background_scroll_
+            || background_scroll_ || character_animation_active()
             || clock_state_ || calendar_state_
             || wake_time_ || audio_wait_) {
             auto_next_time_.reset();
@@ -1852,6 +1881,17 @@ private:
             if (force_unread) {
                 background_scroll_->started -= std::chrono::milliseconds(
                     background_scroll_->frames * 1000 / 60);
+            }
+            return;
+        }
+        if (character_animation_active()) {
+            if (force_unread) {
+                for (auto& animation : character_animations_) {
+                    if (animation.kind != CharacterAnimationKind::none) {
+                        animation.started -= std::chrono::milliseconds(
+                            animation.frames * 1000 / 60);
+                    }
+                }
             }
             return;
         }
@@ -2647,6 +2687,60 @@ private:
         }
     }
 
+    static int character_effect_frames(int frames)
+    {
+        return frames < 0 ? 15 : std::max(frames, 0);
+    }
+
+    bool character_animation_active() const
+    {
+        return std::ranges::any_of(
+            character_animations_, [](const CharacterAnimation& animation) {
+                return animation.kind != CharacterAnimationKind::none;
+            });
+    }
+
+    void start_character_animation(
+        int character_number, CharacterAnimation animation)
+    {
+        animation.frames = character_effect_frames(animation.frames);
+        animation.started = std::chrono::steady_clock::now();
+        if (animation.frames == 0) {
+            if (animation.kind == CharacterAnimationKind::leave) {
+                characters_.remove(character_number);
+                character_textures_[character_number] = {};
+            }
+            return;
+        }
+        character_animations_.at(character_number) = std::move(animation);
+    }
+
+    void update_character_animations()
+    {
+        bool resume = false;
+        const auto now = std::chrono::steady_clock::now();
+        for (std::size_t index = 0; index < character_animations_.size(); ++index) {
+            auto& animation = character_animations_[index];
+            if (animation.kind == CharacterAnimationKind::none) {
+                continue;
+            }
+            const auto elapsed = std::chrono::duration<double>(
+                now - animation.started).count() * 60.0;
+            if (elapsed < animation.frames) {
+                continue;
+            }
+            if (animation.kind == CharacterAnimationKind::leave) {
+                characters_.remove(static_cast<int>(index));
+                character_textures_[index] = {};
+            }
+            resume |= animation.blocking;
+            animation = {};
+        }
+        if (resume) {
+            advance();
+        }
+    }
+
     void set_character(const th2::Event& event)
     {
         const int character_number = number(event, 0);
@@ -2656,20 +2750,50 @@ private:
             locate = event.instruction.name != "SetChar" && previous
                 ? previous->locate : 1;
         }
-        const bool wait_form = event.instruction.name == "CW";
-        const std::size_t layer_index = wait_form ? 3 : 4;
-        const std::size_t brightness_index = wait_form ? 4 : 5;
-        const std::size_t alpha_index = wait_form ? 5 : 6;
+        const bool staged = event.instruction.name == "CW";
+        const std::size_t layer_index = staged ? 3 : 4;
+        const std::size_t brightness_index = staged ? 4 : 5;
+        const std::size_t alpha_index = staged ? 5 : 6;
         const int layer = number(event, layer_index) < 0
             ? 0 : number(event, layer_index);
         const int brightness = number(event, brightness_index) < 0
             ? 128 : number(event, brightness_index);
         const int alpha = number(event, alpha_index) < 0
             ? 256 : number(event, alpha_index);
+        if (previous && previous->pose == number(event, 1)
+            && previous->locate == locate && previous->layer == layer
+            && previous->brightness == brightness
+            && previous->alpha == alpha) {
+            return;
+        }
+        CharacterAnimation animation;
+        animation.from_locate = previous ? previous->locate : locate;
+        animation.to_locate = locate;
+        animation.from_brightness = previous ? previous->brightness : brightness;
+        animation.to_brightness = brightness;
+        animation.from_alpha = previous ? previous->alpha : alpha;
+        animation.to_alpha = alpha;
+        animation.blocking = event.instruction.name == "C";
+        if (event.instruction.name == "C") {
+            animation.type = number(event, 3) == -2 ? -1
+                : number(event, 3) < 0 ? 0 : number(event, 3);
+            animation.frames = animation.type == -1 ? 0 : number(event, 7);
+            animation.kind = previous && previous->pose != number(event, 1)
+                ? CharacterAnimationKind::pose
+                : CharacterAnimationKind::enter;
+        }
+        if (animation.kind == CharacterAnimationKind::pose && previous) {
+            auto& loaded = character_texture(character_number);
+            animation.previous = std::move(loaded.texture);
+            loaded.pose = -1;
+        }
         auto& character = characters_.set(
             character_number, number(event, 1), locate, layer,
             brightness, alpha);
         load_character_texture(character);
+        if (!staged && event.instruction.name != "SetChar") {
+            start_character_animation(character_number, std::move(animation));
+        }
     }
 
     void play_se(int channel, int sound, bool loop, int volume,
@@ -2791,7 +2915,9 @@ private:
             return;
         }
         const auto name = std::format(
-            "B{:03d}{}{}{}.bmp", scene / 10, tone_ % 4, weather_, scene % 10);
+            "B{:03d}{}{}{}.bmp", scene / 10,
+            (tone_back_ < 0 ? tone_ : tone_back_) % 4,
+            weather_, scene % 10);
         background_ = load_texture(renderer_, backgrounds_, name);
     }
 
@@ -2825,7 +2951,8 @@ private:
                 std::format("v{:06d}.tga", bg_scene_));
         } else {
             const auto name = std::format(
-                "B{:03d}{}{}{}.bmp", bg_scene_ / 10, tone_ % 4,
+                "B{:03d}{}{}{}.bmp", bg_scene_ / 10,
+                (tone_back_ < 0 ? tone_ : tone_back_) % 4,
                 weather_, bg_scene_ % 10);
             background_ = load_texture(renderer_, backgrounds_, name);
         }
@@ -2984,7 +3111,19 @@ private:
             background_.reset();
             bg_scene_ = -1;
         } else if (name == "SetTimeMode") {
-            tone_ = std::max<std::int32_t>(0, number(event, 0));
+            const int tone = number(event, 0) < 0 ? 0 : number(event, 0);
+            const int effect = number(event, 1) < 0 ? 0 : number(event, 1);
+            tone_ = tone + effect * 4;
+            tone_back_ = -1;
+            tone_char_ = -1;
+        } else if (name == "SetTimeBack") {
+            const int tone = number(event, 0) < 0 ? 0 : number(event, 0);
+            const int effect = number(event, 1) < 0 ? 0 : number(event, 1);
+            tone_back_ = tone + effect * 4;
+        } else if (name == "SetTimeChar") {
+            const int tone = number(event, 0) < 0 ? 0 : number(event, 0);
+            const int effect = number(event, 1) < 0 ? 0 : number(event, 1);
+            tone_char_ = tone + effect * 4;
         } else if (name == "SetWeatherMode") {
             weather_ = std::max<std::int32_t>(0, number(event, 0));
         } else if (name == "SetBmpEx") {
@@ -3065,21 +3204,56 @@ private:
             set_character(event);
         } else if (name == "CR" || name == "CRW" || name == "ResetChar") {
             const int character_number = number(event, 0);
-            characters_.remove(character_number);
-            if (character_number >= 0
-                && static_cast<std::size_t>(character_number)
-                    < character_textures_.size()) {
+            if (name == "CR") {
+                CharacterAnimation animation;
+                animation.kind = CharacterAnimationKind::leave;
+                animation.type = number(event, 1) < 0 ? 0 : number(event, 1);
+                animation.frames = number(event, 2);
+                animation.blocking = true;
+                if (const auto* character = characters_.find(character_number)) {
+                    animation.from_locate = animation.to_locate =
+                        character->locate;
+                    animation.from_alpha = animation.to_alpha =
+                        character->alpha;
+                    start_character_animation(
+                        character_number, std::move(animation));
+                }
+            } else {
+                characters_.remove(character_number);
                 character_textures_[character_number] = {};
+                character_animations_[character_number] = {};
             }
         } else if (name == "CP" || name == "SetCharPose") {
             const int character_number = number(event, 0);
             if (auto* character = characters_.find(character_number)) {
+                if (character->pose == number(event, 1)) {
+                    return true;
+                }
+                CharacterAnimation animation;
+                animation.kind = CharacterAnimationKind::pose;
+                animation.type = number(event, 2) < 0 ? 0 : number(event, 2);
+                animation.frames = -1;
+                animation.from_alpha = animation.to_alpha = character->alpha;
+                animation.blocking = name == "CP";
+                auto& loaded = character_texture(character_number);
+                animation.previous = std::move(loaded.texture);
+                loaded.pose = -1;
                 character->pose = number(event, 1);
                 load_character_texture(*character);
+                start_character_animation(
+                    character_number, std::move(animation));
             }
         } else if (name == "CL" || name == "SetCharLocate") {
             if (auto* character = characters_.find(number(event, 0))) {
+                CharacterAnimation animation;
+                animation.kind = CharacterAnimationKind::locate;
+                animation.frames = name == "CL" ? number(event, 2) : -1;
+                animation.from_locate = character->locate;
+                animation.to_locate = number(event, 1);
+                animation.blocking = name == "CL";
                 character->locate = number(event, 1);
+                start_character_animation(
+                    character->number, std::move(animation));
             }
         } else if (name == "CY" || name == "SetCharLayer") {
             if (auto* character = characters_.find(number(event, 0))) {
@@ -3087,12 +3261,30 @@ private:
             }
         } else if (name == "CB") {
             if (auto* character = characters_.find(number(event, 0))) {
+                CharacterAnimation animation;
+                animation.kind = CharacterAnimationKind::brightness;
+                animation.frames = number(event, 2);
+                animation.from_brightness = character->brightness;
+                animation.to_brightness = number(event, 1);
+                animation.blocking = true;
                 character->brightness = number(event, 1);
+                start_character_animation(
+                    character->number, std::move(animation));
             }
         } else if (name == "CA") {
             if (auto* character = characters_.find(number(event, 0))) {
+                CharacterAnimation animation;
+                animation.kind = CharacterAnimationKind::alpha;
+                animation.frames = number(event, 2);
+                animation.from_alpha = character->alpha;
+                animation.to_alpha = number(event, 1);
+                animation.blocking = true;
                 character->alpha = number(event, 1);
+                start_character_animation(
+                    character->number, std::move(animation));
             }
+        } else if (name == "WaitChar") {
+            // Character operations already suspend the script until complete.
         } else if (name == "SetMessage2") {
             push_backlog();
             message_.set(th2::substitute_player_name(
@@ -3294,6 +3486,8 @@ private:
         output << "\nbackground=" << bg_scene_
                << "\nvisual=" << bg_is_visual_
                << "\ntone=" << tone_
+               << "\ntone_back=" << tone_back_
+               << "\ntone_char=" << tone_char_
                << "\nweather=" << weather_
                << "\nbgm=" << bgm_track_
                << "\nvoice_event=" << vi_event_voice_no_
@@ -3307,7 +3501,7 @@ private:
         if (wake_time_ || audio_wait_ || transition_ || background_fade_
             || screen_flash_
             || (shake_ && shake_->frames > 0)
-            || background_scroll_
+            || background_scroll_ || character_animation_active()
             || clock_state_ || calendar_state_
             || movie_) {
             return;
@@ -3404,6 +3598,9 @@ private:
                     break;
                 }
                 if (background_scroll_) {
+                    break;
+                }
+                if (character_animation_active()) {
                     break;
                 }
                 if (clock_state_ || calendar_state_) {
@@ -3534,11 +3731,13 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 15);  // native version
+        write_u32(out, 16);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
         write_i32(out, tone_);
+        write_i32(out, tone_back_);
+        write_i32(out, tone_char_);
         write_i32(out, weather_);
         write_i32(out, vi_event_voice_no_);
         write_i32(out, vi_event_voice_no_all_);
@@ -3802,7 +4001,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 15) {
+        if (version != 16) {
             return;
         }
 
@@ -3821,6 +4020,8 @@ private:
         const auto script_name = read_str(in, 64);
         runtime_.load(script_name);
         tone_ = read_i32(in);
+        tone_back_ = read_i32(in);
+        tone_char_ = read_i32(in);
         weather_ = read_i32(in);
         vi_event_voice_no_ = read_i32(in);
         vi_event_voice_no_all_ = read_i32(in);
@@ -3909,6 +4110,7 @@ private:
         // Characters
         characters_ = {};
         character_textures_ = {};
+        character_animations_ = {};
         const auto char_count = read_u32(in);
         for (std::uint32_t i = 0; i < char_count; ++i) {
             const auto number = read_i32(in);
@@ -5833,16 +6035,83 @@ private:
             if (!loaded.texture) {
                 continue;
             }
+            auto& animation = character_animations_.at(character.number);
+            float progress = 1.0f;
+            if (animation.kind != CharacterAnimationKind::none) {
+                progress = std::clamp(
+                    static_cast<float>(std::chrono::duration<double>(
+                        std::chrono::steady_clock::now()
+                        - animation.started).count() * 60.0
+                        / animation.frames),
+                    0.0f, 1.0f);
+            }
+            const float eased = 1.0f
+                - (1.0f - progress) * (1.0f - progress) * (1.0f - progress);
+            float x = static_cast<float>(
+                th2::character_offset(character.locate));
+            int brightness_value = character.brightness;
+            int alpha_value = character.alpha;
+            if (animation.kind == CharacterAnimationKind::enter) {
+                if (animation.type == 1 || animation.type == 2) {
+                    const float start = animation.type == 1 ? -600.0f : 600.0f;
+                    x = start + (x - start) * eased;
+                } else {
+                    alpha_value = static_cast<int>(
+                        animation.to_alpha * progress);
+                }
+            } else if (animation.kind == CharacterAnimationKind::leave) {
+                if (animation.type == 1 || animation.type == 2) {
+                    const float destination =
+                        animation.type == 1 ? -600.0f : 600.0f;
+                    x += (destination - x) * progress * progress * progress;
+                } else {
+                    alpha_value = static_cast<int>(
+                        animation.from_alpha * (1.0f - progress));
+                }
+            } else if (animation.kind == CharacterAnimationKind::locate) {
+                const float from = static_cast<float>(
+                    th2::character_offset(animation.from_locate));
+                const float to = static_cast<float>(
+                    th2::character_offset(animation.to_locate));
+                x = from + (to - from) * eased;
+            } else if (animation.kind
+                       == CharacterAnimationKind::brightness) {
+                brightness_value = static_cast<int>(
+                    animation.from_brightness
+                    + (animation.to_brightness
+                       - animation.from_brightness) * progress);
+            } else if (animation.kind == CharacterAnimationKind::alpha) {
+                alpha_value = static_cast<int>(
+                    animation.from_alpha
+                    + (animation.to_alpha - animation.from_alpha) * progress);
+            } else if (animation.kind == CharacterAnimationKind::pose) {
+                alpha_value = static_cast<int>(
+                    animation.to_alpha * progress);
+            }
             const auto brightness = static_cast<Uint8>(
-                std::clamp(character.brightness * 2, 0, 255));
+                std::clamp(brightness_value * 2, 0, 255));
             SDL_SetTextureColorMod(
                 loaded.texture.get(), brightness, brightness, brightness);
             SDL_SetTextureAlphaMod(
                 loaded.texture.get(),
-                static_cast<Uint8>(std::clamp(character.alpha, 0, 256) * 255 / 256));
+                static_cast<Uint8>(
+                    std::clamp(alpha_value, 0, 256) * 255 / 256));
             SDL_FRect destination{
-                static_cast<float>(th2::character_offset(character.locate)),
-                0.0f, 800.0f, 600.0f};
+                x, 0.0f, 800.0f, 600.0f};
+            if (animation.kind == CharacterAnimationKind::pose
+                && animation.previous) {
+                SDL_SetTextureColorMod(
+                    animation.previous.get(),
+                    brightness, brightness, brightness);
+                SDL_SetTextureAlphaMod(
+                    animation.previous.get(),
+                    static_cast<Uint8>(
+                        std::clamp(static_cast<int>(
+                            animation.from_alpha * (1.0f - progress)),
+                            0, 256) * 255 / 256));
+                SDL_RenderTexture(
+                    renderer_, animation.previous.get(), nullptr, &destination);
+            }
             SDL_RenderTexture(renderer_, loaded.texture.get(), nullptr, &destination);
         }
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
