@@ -3735,10 +3735,8 @@ private:
             if (const auto slot = overlay_index(number(event, 0))) {
                 auto& state = overlay_states_[*slot];
                 state.red = std::clamp(number(event, 1), 0, 255);
-                state.green = number(event, 2) < 0
-                    ? state.red : std::clamp(number(event, 2), 0, 255);
-                state.blue = number(event, 3) < 0
-                    ? state.red : std::clamp(number(event, 3), 0, 255);
+                state.green = std::clamp(number(event, 2), 0, 255);
+                state.blue = std::clamp(number(event, 3), 0, 255);
                 apply_overlay_brightness(*slot);
             }
         } else if (name == "SetBmpMove") {
