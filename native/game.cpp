@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <ctime>
 #include <cstring>
@@ -706,6 +707,7 @@ private:
         int frames = 0;
         int direction = 0;
         int swing = 256;
+        int sampled_frame = 0;
         std::chrono::steady_clock::time_point started;
     };
 
@@ -2650,7 +2652,7 @@ private:
         }
     }
 
-    ShakeSample shake_sample() const
+    ShakeSample shake_sample()
     {
         ShakeSample result;
         if (!shake_) {
@@ -2660,49 +2662,58 @@ private:
             std::chrono::duration<double>(
                 std::chrono::steady_clock::now() - shake_->started).count()
             * 60.0);
+        const int frame_index = std::max(1, static_cast<int>(frame) + 1);
         const float decay = shake_->frames > 0
-            ? std::clamp(1.0f - frame / shake_->frames, 0.0f, 1.0f)
+            ? std::clamp(
+                1.0f - static_cast<float>(frame_index) / shake_->frames,
+                0.0f, 1.0f)
             : 1.0f;
-        const int phase = static_cast<int>(frame * shake_->swing / 8.0f);
+        const int phase = frame_index * shake_->swing / 8;
+        const float cosine = std::cos(
+            static_cast<float>(phase % 256)
+            * 2.0f * std::numbers::pi_v<float> / 256.0f);
         float amount = static_cast<float>(shake_->pitch);
         if (shake_->type == 0 || shake_->type == 3
             || shake_->type == 6 || shake_->type == 15
             || shake_->type == 16) {
-            amount *= static_cast<float>(
-                std::cos((phase % 3600) * std::numbers::pi / 1800.0));
+            amount *= cosine;
             amount *= decay;
         } else if (shake_->type == 1 || shake_->type == 4
                    || shake_->type == 7) {
-            amount *= (static_cast<int>(frame) & 1) ? 1.0f : -1.0f;
+            amount *= (frame_index & 1) ? 1.0f : -1.0f;
         } else if (shake_->type == 9 || shake_->type == 10
                    || shake_->type == 11) {
-            const auto value = static_cast<std::uint32_t>(frame) * 1103515245u
-                + 12345u;
-            result.x = static_cast<float>(
-                static_cast<int>((value >> 16) % 3) - 1) * amount;
-            result.y = static_cast<float>(
-                static_cast<int>((value >> 20) % 3) - 1) * amount;
+            while (shake_->sampled_frame < frame_index) {
+                int direction = std::rand() % 8;
+                while (direction == shake_->direction) {
+                    direction = std::rand() % 8;
+                }
+                shake_->direction = direction;
+                ++shake_->sampled_frame;
+            }
         } else if (shake_->type == 2) {
             const float root = std::sqrt(std::max(0, shake_->pitch));
             const float cycle = std::fmod(
-                frame * root * 2.0f / std::max(1, shake_->frames),
+                frame_index * root * 2.0f / std::max(1, shake_->frames),
                 std::max(1.0f, root));
             result.scale = 1.0f + cycle * cycle / 256.0f;
         } else if (shake_->type == 12) {
-            const float eased = 1.0f - decay * decay;
+            const float inverse = std::clamp(
+                1.0f - static_cast<float>(frame_index)
+                    / std::max(1, shake_->frames),
+                0.0f, 1.0f);
+            const float eased = 1.0f - inverse * inverse;
             float turn = std::fmod(eased * shake_->pitch / 2.0f, 256.0f);
             if ((shake_->direction & 1) == 0) {
                 turn = 256.0f - turn;
             }
             result.angle = turn * 360.0 / 256.0;
         } else if (shake_->type == 13) {
-            const float turn = -static_cast<float>(
-                std::cos((phase % 3600) * std::numbers::pi / 1800.0))
-                * shake_->pitch / 4096.0f * decay;
+            const float turn = -cosine * shake_->pitch * decay;
             result.angle = turn * 360.0 / 256.0;
         } else if (shake_->type == 14) {
             static constexpr std::array<int, 4> steps{-1, 0, 1, 0};
-            result.angle = steps[static_cast<int>(frame) & 3]
+            result.angle = steps[frame_index & 3]
                 * shake_->pitch * 360.0 / 256.0;
         }
 
@@ -3296,6 +3307,7 @@ private:
                 number(event, 3),
                 event.arguments.size() > 4 && number(event, 4) >= 0
                     ? number(event, 4) : 256,
+                0,
                 std::chrono::steady_clock::now(),
             };
         } else if (name == "StopShake") {
@@ -4013,7 +4025,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 19);  // native version
+        write_u32(out, 20);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -4034,6 +4046,7 @@ private:
             write_i32(out, shake_->frames);
             write_i32(out, shake_->direction);
             write_i32(out, shake_->swing);
+            write_i32(out, shake_->sampled_frame);
             const auto elapsed = std::chrono::duration_cast<
                 std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - shake_->started).count();
@@ -4287,7 +4300,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 19) {
+        if (version != 20) {
             return;
         }
 
@@ -4322,6 +4335,7 @@ private:
             state.frames = read_i32(in);
             state.direction = read_i32(in);
             state.swing = read_i32(in);
+            state.sampled_frame = read_i32(in);
             state.started = std::chrono::steady_clock::now()
                 - std::chrono::milliseconds(read_i64(in));
             shake_ = state;

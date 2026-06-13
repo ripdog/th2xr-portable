@@ -51,30 +51,42 @@ int main(int argc, char** argv)
                     ++counts[std::string(instruction.name)];
                     ++instructions;
                     if (!requested.empty() && instruction.name == requested) {
-                        const auto event = th2::decode_event(
-                            instruction,
-                            scenario.bytecode().subspan(
-                                instruction.offset, instruction.size),
-                            registers);
                         std::cout << entry.name << ':' << instruction.offset;
-                        for (const auto& argument : event.arguments) {
-                            std::visit([&](const auto& value) {
-                                using T = std::decay_t<decltype(value)>;
-                                if constexpr (std::is_same_v<T, std::int32_t>) {
-                                    std::cout << ' ' << value;
-                                } else if constexpr (
-                                    std::is_same_v<T, std::string>) {
-                                    std::cout << ' ' << std::quoted(value);
-                                } else if constexpr (
-                                    std::is_same_v<T, th2::RegisterTarget>) {
-                                    std::cout << " reg[" << +value.index << ']';
-                                } else {
-                                    std::cout << " cmp["
-                                              << +value.register_index << ','
-                                              << +value.operation << ','
-                                              << value.value << ']';
+                        if (instruction.opcode >= 64) {
+                            try {
+                                const auto event = th2::decode_event(
+                                    instruction,
+                                    scenario.bytecode().subspan(
+                                        instruction.offset, instruction.size),
+                                    registers);
+                                for (const auto& argument : event.arguments) {
+                                    std::visit([&](const auto& value) {
+                                        using T = std::decay_t<decltype(value)>;
+                                        if constexpr (
+                                            std::is_same_v<T, std::int32_t>) {
+                                            std::cout << ' ' << value;
+                                        } else if constexpr (
+                                            std::is_same_v<T, std::string>) {
+                                            std::cout << ' '
+                                                      << std::quoted(value);
+                                        } else if constexpr (
+                                            std::is_same_v<
+                                                T, th2::RegisterTarget>) {
+                                            std::cout << " reg["
+                                                      << +value.index << ']';
+                                        } else {
+                                            std::cout << " cmp["
+                                                      << +value.register_index
+                                                      << ',' << +value.operation
+                                                      << ',' << value.value
+                                                      << ']';
+                                        }
+                                    }, argument);
                                 }
-                            }, argument);
+                            } catch (const std::exception& error) {
+                                std::cout << " <dynamic: " << error.what()
+                                          << '>';
+                            }
                         }
                         std::cout << '\n';
                     }
