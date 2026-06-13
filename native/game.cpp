@@ -1895,17 +1895,34 @@ private:
         constexpr std::size_t time_flag = 2;
         constexpr std::size_t event_next_flag = 3;
         constexpr std::size_t event_end_flag = 4;
+        constexpr std::size_t calendar_skip_flag = 6;
+        constexpr std::size_t clock_time_flag = 7;
 
         int month = runtime_.flag(month_flag);
         int day = runtime_.flag(day_flag);
         int time = runtime_.flag(time_flag);
         const int event_next = runtime_.flag(event_next_flag);
+        bool show_calendar = false;
 
         if (runtime_.flag(event_end_flag) != 0) {
             time = event_next == -1 ? time + 1 : event_next;
             if (time >= 7) {
-                ++day;
+                map_events_.clear();
+                if (skipped_month_ != 0) {
+                    month = skipped_month_;
+                    day = skipped_day_;
+                    skipped_month_ = 0;
+                    skipped_day_ = 0;
+                } else {
+                    ++day;
+                }
                 time = 0;
+                runtime_.set_flag(clock_time_flag, 0);
+                if (runtime_.flag(calendar_skip_flag) != 0) {
+                    runtime_.set_flag(calendar_skip_flag, 0);
+                } else {
+                    show_calendar = true;
+                }
                 if ((month == 3 && day >= 32)
                     || (month == 4 && day >= 31)) {
                     ++month;
@@ -1950,6 +1967,9 @@ private:
         runtime_.set_flag(event_next_flag, -1);
         runtime_.load(std::format(
             "EV_{:02d}{:02d}{}.SDT", month, day, periods[time]));
+        if (show_calendar) {
+            begin_calendar(-1, -1);
+        }
         return true;
     }
 
@@ -4076,7 +4096,7 @@ private:
                     return_to_title();
                     break;
                 }
-                if (ui_mode_ == UiMode::map) {
+                if (ui_mode_ == UiMode::map || calendar_state_) {
                     break;
                 }
                 continue;
