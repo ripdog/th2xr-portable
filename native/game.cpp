@@ -3314,6 +3314,12 @@ private:
             && previous->alpha == alpha) {
             return;
         }
+        const int animation_type = wait_form ? 3
+            : number(event, 3) == -2 ? -1
+            : number(event, 3) < 0 ? 0 : number(event, 3);
+        if (animation_type != 3) {
+            message_visible_ = false;
+        }
         CharacterAnimation animation;
         animation.from_locate = previous ? previous->locate : locate;
         animation.to_locate = locate;
@@ -3324,8 +3330,7 @@ private:
         animation.blocking = event.instruction.name == "C";
         bool stage = wait_form;
         if (event.instruction.name == "C") {
-            animation.type = number(event, 3) == -2 ? -1
-                : number(event, 3) < 0 ? 0 : number(event, 3);
+            animation.type = animation_type;
             stage = animation.type == 3;
             animation.frames = animation.type == -1 ? 0 : number(event, 7);
             animation.kind = previous && previous->pose != number(event, 1)
@@ -3688,21 +3693,53 @@ private:
     {
         const auto name = event.instruction.name;
         if (name == "B" || name == "BT" || name == "BC" || name == "BCT") {
+            const int scene = number(event, 1) < 0 ? -1
+                : number(event, 1) * 10
+                    + std::max<std::int32_t>(0, number(event, 2));
+            const bool unchanged_direct =
+                number(event, 0) == -1
+                && background_
+                && bg_scene_ == scene;
+            if (unchanged_direct) {
+                return true;
+            }
+            message_visible_ = false;
             begin_transition(
                 number(event, 0), number(event, 3), number(event, 6), true);
             set_background(
                 event, name == "BC" || name == "BCT");
         } else if (name == "H" || name == "HT") {
             if (number(event, 1) >= 0) {
+                const int visual = number(event, 1) * 10
+                    + std::max<std::int32_t>(0, number(event, 2));
+                const bool unchanged_direct =
+                    number(event, 0) == -1
+                    && background_
+                    && bg_scene_ == visual;
+                if (unchanged_direct) {
+                    return true;
+                }
+                message_visible_ = false;
                 begin_transition(
                     number(event, 0), number(event, 3), number(event, 7), true);
                 set_cg(event, BackgroundKind::hcg, 'h');
             }
         } else if (name == "V" || name == "VT") {
+            const int visual = number(event, 1) * 10
+                + std::max<std::int32_t>(0, number(event, 2));
+            const bool unchanged_direct =
+                number(event, 0) == -1
+                && background_
+                && bg_scene_ == visual;
+            if (unchanged_direct) {
+                return true;
+            }
+            message_visible_ = false;
             begin_transition(
                 number(event, 0), number(event, 3), number(event, 7), true);
             set_cg(event, BackgroundKind::visual, 'v');
         } else if (name == "FB") {
+            message_visible_ = false;
             begin_background_fade(
                 number(event, 0), number(event, 1), number(event, 2),
                 number(event, 3));
@@ -3716,6 +3753,10 @@ private:
                 std::chrono::steady_clock::now(),
             };
         } else if (name == "Q" || name == "SetShake") {
+            if ((number(event, 0) == 0 || number(event, 0) == 3)
+                && number(event, 2) != 0) {
+                message_visible_ = false;
+            }
             shake_ = ShakeState{
                 number(event, 0),
                 number(event, 1),
@@ -3846,6 +3887,7 @@ private:
                         character->locate;
                     animation.from_alpha = animation.to_alpha =
                         character->alpha;
+                    message_visible_ = false;
                     start_character_animation(
                         character_number, std::move(animation));
                 }
@@ -3862,6 +3904,7 @@ private:
                     character_staged_[character_index(character_number)] = true;
                     return true;
                 }
+                message_visible_ = false;
                 CharacterAnimation animation;
                 animation.kind = CharacterAnimationKind::pose;
                 animation.type = number(event, 2) < 0 ? 0 : number(event, 2);
@@ -3878,6 +3921,7 @@ private:
             }
         } else if (name == "CL") {
             if (auto* character = characters_.find(number(event, 0))) {
+                message_visible_ = false;
                 CharacterAnimation animation;
                 animation.kind = CharacterAnimationKind::locate;
                 animation.frames = name == "CL" ? number(event, 2) : -1;
@@ -3892,6 +3936,7 @@ private:
             push_backlog();
             message_.set(th2::substitute_player_name(
                 text(event, 0), config_.player_name));
+            message_visible_ = true;
             current_line_key_ = runtime_.script_name() + ':'
                 + std::to_string(runtime_.vm_pc());
             message_ends_block_ = number(event, 1) == 2;
@@ -3900,6 +3945,7 @@ private:
         } else if (name == "AddMessage2") {
             message_.append(th2::substitute_player_name(
                 text(event, 0), config_.player_name));
+            message_visible_ = true;
             current_line_key_ = runtime_.script_name() + ':'
                 + std::to_string(runtime_.vm_pc());
             message_ends_block_ = number(event, 1) == 2;
