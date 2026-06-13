@@ -152,8 +152,14 @@ ImGuiLayer::~ImGuiLayer()
 void ImGuiLayer::process_event(const SDL_Event& event)
 {
     auto& io = ImGui::GetIO();
+    // SDL event coordinates are in window pixels; ImGui's logical coordinate
+    // system is the full window divided by the display scale.
+    auto to_imgui = [&](float x, float y) {
+        return std::pair{x / display_scale_, y / display_scale_};
+    };
     if (event.type == SDL_EVENT_MOUSE_MOTION) {
-        io.AddMousePosEvent(event.motion.x, event.motion.y);
+        const auto [x, y] = to_imgui(event.motion.x, event.motion.y);
+        io.AddMousePosEvent(x, y);
     } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
                || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
         int button = -1;
@@ -165,6 +171,9 @@ void ImGuiLayer::process_event(const SDL_Event& event)
                 button, event.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
         }
     } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+        const auto [x, y] =
+            to_imgui(event.wheel.mouse_x, event.wheel.mouse_y);
+        io.AddMousePosEvent(x, y);
         io.AddMouseWheelEvent(event.wheel.x, event.wheel.y);
     } else if (event.type == SDL_EVENT_TEXT_INPUT) {
         io.AddInputCharactersUTF8(event.text.text);
@@ -183,31 +192,36 @@ void ImGuiLayer::process_event(const SDL_Event& event)
     }
 }
 
-void ImGuiLayer::rebuild_font_atlas(float framebuffer_scale)
+void ImGuiLayer::rebuild_font_atlas(float display_scale)
 {
     auto& io = ImGui::GetIO();
     io.Fonts->Clear();
     if (!imgui_font_path_.empty()) {
         // Scale the reference 13px default size to the monitor DPI.
         io.Fonts->AddFontFromFileTTF(
-            imgui_font_path_.c_str(), 13.0f * framebuffer_scale);
+            imgui_font_path_.c_str(), 13.0f * display_scale);
     }
     if (io.Fonts->Fonts.empty()) {
         io.Fonts->AddFontDefault();
     }
-    last_font_scale_ = framebuffer_scale;
+    last_font_scale_ = display_scale;
 }
 
-void ImGuiLayer::new_frame(float framebuffer_scale)
+void ImGuiLayer::new_frame(
+    int window_width, int window_height, float display_scale)
 {
     auto& io = ImGui::GetIO();
-    io.DisplaySize = ImVec2(800.0f, 600.0f);
-    io.DisplayFramebufferScale = ImVec2(framebuffer_scale, framebuffer_scale);
+    display_scale_ = display_scale > 0.0f ? display_scale : 1.0f;
+    // ImGui's logical canvas covers the full window; the display scale keeps
+    // the UI elements at a comfortable OS-DPI size.
+    io.DisplaySize = ImVec2(
+        window_width / display_scale_, window_height / display_scale_);
+    io.DisplayFramebufferScale = ImVec2(display_scale_, display_scale_);
 
     // Rebuild the font atlas when the scale changes so text stays crisp
     // at the monitor's native resolution.
-    if (std::abs(framebuffer_scale - last_font_scale_) > 0.05f) {
-        rebuild_font_atlas(framebuffer_scale);
+    if (std::abs(display_scale_ - last_font_scale_) > 0.05f) {
+        rebuild_font_atlas(display_scale_);
     }
 
     const auto ticks = SDL_GetTicks();

@@ -302,9 +302,9 @@ public:
                     running_ = false;
                     continue;
                 }
+                imgui_->process_event(event);
                 convert_event_to_logical_coordinates(
                     event, window_width, window_height);
-                imgui_->process_event(event);
                 if (config_.show_script_position
                     && imgui_->wants_mouse()
                     && (event.type == SDL_EVENT_MOUSE_MOTION
@@ -530,7 +530,9 @@ public:
             const float scale_y = output_height / 600.0f;
             const float framebuffer_scale = std::min(scale_x, scale_y);
             const float display_scale = SDL_GetWindowDisplayScale(window_);
-            imgui_->new_frame(display_scale > 0.0f ? display_scale : 1.0f);
+            imgui_->new_frame(
+                window_width, window_height,
+                display_scale > 0.0f ? display_scale : 1.0f);
             font_.configure(
                 config_.authentic_font, config_.font_family,
                 config_.font_size, framebuffer_scale);
