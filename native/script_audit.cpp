@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <deque>
 #include <exception>
 #include <filesystem>
 #include <format>
@@ -48,6 +49,15 @@ bool is_scenario(std::string_view name)
     return extension == ".sdt";
 }
 
+std::uint32_t read_u32(
+    std::span<const std::uint8_t> bytes, std::size_t position)
+{
+    return static_cast<std::uint32_t>(bytes[position])
+        | (static_cast<std::uint32_t>(bytes[position + 1]) << 8)
+        | (static_cast<std::uint32_t>(bytes[position + 2]) << 16)
+        | (static_cast<std::uint32_t>(bytes[position + 3]) << 24);
+}
+
 std::string scenario_name(std::string name)
 {
     if (!is_scenario(name)) {
@@ -83,6 +93,98 @@ struct Reference {
     }
 };
 
+std::set<std::string> reachable_script_targets(
+    const th2::Scenario& scenario,
+    std::span<const std::int32_t> registers)
+{
+    std::set<std::string> targets;
+    std::set<std::size_t> visited;
+    std::vector<std::size_t> pending;
+    if (scenario.blocks()[0] != 0) {
+        pending.push_back(scenario.blocks()[0] - 1);
+    }
+
+    const auto bytecode = scenario.bytecode();
+    const auto push = [&](std::size_t offset) {
+        if (offset < bytecode.size() && !visited.contains(offset)) {
+            pending.push_back(offset);
+        }
+    };
+    while (!pending.empty()) {
+        const auto offset = pending.back();
+        pending.pop_back();
+        if (!visited.insert(offset).second) {
+            continue;
+        }
+        const auto instruction = th2::decode_instruction(bytecode, offset);
+        const auto next = offset + instruction.size;
+
+        if (instruction.opcode == 1) {
+            continue;
+        }
+        if (instruction.opcode == 6 || instruction.opcode == 7) {
+            push(read_u32(
+                bytecode, offset + (instruction.opcode == 6 ? 5 : 8)));
+            push(next);
+            continue;
+        }
+        if (instruction.opcode == 8 || instruction.opcode == 9) {
+            const auto first = offset
+                + (instruction.opcode == 8 ? 5 : 8);
+            push(read_u32(bytecode, first));
+            push(read_u32(bytecode, first + 4));
+            continue;
+        }
+        if (instruction.opcode == 10) {
+            push(read_u32(bytecode, offset + 3));
+            push(next);
+            continue;
+        }
+        if (instruction.opcode == 11) {
+            push(read_u32(bytecode, offset + 2));
+            continue;
+        }
+        if (instruction.opcode == 35) {
+            const auto block = bytecode[offset + 2];
+            if (scenario.blocks()[block] != 0) {
+                push(scenario.blocks()[block] - 1);
+            }
+            push(next);
+            continue;
+        }
+        if (instruction.opcode == 36) {
+            continue;
+        }
+        if (instruction.opcode == 40) {
+            const auto length = bytecode[offset + 2];
+            targets.insert(scenario_name(std::string(
+                reinterpret_cast<const char*>(bytecode.data() + offset + 3),
+                length)));
+            continue;
+        }
+        if (instruction.opcode >= 64) {
+            const auto event = th2::decode_event(
+                instruction,
+                bytecode.subspan(instruction.offset, instruction.size),
+                registers);
+            if (instruction.name == "LoadScript") {
+                targets.insert(scenario_name(string_argument(event, 0)));
+                continue;
+            }
+            if (instruction.name == "SetMapEvent") {
+                const auto& target = string_argument(event, 3);
+                if (!target.empty()) {
+                    targets.insert(scenario_name(target));
+                }
+            } else if (instruction.name == "SetTitle") {
+                continue;
+            }
+        }
+        push(next);
+    }
+    return targets;
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -102,6 +204,7 @@ int main(int argc, char** argv)
         const th2::Archive movies(data / "mov.pak");
         std::map<std::string, std::size_t> opcode_counts;
         std::map<std::string, std::set<Reference>> scenario_references;
+        std::map<std::string, std::set<std::string>> route_edges;
         std::set<std::string> missing_assets;
         std::size_t scenario_count = 0;
         std::size_t instruction_count = 0;
@@ -118,6 +221,8 @@ int main(int argc, char** argv)
             }
             ++scenario_count;
             const th2::Scenario scenario(archive.read(entry));
+            route_edges.emplace(
+                entry.name, reachable_script_targets(scenario, registers));
             std::size_t offset = 0;
             try {
                 while (offset < scenario.bytecode().size()) {
@@ -312,6 +417,7 @@ int main(int argc, char** argv)
         }
 
         std::vector<std::string> missing_schedule;
+        std::deque<std::string> route_pending;
         static constexpr std::array periods{
             "MORNING", "INTERVAL", "LUNCH_BREAK",
             "SCHOOL_HOURS", "AFTER_SCHOOL", "NIGHT",
@@ -328,8 +434,40 @@ int main(int argc, char** argv)
                         "EV_{:02d}{:02d}{}.SDT", month, day, period);
                     if (!archive.find(name)) {
                         missing_schedule.push_back(name);
+                    } else {
+                        route_pending.push_back(name);
                     }
                 }
+            }
+        }
+        static constexpr std::array replay_scenarios{
+            10, 20, 30, 40, 50, 70, 80, 90, 110,
+        };
+        for (const int replay : replay_scenarios) {
+            route_pending.push_back(std::format(
+                "8000{:05d}.SDT", replay));
+        }
+
+        std::set<std::string> reachable_scenarios;
+        std::set<std::string> missing_reachable_scenarios;
+        while (!route_pending.empty()) {
+            auto name = std::move(route_pending.front());
+            route_pending.pop_front();
+            const auto* entry = archive.find(name);
+            if (!entry) {
+                missing_reachable_scenarios.insert(std::move(name));
+                continue;
+            }
+            if (!reachable_scenarios.insert(entry->name).second) {
+                continue;
+            }
+            const auto found = route_edges.find(entry->name);
+            if (found == route_edges.end()) {
+                throw std::runtime_error(
+                    "route graph is missing " + entry->name);
+            }
+            for (const auto& target : found->second) {
+                route_pending.push_back(target);
             }
         }
 
@@ -337,7 +475,9 @@ int main(int argc, char** argv)
                   << " instructions, " << observed.size() << " opcodes\n"
                   << present_references << " present scenario destinations, "
                   << missing_references << " absent scenario destinations\n"
-                  << "481 scheduled event scenarios verified\n";
+                  << "481 scheduled event scenarios verified\n"
+                  << reachable_scenarios.size()
+                  << " scenarios reachable from retail entry points\n";
         if (undecodable_references != 0) {
             std::cout << undecodable_references
                       << " scenario references could not be decoded statically\n";
@@ -353,9 +493,13 @@ int main(int argc, char** argv)
         for (const auto& name : missing_schedule) {
             std::cerr << "missing scheduled scenario: " << name << '\n';
         }
+        for (const auto& name : missing_reachable_scenarios) {
+            std::cerr << "missing reachable scenario: " << name << '\n';
+        }
 
         if (!unexpected.empty() || !absent.empty()
-            || !missing_assets.empty() || !missing_schedule.empty()) {
+            || !missing_assets.empty() || !missing_schedule.empty()
+            || !missing_reachable_scenarios.empty()) {
             for (const auto& name : unexpected) {
                 std::cerr << "unexpected shipped opcode: " << name << '\n';
             }
