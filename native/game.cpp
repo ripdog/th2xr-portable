@@ -505,10 +505,12 @@ public:
                     } else {
                         if (event.key.key == SDLK_ESCAPE) {
                             open_system_menu();
-                        } else if (event.key.key == SDLK_F5) {
+                        } else if (event.key.key == SDLK_F5
+                                   && !replay_mode_) {
                             save_snapshot_ = capture_frame_pixels();
                             save(0);
-                        } else if (event.key.key == SDLK_F7) {
+                        } else if (event.key.key == SDLK_F7
+                                   && !replay_mode_) {
                             save_snapshot_ = capture_frame_pixels();
                             open_save_load(UiMode::load);
                         } else if (event.key.key == SDLK_F11) {
@@ -1218,6 +1220,7 @@ private:
     bool auto_mode_ = false;
     bool skip_mode_ = false;
     bool demo_mode_ = false;
+    bool replay_mode_ = false;
     int demo_delay_frames_ = 0;
     std::vector<MapEvent> map_events_;
     int map_field_ = 1;
@@ -1240,12 +1243,18 @@ private:
 
     bool current_text_is_read() const
     {
+        if (replay_mode_) {
+            return true;
+        }
         const auto key = current_read_key();
         return !key.empty() && config_.read_lines.contains(key);
     }
 
     void mark_current_text_read()
     {
+        if (replay_mode_) {
+            return;
+        }
         const auto key = current_read_key();
         if (!key.empty() && config_.read_lines.insert(key).second) {
             th2::save_config(config_path_, config_);
@@ -4177,6 +4186,10 @@ private:
             }
             sync_game_flags();
             if (step.reason == th2::VmYield::ended) {
+                if (replay_mode_) {
+                    return_to_title();
+                    break;
+                }
                 if (!load_scheduled_script()) {
                     return_to_title();
                     break;
@@ -5164,12 +5177,12 @@ private:
         auto_mode_ = false;
         skip_mode_ = false;
         demo_mode_ = false;
+        replay_mode_ = false;
         demo_delay_frames_ = 0;
     }
 
-    void start_new_game()
+    void initialize_scenario_flags()
     {
-        reset_play_state();
         runtime_.reset_flags();
         runtime_.set_flag(0, 3);
         runtime_.set_flag(1, 1);
@@ -5182,6 +5195,12 @@ private:
                 ? 1 : 0);
         runtime_.set_flag(6, 0);
         runtime_.set_flag(7, 0);
+    }
+
+    void start_new_game()
+    {
+        reset_play_state();
+        initialize_scenario_flags();
         runtime_.load("EV_0301MORNING.SDT");
         ui_mode_ = UiMode::game;
         advance();
@@ -5286,6 +5305,7 @@ private:
         confirm_return_title_ = false;
         auto_mode_ = false;
         skip_mode_ = false;
+        replay_mode_ = false;
         wake_time_.reset();
         audio_wait_.reset();
         transition_.reset();
@@ -5523,8 +5543,12 @@ private:
     void execute_menu_item(int index)
     {
         switch (index) {
-        case 0: open_save_load(UiMode::save); break;
-        case 1: open_save_load(UiMode::load); break;
+        case 0:
+            if (!replay_mode_) open_save_load(UiMode::save);
+            break;
+        case 1:
+            if (!replay_mode_) open_save_load(UiMode::load);
+            break;
         case 2: message_visible_ = !message_visible_; break;
         case 3: open_config(); break;
         case 4: break;
@@ -5602,6 +5626,7 @@ private:
         const int dst_y[4] = {112, 200, 288, 376};
 
         for (int i = 0; i < 4; ++i) {
+            const bool disabled = replay_mode_ && (i == 0 || i == 1);
             const int state = (i == menu_highlight_) ? 82 : 0;
             const SDL_FRect src{
                 static_cast<float>(btn_x[i]),
@@ -5610,8 +5635,11 @@ private:
                 static_cast<float>(dst_x[i]),
                 static_cast<float>(dst_y[i]), 400.0f, 82.0f};
             if (ui_sys_menu_btns_) {
+                SDL_SetTextureAlphaMod(
+                    ui_sys_menu_btns_.get(), disabled ? 64 : 255);
                 SDL_RenderTexture(renderer_, ui_sys_menu_btns_.get(),
                                   &src, &dst);
+                SDL_SetTextureAlphaMod(ui_sys_menu_btns_.get(), 255);
             } else {
                 // Fallback: draw text
                 const char* labels[4] = {"Save", "Load", "Hide Text", "Settings"};
@@ -6758,13 +6786,9 @@ private:
 
     void start_replay(int slot)
     {
-        bgm_.stop();
-        bgm_track_ = -1;
-        message_ = th2::Message{};
-        backlog_.clear();
-        clear_characters();
-        background_.reset();
-        bg_scene_ = -1;
+        reset_play_state();
+        initialize_scenario_flags();
+        replay_mode_ = true;
         runtime_.load(std::format(
             "8000{:05d}.SDT", replay_scripts.at(slot)));
         ui_mode_ = UiMode::game;
@@ -7095,6 +7119,15 @@ private:
         const int dst_y[5] = {112, 200, 288, 376, 480};
         const int dst_w[5] = {400, 400, 400, 400, 188};
         const int dst_h[5] = {82, 82, 82, 82, 32};
+        const auto enabled = [&](int item) {
+            return !replay_mode_ || (item != 0 && item != 1);
+        };
+        const auto move_highlight = [&](int direction) {
+            do {
+                menu_highlight_ =
+                    (menu_highlight_ + direction + 5) % 5;
+            } while (!enabled(menu_highlight_));
+        };
 
         const int previous_highlight = menu_highlight_;
         if (event.type == SDL_EVENT_KEY_DOWN) {
@@ -7102,14 +7135,16 @@ private:
                 play_se(-1, 9107, false, 255);
                 close_system_menu();
             } else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_SPACE) {
-                play_se(-1, 9014, false, 255);
                 const int item = menu_highlight_;
-                close_system_menu();
-                execute_menu_item(item);
+                if (enabled(item)) {
+                    play_se(-1, 9014, false, 255);
+                    close_system_menu();
+                    execute_menu_item(item);
+                }
             } else if (event.key.key == SDLK_UP) {
-                menu_highlight_ = (menu_highlight_ - 1 + 5) % 5;
+                move_highlight(-1);
             } else if (event.key.key == SDLK_DOWN) {
-                menu_highlight_ = (menu_highlight_ + 1) % 5;
+                move_highlight(1);
             }
         } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
             if (event.button.button == SDL_BUTTON_RIGHT) {
@@ -7119,7 +7154,8 @@ private:
                 const float mx = event.button.x; const float my = event.button.y;
                 for (int i = 0; i < 5; ++i) {
                     if (mx >= dst_x[i] && mx < dst_x[i] + dst_w[i]
-                        && my >= dst_y[i] && my < dst_y[i] + dst_h[i]) {
+                        && my >= dst_y[i] && my < dst_y[i] + dst_h[i]
+                        && enabled(i)) {
                         play_se(-1, 9014, false, 255);
                         close_system_menu();
                         execute_menu_item(i);
@@ -7131,7 +7167,8 @@ private:
             const float mx = event.motion.x; const float my = event.motion.y;
             for (int i = 0; i < 5; ++i) {
                 if (mx >= dst_x[i] && mx < dst_x[i] + dst_w[i]
-                    && my >= dst_y[i] && my < dst_y[i] + dst_h[i]) {
+                    && my >= dst_y[i] && my < dst_y[i] + dst_h[i]
+                    && enabled(i)) {
                     menu_highlight_ = i;
                     break;
                 }
@@ -7310,9 +7347,10 @@ private:
 
         for (int i = 0; i < static_cast<int>(std::size(btns)); ++i) {
             const auto& button = btns[i];
+            const bool disabled = replay_mode_ && (i == 2 || i == 3);
             const bool active =
                 (i == 4 && auto_mode_) || (i == 5 && skip_mode_);
-            const float state_x = active ? 66.0f
+            const float state_x = disabled ? 0.0f : active ? 66.0f
                 : (i == sidebar_hover_ ? 44.0f : 22.0f);
             const SDL_FRect src{
                 state_x, static_cast<float>(button.source_y),
@@ -7340,6 +7378,9 @@ private:
         };
         for (int i = 0; i < static_cast<int>(button_y.size()); ++i) {
             if (y >= button_y[i] && y < button_y[i] + button_h[i]) {
+                if (replay_mode_ && (i == 2 || i == 3)) {
+                    return;
+                }
                 sidebar_hover_ = i;
                 if (sidebar_hover_ != previous_hover) {
                     play_se(-1, 9108, false, 255);
@@ -7392,11 +7433,13 @@ private:
                 }
                 break;
             case 2:
+                if (replay_mode_) break;
                 play_se(-1, 9104, false, 255);
                 save_snapshot_ = capture_frame_pixels();
                 open_save_load(UiMode::save);
                 break;
             case 3:
+                if (replay_mode_) break;
                 play_se(-1, 9104, false, 255);
                 save_snapshot_ = capture_frame_pixels();
                 open_save_load(UiMode::load);
@@ -7416,6 +7459,7 @@ private:
                 open_config();
                 break;
             case 7:
+                if (replay_mode_) break;
                 play_se(-1, 9104, false, 255);
                 save_snapshot_ = capture_frame_pixels();
                 save(0);
