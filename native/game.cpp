@@ -4720,11 +4720,11 @@ private:
         }
 
         // BGM
-        bgm_track_ = read_i32(in);
+        const auto loaded_bgm_track = read_i32(in);
         bgm_loop_ = read_i32(in) != 0;
         bgm_volume_ = read_i32(in);
-        if (bgm_track_ >= 0) {
-            play_bgm(bgm_track_, bgm_loop_, bgm_volume_);
+        if (loaded_bgm_track >= 0) {
+            play_bgm(loaded_bgm_track, bgm_loop_, bgm_volume_);
         }
 
         // SE channels - restore looping channels
