@@ -457,6 +457,7 @@ public:
                 if (config_open_ || name_input_open_) {
                     if (event.type == SDL_EVENT_KEY_DOWN
                         && event.key.key == SDLK_ESCAPE && config_open_) {
+                        play_se(-1, 9107, false, 255);
                         close_config();
                     }
                     continue;
@@ -5125,17 +5126,20 @@ private:
 
     bool volume_control(const char* label, int& volume, bool& muted)
     {
-        bool changed = false;
+        bool volume_changed = false;
         ImGui::PushID(label);
         ImGui::BeginDisabled(muted);
-        changed |= ImGui::SliderInt("##volume", &volume, 0, 256);
+        volume_changed = ImGui::SliderInt("##volume", &volume, 0, 256);
         ImGui::EndDisabled();
         ImGui::SameLine();
-        changed |= ImGui::Checkbox("Mute", &muted);
+        const bool mute_changed = ImGui::Checkbox("Mute", &muted);
         ImGui::SameLine();
         ImGui::TextUnformatted(label);
         ImGui::PopID();
-        return changed;
+        if (mute_changed) {
+            play_se(-1, 9104, false, 255);
+        }
+        return volume_changed || mute_changed;
     }
 
     void return_to_title()
@@ -5171,9 +5175,10 @@ private:
         ImGui::SetNextWindowPos(ImVec2(115.0f, 50.0f), ImGuiCond_FirstUseEver);
         bool open = true;
         if (ImGui::Begin("Panel Config", &open)) {
+            bool option_changed = false;
             if (ImGui::BeginTabBar("config-tabs")) {
                 if (ImGui::BeginTabItem("Playback")) {
-                    ImGui::Checkbox(
+                    option_changed |= ImGui::Checkbox(
                         "Auto mode skips previously read text",
                         &config_.auto_skip_read);
                     ImGui::SliderInt(
@@ -5183,7 +5188,7 @@ private:
                         "Delay at page end", &config_.auto_page_ms,
                         500, 15000, "%d ms");
                     ImGui::Separator();
-                    ImGui::Checkbox(
+                    option_changed |= ImGui::Checkbox(
                         "Auto-skip includes unread text",
                         &config_.skip_unread);
                     ImGui::EndTabItem();
@@ -5213,9 +5218,10 @@ private:
                 if (ImGui::BeginTabItem("Display & Input")) {
                     if (ImGui::Checkbox("Fullscreen", &config_.fullscreen)) {
                         SDL_SetWindowFullscreen(window_, config_.fullscreen);
+                        option_changed = true;
                     }
                     ImGui::BeginDisabled(!anime4k_available_);
-                    ImGui::Checkbox(
+                    option_changed |= ImGui::Checkbox(
                         "Anime4K art upscaling", &config_.anime4k);
                     ImGui::EndDisabled();
                     if (!anime4k_available_) {
@@ -5223,7 +5229,7 @@ private:
                             "Anime4K requires SDL's GPU renderer with SPIR-V support.");
                     }
                     ImGui::SeparatorText("Text");
-                    ImGui::Checkbox(
+                    option_changed |= ImGui::Checkbox(
                         "Authentic bitmap font", &config_.authentic_font);
                     ImGui::BeginDisabled(config_.authentic_font);
                     const auto& families =
@@ -5236,6 +5242,7 @@ private:
                             if (ImGui::Selectable(
                                     family.c_str(), selected)) {
                                 config_.font_family = family;
+                                option_changed = true;
                             }
                             if (selected) {
                                 ImGui::SetItemDefaultFocus();
@@ -5243,19 +5250,19 @@ private:
                         }
                         ImGui::EndCombo();
                     }
-                    ImGui::InputInt(
+                    option_changed |= ImGui::InputInt(
                         "Font size", &config_.font_size, 1, 4);
                     config_.font_size =
                         std::clamp(config_.font_size, 12, 48);
                     ImGui::EndDisabled();
-                    ImGui::Checkbox(
+                    option_changed |= ImGui::Checkbox(
                         "Mouse wheel opens backlog",
                         &config_.wheel_opens_backlog);
                     ImGui::SeparatorText("Debug");
-                    ImGui::Checkbox(
+                    option_changed |= ImGui::Checkbox(
                         "Show script position",
                         &config_.show_script_position);
-                    ImGui::Checkbox(
+                    option_changed |= ImGui::Checkbox(
                         "Dump transition frames",
                         &config_.dump_transition_frames);
                     ImGui::TextDisabled(
@@ -5264,14 +5271,19 @@ private:
                 }
                 ImGui::EndTabBar();
             }
+            if (option_changed) {
+                play_se(-1, 9104, false, 255);
+            }
             ImGui::Separator();
             if (ImGui::Button("Close", ImVec2(110.0f, 0.0f))) {
+                play_se(-1, 9104, false, 255);
                 open = false;
             }
             if (ui_mode_ != UiMode::title) {
                 ImGui::SameLine();
                 if (ImGui::Button(
                         "Return to Title", ImVec2(140.0f, 0.0f))) {
+                    play_se(-1, 9104, false, 255);
                     confirm_return_title_ = true;
                     ImGui::OpenPopup("Return to Title?");
                 }
@@ -5282,12 +5294,14 @@ private:
                 ImGui::TextUnformatted(
                     "Unsaved progress will be lost.\nReturn to the title screen?");
                 if (ImGui::Button("Return", ImVec2(120.0f, 0.0f))) {
+                    play_se(-1, 9104, false, 255);
                     return_to_title();
                     ImGui::CloseCurrentPopup();
                     open = false;
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f))) {
+                    play_se(-1, 9107, false, 255);
                     confirm_return_title_ = false;
                     ImGui::CloseCurrentPopup();
                 }
