@@ -2,6 +2,7 @@
 #include "bytecode.hpp"
 #include "event.hpp"
 #include "scenario.hpp"
+#include "script_runtime.hpp"
 
 #include <algorithm>
 #include <array>
@@ -210,6 +211,7 @@ int main(int argc, char** argv)
         std::size_t instruction_count = 0;
         std::size_t undecodable_references = 0;
         std::size_t dynamic_asset_references = 0;
+        std::map<std::string, std::set<Reference>> dynamic_assets;
         std::array<std::int32_t, 50> registers{};
         registers.fill(1);
         std::array<std::int32_t, 50> alternate_registers{};
@@ -252,6 +254,12 @@ int main(int argc, char** argv)
                                 scenario.bytecode().subspan(
                                     instruction.offset, instruction.size),
                                 alternate_registers);
+                            const auto dynamic_asset = [&] {
+                                ++dynamic_asset_references;
+                                dynamic_assets[
+                                    std::string(instruction.name)].insert(
+                                    {entry.name, instruction.offset});
+                            };
                             if (instruction.name == "LoadScript"
                                 || instruction.name == "SetMapEvent") {
                                 const auto argument =
@@ -274,7 +282,7 @@ int main(int argc, char** argv)
                                 }
                             } else if (instruction.name == "M") {
                                 if (!stable_integer(event, alternate_event, 0)) {
-                                    ++dynamic_asset_references;
+                                    dynamic_asset();
                                     offset += instruction.size;
                                     continue;
                                 }
@@ -299,7 +307,7 @@ int main(int argc, char** argv)
                                     instruction.name == "SE" ? 0u : 1u;
                                 if (!stable_integer(
                                         event, alternate_event, argument)) {
-                                    ++dynamic_asset_references;
+                                    dynamic_asset();
                                     offset += instruction.size;
                                     continue;
                                 }
@@ -317,7 +325,7 @@ int main(int argc, char** argv)
                                 if (!stable_integer(event, alternate_event, 1)
                                     || !stable_integer(
                                         event, alternate_event, 2)) {
-                                    ++dynamic_asset_references;
+                                    dynamic_asset();
                                     offset += instruction.size;
                                     continue;
                                 }
@@ -334,7 +342,7 @@ int main(int argc, char** argv)
                                 }
                             } else if (instruction.name == "SetMovie") {
                                 if (!stable_integer(event, alternate_event, 0)) {
-                                    ++dynamic_asset_references;
+                                    dynamic_asset();
                                     offset += instruction.size;
                                     continue;
                                 }
@@ -356,7 +364,7 @@ int main(int argc, char** argv)
                                 if (!stable_integer(event, alternate_event, 0)
                                     || !stable_integer(
                                         event, alternate_event, 1)) {
-                                    ++dynamic_asset_references;
+                                    dynamic_asset();
                                     offset += instruction.size;
                                     continue;
                                 }
@@ -471,6 +479,56 @@ int main(int argc, char** argv)
             }
         }
 
+        auto unresolved_dynamic_assets = dynamic_assets;
+        std::set<std::string> dynamic_sources;
+        for (const auto& [opcode, references] : dynamic_assets) {
+            static_cast<void>(opcode);
+            for (const auto& reference : references) {
+                dynamic_sources.insert(reference.source);
+            }
+        }
+        for (const auto& source : dynamic_sources) {
+            th2::ScriptRuntime runtime(archive);
+            runtime.load(source);
+            for (std::size_t count = 0; count < 10000; ++count) {
+                const auto step = runtime.run();
+                if (step.script_name != source) {
+                    break;
+                }
+                if (step.reason == th2::VmYield::ended) {
+                    break;
+                }
+                if (step.reason != th2::VmYield::event) {
+                    continue;
+                }
+                const Reference reference{
+                    step.script_name, step.event.instruction.offset};
+                auto found = unresolved_dynamic_assets.find(
+                    std::string(step.event.instruction.name));
+                if (found == unresolved_dynamic_assets.end()
+                    || !found->second.erase(reference)) {
+                    continue;
+                }
+                if (step.event.instruction.name == "H") {
+                    int visual = integer_argument(step.event, 1) * 10;
+                    if (integer_argument(step.event, 2) >= 0) {
+                        visual += integer_argument(step.event, 2);
+                    }
+                    const auto name = std::format("h{:06d}.tga", visual);
+                    if (!graphics.find(name)) {
+                        missing_assets.insert("grp/" + name);
+                    }
+                }
+            }
+        }
+        for (const auto& [opcode, references] : unresolved_dynamic_assets) {
+            for (const auto& reference : references) {
+                std::cerr << "unvalidated dynamic " << opcode
+                          << " asset reference: " << reference.source << ':'
+                          << reference.offset << '\n';
+            }
+        }
+
         std::cout << scenario_count << " scenarios, " << instruction_count
                   << " instructions, " << observed.size() << " opcodes\n"
                   << present_references << " present scenario destinations, "
@@ -484,7 +542,11 @@ int main(int argc, char** argv)
         }
         if (dynamic_asset_references != 0) {
             std::cout << dynamic_asset_references
-                      << " dynamic asset references require runtime validation\n";
+                      << " dynamic asset references runtime-validated\n";
+            for (const auto& [opcode, references] : dynamic_assets) {
+                std::cout << "  " << opcode << ": " << references.size()
+                          << '\n';
+            }
         }
 
         for (const auto& name : missing_assets) {
@@ -499,7 +561,10 @@ int main(int argc, char** argv)
 
         if (!unexpected.empty() || !absent.empty()
             || !missing_assets.empty() || !missing_schedule.empty()
-            || !missing_reachable_scenarios.empty()) {
+            || !missing_reachable_scenarios.empty()
+            || std::ranges::any_of(
+                unresolved_dynamic_assets,
+                [](const auto& entry) { return !entry.second.empty(); })) {
             for (const auto& name : unexpected) {
                 std::cerr << "unexpected shipped opcode: " << name << '\n';
             }
