@@ -145,7 +145,10 @@ int cp932_half_index(unsigned char byte)
 
 int cp932_full_index(std::uint16_t code)
 {
-    for (const auto& point : full_font_points) {
+    // The final entry is the original engine's full-width-space sentinel.
+    // It advances like a full-width character but has no bitmap.
+    for (std::size_t i = 0; i + 1 < full_font_points.size(); ++i) {
+        const auto& point = full_font_points[i];
         if (code >= point.start && code <= point.end) {
             return point.pointer + (code - point.start);
         }
@@ -294,7 +297,7 @@ float GameFont::text_width(std::string_view text) const
                     const auto code = static_cast<std::uint16_t>(
                         (byte << 8)
                         | static_cast<unsigned char>(cp932[i + 1]));
-                    if (cp932_full_index(code) >= 0) {
+                    if (code == 0x8140 || cp932_full_index(code) >= 0) {
                         result += static_cast<float>(size);
                     }
                     i += 2;
@@ -449,6 +452,8 @@ void GameFont::draw_bitmap(
                 const auto* bitmap =
                     data_.data() + index * full_glyph_bytes;
                 draw_glyph(renderer, x, y, size, bitmap, red, green, blue);
+                x += size;
+            } else if (code == 0x8140) {
                 x += size;
             }
             i += 2;
