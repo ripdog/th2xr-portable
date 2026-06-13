@@ -3072,6 +3072,17 @@ private:
 
     void play_bgm(int music, bool loop, int volume)
     {
+        static constexpr std::array music_room_tracks{
+            0, 10, 29, 11, 12, 13, 14, 30, 27, 1,
+            2, 4, 3, 5, 6, 8, 7, 9, 18, 37,
+            38, 41, 42, 39, 40, 15, 16, 17, 19, 20,
+            22, 32, 21, 23, 26, 31, 25, 24, 28, 50,
+        };
+        if (std::ranges::find(music_room_tracks, music)
+                != music_room_tracks.end()
+            && config_.unlocked_music.emplace(music).second) {
+            th2::save_config(config_path_, config_);
+        }
         if (bgm_track_ == music) {
             return;
         }
@@ -3204,6 +3215,11 @@ private:
         background_ = load_toned_texture(
             renderer_, graphics_, std::format("{}{:06d}.tga", prefix, visual),
             graphics_, background_tone_curves());
+        auto& unlocked = kind == BackgroundKind::visual
+            ? config_.unlocked_visual_cgs : config_.unlocked_h_cgs;
+        if (unlocked.emplace(visual).second) {
+            th2::save_config(config_path_, config_);
+        }
         const bool keep_characters = number(event, 4) > 0;
         if (keep_characters) {
             apply_staged_characters();

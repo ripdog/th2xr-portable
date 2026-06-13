@@ -34,6 +34,9 @@ struct GameConfig {
     bool dump_transition_frames = false;
     PlayerName player_name;
     std::unordered_set<std::string> read_lines;
+    std::unordered_set<int> unlocked_visual_cgs;
+    std::unordered_set<int> unlocked_h_cgs;
+    std::unordered_set<int> unlocked_music;
     std::unordered_set<int> unlocked_replays;
 };
 

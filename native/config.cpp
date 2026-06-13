@@ -108,6 +108,21 @@ GameConfig load_config(const std::filesystem::path& path)
             }
         } else if (key == "read") {
             config.read_lines.emplace(value);
+        } else if (key == "visual_cg") {
+            const auto cg = parse_int(value, -1, -1, 99999);
+            if (cg >= 0) {
+                config.unlocked_visual_cgs.emplace(cg);
+            }
+        } else if (key == "h_cg") {
+            const auto cg = parse_int(value, -1, -1, 99999);
+            if (cg >= 0) {
+                config.unlocked_h_cgs.emplace(cg);
+            }
+        } else if (key == "music") {
+            const auto music = parse_int(value, -1, -1, 255);
+            if (music >= 0) {
+                config.unlocked_music.emplace(music);
+            }
         } else if (key == "replay") {
             const auto replay = parse_int(value, -1, -1, 255);
             if (replay >= 0) {
@@ -155,6 +170,15 @@ void save_config(const std::filesystem::path& path, const GameConfig& config)
     }
     for (const auto& key : config.read_lines) {
         output << "read=" << key << '\n';
+    }
+    for (const auto cg : config.unlocked_visual_cgs) {
+        output << "visual_cg=" << cg << '\n';
+    }
+    for (const auto cg : config.unlocked_h_cgs) {
+        output << "h_cg=" << cg << '\n';
+    }
+    for (const auto music : config.unlocked_music) {
+        output << "music=" << music << '\n';
     }
     for (const auto replay : config.unlocked_replays) {
         output << "replay=" << replay << '\n';

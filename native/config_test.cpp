@@ -18,6 +18,9 @@ int main()
     source.character_voice_muted[3] = true;
     source.player_name.family = "Smith";
     source.read_lines.insert("010301000.sdt:42");
+    source.unlocked_visual_cgs.insert(1010);
+    source.unlocked_h_cgs.insert(1000);
+    source.unlocked_music.insert(29);
     source.unlocked_replays.insert(7);
     th2::save_config(path, source);
 
@@ -33,6 +36,9 @@ int main()
         || !loaded.character_voice_muted[3]
         || loaded.player_name.family != "Smith"
         || !loaded.read_lines.contains("010301000.sdt:42")
+        || !loaded.unlocked_visual_cgs.contains(1010)
+        || !loaded.unlocked_h_cgs.contains(1000)
+        || !loaded.unlocked_music.contains(29)
         || !loaded.unlocked_replays.contains(7)) {
         return 1;
     }
