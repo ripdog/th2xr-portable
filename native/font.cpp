@@ -2,10 +2,12 @@
 
 #include <SDL3_ttf/SDL_ttf.h>
 #include <fontconfig/fontconfig.h>
+#include <iconv.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <stdexcept>
 #include <unordered_map>
@@ -25,6 +27,128 @@ int glyph_index(unsigned char character)
     }
     if (character == ' ') {
         return 157;
+    }
+    return -1;
+}
+
+std::string utf8_to_cp932(std::string_view text)
+{
+    iconv_t converter = iconv_open("CP932", "UTF-8");
+    if (converter == reinterpret_cast<iconv_t>(-1)) {
+        throw std::runtime_error("CP932 converter is unavailable");
+    }
+    std::string output(text.size() * 2 + 2, '\0');
+    char* input = const_cast<char*>(text.data());
+    std::size_t input_left = text.size();
+    char* destination = output.data();
+    std::size_t output_left = output.size();
+    const auto result = iconv(
+        converter, &input, &input_left, &destination, &output_left);
+    iconv_close(converter);
+    if (result == static_cast<std::size_t>(-1)) {
+        throw std::runtime_error("invalid UTF-8 text for CP932 conversion");
+    }
+    output.resize(output.size() - output_left);
+    return output;
+}
+
+struct FontPoint {
+    int pointer;
+    std::uint16_t start;
+    std::uint16_t end;
+};
+
+// Mapping from Shift_JIS full-width code words to glyph indices in
+// font24.fd0.  Derived from the original ToHeart2 Font.cpp.
+constexpr std::array<FontPoint, 53> full_font_points{{
+    {     0, 0x8141, 0x81ac },
+    {   108, 0x81b8, 0x81bf },
+    {   116, 0x81c8, 0x81ce },
+    {   123, 0x81da, 0x81fc },
+    {   158, 0x824f, 0x8258 },
+    {   168, 0x8260, 0x8279 },
+    {   194, 0x8281, 0x829a },
+    {   220, 0x829f, 0x82f1 },
+    {   303, 0x8340, 0x8396 },
+    {   390, 0x839f, 0x83b6 },
+    {   414, 0x83bf, 0x83d6 },
+    {   438, 0x8440, 0x8460 },
+    {   471, 0x8470, 0x8491 },
+    {   505, 0x849f, 0x84be },
+    {   537, 0x8740, 0x8799 },
+    {   627, 0x889f, 0x88fc },
+    {   721, 0x8940, 0x89fc },
+    {   910, 0x8a40, 0x8afc },
+    {  1099, 0x8b40, 0x8bfc },
+    {  1288, 0x8c40, 0x8cfc },
+    {  1477, 0x8d40, 0x8dfc },
+    {  1666, 0x8e40, 0x8efc },
+    {  1855, 0x8f40, 0x8ffc },
+    {  2044, 0x9040, 0x90fc },
+    {  2233, 0x9140, 0x91fc },
+    {  2422, 0x9240, 0x92fc },
+    {  2611, 0x9340, 0x93fc },
+    {  2800, 0x9440, 0x94fc },
+    {  2989, 0x9540, 0x95fc },
+    {  3178, 0x9640, 0x96fc },
+    {  3367, 0x9740, 0x97fc },
+    {  3556, 0x9840, 0x9872 },
+    {  3607, 0x989f, 0x98fc },
+    {  3701, 0x9940, 0x99fc },
+    {  3890, 0x9a40, 0x9afc },
+    {  4079, 0x9b40, 0x9bfc },
+    {  4268, 0x9c40, 0x9cfc },
+    {  4457, 0x9d40, 0x9dfc },
+    {  4646, 0x9e40, 0x9efc },
+    {  4835, 0x9f40, 0x9ffc },
+    {  5024, 0xe040, 0xe0fc },
+    {  5213, 0xe140, 0xe1fc },
+    {  5402, 0xe240, 0xe2fc },
+    {  5591, 0xe340, 0xe3fc },
+    {  5780, 0xe440, 0xe4fc },
+    {  5969, 0xe540, 0xe5fc },
+    {  6158, 0xe640, 0xe6fc },
+    {  6347, 0xe740, 0xe7fc },
+    {  6536, 0xe840, 0xe8fc },
+    {  6725, 0xe940, 0xe9fc },
+    {  6914, 0xea40, 0xeaa4 },
+    {  7015, 0xf040, 0xf047 },
+    {  7023, 0x8140, 0x8140 },
+}};
+
+bool is_cp932_full_lead(unsigned char byte)
+{
+    return (byte >= 0x81 && byte <= 0x9f)
+        || (byte >= 0xe0 && byte <= 0xea)
+        || byte == 0xf0;
+}
+
+bool is_cp932_half(unsigned char byte)
+{
+    return (byte >= 0x21 && byte <= 0x7e)
+        || (byte >= 0xa1 && byte <= 0xdf);
+}
+
+int cp932_half_index(unsigned char byte)
+{
+    if (byte >= '!' && byte <= '~') {
+        return byte - '!';
+    }
+    if (byte >= 0xa1 && byte <= 0xdf) {
+        return 94 + (byte - 0xa1);
+    }
+    if (byte == ' ') {
+        return 157;
+    }
+    return -1;
+}
+
+int cp932_full_index(std::uint16_t code)
+{
+    for (const auto& point : full_font_points) {
+        if (code >= point.start && code <= point.end) {
+            return point.pointer + (code - point.start);
+        }
     }
     return -1;
 }
@@ -155,16 +279,47 @@ void GameFont::configure(
 float GameFont::text_width(std::string_view text) const
 {
     if (authentic_ || text.empty()) {
-        float result = 0.0f;
-        for (const auto byte : text) {
-            if (byte == '\n') {
-                break;
+        try {
+            const auto cp932 = utf8_to_cp932(text);
+            float result = 0.0f;
+            for (std::size_t i = 0; i < cp932.size();) {
+                const auto byte = static_cast<unsigned char>(cp932[i]);
+                if (byte == '\n') {
+                    break;
+                }
+                if (is_cp932_full_lead(byte)) {
+                    if (i + 1 >= cp932.size()) {
+                        break;
+                    }
+                    const auto code = static_cast<std::uint16_t>(
+                        (byte << 8)
+                        | static_cast<unsigned char>(cp932[i + 1]));
+                    if (cp932_full_index(code) >= 0) {
+                        result += static_cast<float>(size);
+                    }
+                    i += 2;
+                } else if (is_cp932_half(byte)) {
+                    if (cp932_half_index(byte) >= 0) {
+                        result += static_cast<float>(width);
+                    }
+                    ++i;
+                } else {
+                    ++i;
+                }
             }
-            if (glyph(static_cast<unsigned char>(byte))) {
-                result += GameFont::width;
+            return result;
+        } catch (const std::exception&) {
+            float result = 0.0f;
+            for (const auto byte : text) {
+                if (byte == '\n') {
+                    break;
+                }
+                if (glyph(static_cast<unsigned char>(byte))) {
+                    result += GameFont::width;
+                }
             }
+            return result;
         }
-        return result;
     }
 
     try {
@@ -222,36 +377,93 @@ const std::vector<std::string>& GameFont::system_families()
     return families;
 }
 
+namespace {
+
+void draw_glyph(
+    SDL_Renderer* renderer, float x, float y, int glyph_width,
+    const std::uint8_t* bitmap, std::uint8_t red, std::uint8_t green,
+    std::uint8_t blue)
+{
+    for (int row = 0; row < 24; ++row) {
+        for (int column = 0; column < glyph_width; ++column) {
+            const auto packed = bitmap[row * (glyph_width / 2) + column / 2];
+            const auto coverage =
+                column % 2 == 0 ? packed & 0x0f : packed >> 4;
+            if (!coverage) {
+                continue;
+            }
+            SDL_SetRenderDrawColor(
+                renderer, red, green, blue,
+                static_cast<std::uint8_t>(coverage * 17));
+            SDL_RenderPoint(renderer, x + column, y + row);
+        }
+    }
+}
+
+}  // namespace
+
 void GameFont::draw_bitmap(
     SDL_Renderer* renderer, float x, float y, std::string_view text,
     std::uint8_t red, std::uint8_t green, std::uint8_t blue) const
 {
     const float start_x = x;
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-    for (const auto byte : text) {
+
+    std::string cp932;
+    try {
+        cp932 = utf8_to_cp932(text);
+    } catch (const std::exception&) {
+        for (const auto byte : text) {
+            if (byte == '\n') {
+                x = start_x;
+                y += 31;
+                continue;
+            }
+            const auto* bitmap = glyph(static_cast<unsigned char>(byte));
+            if (!bitmap) {
+                continue;
+            }
+            draw_glyph(renderer, x, y, width, bitmap, red, green, blue);
+            x += width;
+        }
+        return;
+    }
+
+    for (std::size_t i = 0; i < cp932.size();) {
+        const auto byte = static_cast<unsigned char>(cp932[i]);
         if (byte == '\n') {
             x = start_x;
             y += 31;
+            ++i;
             continue;
         }
-        const auto* bitmap = glyph(static_cast<unsigned char>(byte));
-        if (!bitmap) {
-            continue;
-        }
-        for (int row = 0; row < size; ++row) {
-            for (int column = 0; column < width; ++column) {
-                const auto packed = bitmap[row * (width / 2) + column / 2];
-                const auto coverage = column % 2 == 0 ? packed & 0x0f : packed >> 4;
-                if (!coverage) {
-                    continue;
-                }
-                SDL_SetRenderDrawColor(
-                    renderer, red, green, blue,
-                    static_cast<std::uint8_t>(coverage * 17));
-                SDL_RenderPoint(renderer, x + column, y + row);
+        if (is_cp932_full_lead(byte)) {
+            if (i + 1 >= cp932.size()) {
+                break;
             }
+            const auto code = static_cast<std::uint16_t>(
+                (byte << 8)
+                | static_cast<unsigned char>(cp932[i + 1]));
+            const auto index = cp932_full_index(code);
+            if (index >= 0) {
+                const auto* bitmap =
+                    data_.data() + index * full_glyph_bytes;
+                draw_glyph(renderer, x, y, size, bitmap, red, green, blue);
+                x += size;
+            }
+            i += 2;
+        } else if (is_cp932_half(byte)) {
+            const auto index = cp932_half_index(byte);
+            if (index >= 0) {
+                const auto* bitmap =
+                    data_.data() + ascii_offset + index * half_glyph_bytes;
+                draw_glyph(renderer, x, y, width, bitmap, red, green, blue);
+                x += width;
+            }
+            ++i;
+        } else {
+            ++i;
         }
-        x += width;
     }
 }
 

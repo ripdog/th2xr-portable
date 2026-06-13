@@ -36,9 +36,28 @@ std::vector<std::string> split_segments(std::string_view source)
         }
         const auto character =
             static_cast<unsigned char>(source[position++]);
-        if (character == '\n'
-            || (character >= ' ' && character <= '~')) {
+        if (character == '\n' || (character >= ' ' && character <= '~')) {
             segments.back().push_back(static_cast<char>(character));
+        } else if (character >= 0xc2 && character <= 0xf4) {
+            const auto start = position - 1;
+            const auto extra = character <= 0xdf ? 1
+                : character <= 0xef ? 2
+                : 3;
+            bool valid = true;
+            for (std::size_t j = 0; j < extra; ++j) {
+                if (start + 1 + j >= source.size()
+                    || static_cast<unsigned char>(source[start + 1 + j])
+                           < 0x80
+                    || static_cast<unsigned char>(source[start + 1 + j])
+                           > 0xbf) {
+                    valid = false;
+                    break;
+                }
+            }
+            if (valid) {
+                segments.back().append(source.substr(start, 1 + extra));
+                position = start + 1 + extra;
+            }
         }
     }
     if (segments.size() > 1 && segments.back().empty()) {

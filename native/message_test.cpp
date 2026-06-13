@@ -61,4 +61,9 @@ int main()
     if (message.visible() != "I'm eating an egg sandwich") {
         return 10;
     }
+
+    message.set("Huhuhu\xe2\x99\xaa");
+    if (message.visible() != "Huhuhu\xe2\x99\xaa") {
+        return 11;
+    }
 }

@@ -2095,6 +2095,16 @@ private:
         return lines;
     }
 
+    float message_text_x() const
+    {
+        return config_.authentic_font ? 26.0f : 52.0f;
+    }
+
+    float message_text_y() const
+    {
+        return config_.authentic_font ? 36.0f : 72.0f;
+    }
+
     void skip(bool force_unread = false)
     {
         if (clock_state_) {
@@ -7138,10 +7148,11 @@ private:
                 backlog_.size() - static_cast<std::size_t>(backlog_depth_)].text;
         }
 
-        float y = 72.0f;
+        const float x = message_text_x();
+        float y = message_text_y();
         for (const auto& line : display_lines(selected)) {
-            font_.draw(renderer_, 54.0f, y + 2.0f, line, 0, 0, 0);
-            font_.draw(renderer_, 52.0f, y, line, 255, 144, 32);
+            font_.draw(renderer_, x + 2.0f, y + 2.0f, line, 0, 0, 0);
+            font_.draw(renderer_, x, y, line, 255, 144, 32);
             y += 31.0f;
             if (y > 535.0f) {
                 break;
@@ -7366,8 +7377,8 @@ private:
         const auto& last_line = lines.back();
         const float width = font_.text_width(last_line);
 
-        const float x = 52.0f + width + 4.0f;
-        const float y = 72.0f
+        const float x = message_text_x() + width + 4.0f;
+        const float y = message_text_y()
             + (std::min(lines.size(), static_cast<std::size_t>(15)) - 1)
             * 31.0f - 2.0f;
 
@@ -7728,10 +7739,11 @@ private:
             SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 150);
             SDL_RenderFillRect(renderer_, nullptr);
             const auto lines = display_lines(message_.visible());
-            float y = 72.0f;
+            const float x = message_text_x();
+            float y = message_text_y();
             for (const auto& line : lines) {
-                font_.draw(renderer_, 54.0f, y + 2.0f, line, 0, 0, 0);
-                font_.draw(renderer_, 52.0f, y, line);
+                font_.draw(renderer_, x + 2.0f, y + 2.0f, line, 0, 0, 0);
+                font_.draw(renderer_, x, y, line);
                 y += 31.0f;
                 if (y > 535.0f) {
                     break;
