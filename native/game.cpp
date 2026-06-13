@@ -7721,6 +7721,45 @@ private:
                 draw_overlay(i);
             }
         }
+        if (background_brightness_ != std::array<float, 3>{
+                128.0f, 128.0f, 128.0f}) {
+            const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
+            std::array<Uint8, 3> multiply{};
+            std::array<Uint8, 3> screen{};
+            bool needs_multiply = false;
+            bool needs_screen = false;
+            for (std::size_t i = 0; i < background_brightness_.size(); ++i) {
+                const float value =
+                    std::clamp(background_brightness_[i], 0.0f, 256.0f);
+                multiply[i] = static_cast<Uint8>(
+                    value < 128.0f ? value * 255.0f / 128.0f : 255.0f);
+                screen[i] = static_cast<Uint8>(
+                    value > 128.0f
+                        ? (value - 128.0f) * 255.0f / 128.0f
+                        : 0.0f);
+                needs_multiply |= value < 128.0f;
+                needs_screen |= value > 128.0f;
+            }
+            if (needs_multiply) {
+                SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_MOD);
+                SDL_SetRenderDrawColor(
+                    renderer_, multiply[0], multiply[1], multiply[2], 255);
+                SDL_RenderFillRect(renderer_, &game_area);
+            }
+            if (needs_screen) {
+                const auto screen_blend = SDL_ComposeCustomBlendMode(
+                    SDL_BLENDFACTOR_ONE,
+                    SDL_BLENDFACTOR_ONE_MINUS_SRC_COLOR,
+                    SDL_BLENDOPERATION_ADD,
+                    SDL_BLENDFACTOR_ZERO,
+                    SDL_BLENDFACTOR_ONE,
+                    SDL_BLENDOPERATION_ADD);
+                SDL_SetRenderDrawBlendMode(renderer_, screen_blend);
+                SDL_SetRenderDrawColor(
+                    renderer_, screen[0], screen[1], screen[2], 0);
+                SDL_RenderFillRect(renderer_, &game_area);
+            }
+        }
         draw_sakura();
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
             if (overlay_states_[i].layer >= 5
@@ -7818,45 +7857,6 @@ private:
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
             if (overlay_states_[i].layer >= 18) {
                 draw_overlay(i);
-            }
-        }
-        if (background_brightness_ != std::array<float, 3>{
-                128.0f, 128.0f, 128.0f}) {
-            const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
-            std::array<Uint8, 3> multiply{};
-            std::array<Uint8, 3> screen{};
-            bool needs_multiply = false;
-            bool needs_screen = false;
-            for (std::size_t i = 0; i < background_brightness_.size(); ++i) {
-                const float value =
-                    std::clamp(background_brightness_[i], 0.0f, 256.0f);
-                multiply[i] = static_cast<Uint8>(
-                    value < 128.0f ? value * 255.0f / 128.0f : 255.0f);
-                screen[i] = static_cast<Uint8>(
-                    value > 128.0f
-                        ? (value - 128.0f) * 255.0f / 128.0f
-                        : 0.0f);
-                needs_multiply |= value < 128.0f;
-                needs_screen |= value > 128.0f;
-            }
-            if (needs_multiply) {
-                SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_MOD);
-                SDL_SetRenderDrawColor(
-                    renderer_, multiply[0], multiply[1], multiply[2], 255);
-                SDL_RenderFillRect(renderer_, &game_area);
-            }
-            if (needs_screen) {
-                const auto screen_blend = SDL_ComposeCustomBlendMode(
-                    SDL_BLENDFACTOR_ONE,
-                    SDL_BLENDFACTOR_ONE_MINUS_SRC_COLOR,
-                    SDL_BLENDOPERATION_ADD,
-                    SDL_BLENDFACTOR_ZERO,
-                    SDL_BLENDFACTOR_ONE,
-                    SDL_BLENDOPERATION_ADD);
-                SDL_SetRenderDrawBlendMode(renderer_, screen_blend);
-                SDL_SetRenderDrawColor(
-                    renderer_, screen[0], screen[1], screen[2], 0);
-                SDL_RenderFillRect(renderer_, &game_area);
             }
         }
         draw_active_transition();
