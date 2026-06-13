@@ -152,6 +152,45 @@ void GameFont::configure(
     framebuffer_scale_ = std::max(framebuffer_scale, 1.0f);
 }
 
+float GameFont::text_width(std::string_view text) const
+{
+    if (authentic_ || text.empty()) {
+        float result = 0.0f;
+        for (const auto byte : text) {
+            if (byte == '\n') {
+                break;
+            }
+            if (glyph(static_cast<unsigned char>(byte))) {
+                result += GameFont::width;
+            }
+        }
+        return result;
+    }
+
+    try {
+        modern_->open(family_, font_size_, framebuffer_scale_);
+        int pixel_width = 0;
+        int pixel_height = 0;
+        if (!TTF_GetStringSize(
+                modern_->font, text.data(), text.size(),
+                &pixel_width, &pixel_height)) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        return static_cast<float>(pixel_width) / framebuffer_scale_;
+    } catch (const std::exception&) {
+        float result = 0.0f;
+        for (const auto byte : text) {
+            if (byte == '\n') {
+                break;
+            }
+            if (glyph(static_cast<unsigned char>(byte))) {
+                result += GameFont::width;
+            }
+        }
+        return result;
+    }
+}
+
 const std::vector<std::string>& GameFont::system_families()
 {
     static const std::vector<std::string> families = [] {

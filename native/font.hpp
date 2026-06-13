@@ -21,6 +21,7 @@ public:
     void configure(bool authentic, std::string_view family,
                    int font_size, float framebuffer_scale);
     static const std::vector<std::string>& system_families();
+    float text_width(std::string_view text) const;
     void draw(
         SDL_Renderer* renderer, float x, float y, std::string_view text,
         std::uint8_t red = 255, std::uint8_t green = 255,

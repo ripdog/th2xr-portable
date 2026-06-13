@@ -7364,9 +7364,7 @@ private:
         const auto lines = display_lines(message_.visible());
         if (lines.empty()) return;
         const auto& last_line = lines.back();
-        float width = 0;
-        for (unsigned char c : last_line)
-            width += (c >= 0x20 && c <= 0x7E) ? 12.0f : 24.0f;
+        const float width = font_.text_width(last_line);
 
         const float x = 52.0f + width + 4.0f;
         const float y = 72.0f
