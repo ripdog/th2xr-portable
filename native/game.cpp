@@ -4078,6 +4078,56 @@ private:
         return path;
     }
 
+    std::filesystem::path dump_runtime_error(std::string_view error)
+    {
+        std::filesystem::create_directories("logs");
+        const auto now = std::chrono::system_clock::now();
+        const auto stamp = std::chrono::duration_cast<
+            std::chrono::milliseconds>(now.time_since_epoch()).count();
+        const auto path = std::filesystem::path("logs")
+            / std::format("engine-error-{}.log", stamp);
+        std::ofstream output(path);
+        const auto pc = runtime_.vm_pc();
+        const auto bytecode = runtime_.vm_bytecode();
+        output << "error=" << error << '\n'
+               << "script=" << runtime_.script_name() << '\n'
+               << "pc=" << pc << "\nbytecode=";
+        const auto first = pc > 16 ? pc - 16 : 0;
+        const auto last = std::min(bytecode.size(), pc + 32);
+        output << std::hex << std::setfill('0');
+        for (std::size_t offset = first; offset < last; ++offset) {
+            if (offset == pc) {
+                output << '[';
+            }
+            output << std::setw(2)
+                   << static_cast<unsigned>(bytecode[offset]);
+            if (offset == pc + 1) {
+                output << ']';
+            }
+            output << ' ';
+        }
+        output << std::dec << "\nregisters=";
+        for (const auto value : runtime_.vm_registers()) {
+            output << value << ' ';
+        }
+        output << "\nstack=";
+        for (const auto value : runtime_.vm_stack()) {
+            output << value << ' ';
+        }
+        output << "\nbackground=" << bg_scene_
+               << "\nbackground_kind="
+               << static_cast<std::int32_t>(background_kind_)
+               << "\ntone=" << tone_
+               << "\ntone_back=" << tone_back_
+               << "\ntone_char=" << tone_char_
+               << "\nweather=" << weather_
+               << "\nbgm=" << bgm_track_
+               << "\nvoice_event=" << vi_event_voice_no_
+               << "\nvoice_event_all=" << vi_event_voice_no_all_
+               << "\nmessage=" << std::quoted(message_.visible()) << '\n';
+        return path;
+    }
+
     void advance(bool skipping = false)
     {
         if (wake_time_ || audio_wait_ || transition_ || background_fade_
@@ -4115,7 +4165,16 @@ private:
             choice_ex_ = false;
         }
         while (running_ && !waiting_for_input_ && !choosing_) {
-            const auto step = runtime_.run();
+            th2::ScriptStep step;
+            try {
+                step = runtime_.run();
+            } catch (const std::exception& error) {
+                const auto dump = dump_runtime_error(error.what());
+                throw std::runtime_error(std::format(
+                    "{}:{}: {} (state dumped to {})",
+                    runtime_.script_name(), runtime_.vm_pc(),
+                    error.what(), dump.string()));
+            }
             sync_game_flags();
             if (step.reason == th2::VmYield::ended) {
                 if (!load_scheduled_script()) {

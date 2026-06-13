@@ -38,6 +38,7 @@ public:
 
     std::span<const std::int32_t> vm_registers() const;
     std::span<const std::int32_t> vm_stack() const;
+    std::span<const std::uint8_t> vm_bytecode() const;
     std::size_t vm_pc() const;
     void vm_restore(std::span<const std::int32_t> registers,
                     std::span<const std::int32_t> stack,

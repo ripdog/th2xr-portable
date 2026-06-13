@@ -102,17 +102,25 @@ std::int32_t ScriptRuntime::reg(std::size_t index) const
 
 std::span<const std::int32_t> ScriptRuntime::vm_registers() const
 {
-    return vm_->registers();
+    return vm_ ? vm_->registers()
+               : std::span<const std::int32_t>{};
 }
 
 std::span<const std::int32_t> ScriptRuntime::vm_stack() const
 {
-    return vm_->stack();
+    return vm_ ? vm_->stack()
+               : std::span<const std::int32_t>{};
+}
+
+std::span<const std::uint8_t> ScriptRuntime::vm_bytecode() const
+{
+    return scenario_ ? scenario_->bytecode()
+                     : std::span<const std::uint8_t>{};
 }
 
 std::size_t ScriptRuntime::vm_pc() const
 {
-    return vm_->pc();
+    return vm_ ? vm_->pc() : 0;
 }
 
 void ScriptRuntime::vm_restore(
