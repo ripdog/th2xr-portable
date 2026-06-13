@@ -662,7 +662,7 @@ public:
     }
 
 private:
-    static constexpr std::uint32_t save_version_ = 23;
+    static constexpr std::uint32_t save_version_ = 24;
 
     enum class AudioWaitKind {
         bgm,
@@ -871,6 +871,7 @@ private:
         int speed = 10;
         int tick = 0;
         int reset_frames = -1;
+        bool no_reset = false;
         std::chrono::steady_clock::time_point updated;
     };
 
@@ -1681,6 +1682,82 @@ private:
         SDL_RenderTexture(
             renderer_, calendar_labels_.get(),
             &holiday_source, &holiday_destination);
+    }
+
+    void start_sakura(int amount, bool no_reset)
+    {
+        if (!sakura_large_) {
+            sakura_large_ =
+                load_texture(renderer_, graphics_, "sakura.bmp");
+            sakura_small_ =
+                load_texture(renderer_, graphics_, "sakura2.bmp");
+        }
+        if (!sakura_) {
+            sakura_ = SakuraState{};
+            sakura_->updated = std::chrono::steady_clock::now();
+        }
+        sakura_->target_amount = std::clamp(amount, 0, 200);
+        sakura_->wind = 1.0f;
+        sakura_->speed = 10;
+        sakura_->reset_frames = -1;
+        sakura_->no_reset = no_reset;
+    }
+
+    void stop_sakura(bool force)
+    {
+        if (sakura_ && (force || !sakura_->no_reset)
+            && sakura_->reset_frames < 0) {
+            sakura_->no_reset = false;
+            sakura_->reset_frames = 0;
+        }
+    }
+
+    int seasonal_background_scene(int scene) const
+    {
+        const int variant = scene % 10;
+        int base = scene / 10;
+        if (base >= 10000) {
+            return scene;
+        }
+        if ((base >= 1 && base <= 4) || base == 78) {
+            base = 1;
+        } else if ((base >= 5 && base <= 8) || base == 79) {
+            base = 5;
+        } else if ((base >= 34 && base <= 37) || base == 80) {
+            base = 34;
+        } else if ((base >= 48 && base <= 51) || base == 81) {
+            base = 48;
+        } else {
+            return scene;
+        }
+
+        int type = 3;
+        const int month = runtime_.flag(0);
+        const int day = runtime_.flag(1);
+        if (month == 3) {
+            type = day <= 15 ? 4 : day <= 28 ? 2 : 0;
+        } else if (month == 4) {
+            type = day <= 15 ? 0 : day <= 27 ? 1 : 3;
+        }
+        if (type == 4) {
+            base = base == 1 ? 78 : base == 5 ? 79
+                : base == 34 ? 80 : 81;
+        } else {
+            base += type;
+        }
+        return base * 10 + variant;
+    }
+
+    void update_background_sakura(int scene, bool background)
+    {
+        if (background) {
+            const int base = scene / 10;
+            if (base == 1 || base == 5 || base == 34 || base == 48) {
+                start_sakura(32, false);
+                return;
+            }
+        }
+        stop_sakura(false);
     }
 
     std::uint32_t next_sakura_random()
@@ -3441,8 +3518,9 @@ private:
             background_scroll_.reset();
             return;
         }
-        const int scene = number(event, 1) * 10
+        int scene = number(event, 1) * 10
             + std::max<std::int32_t>(0, number(event, 2));
+        scene = seasonal_background_scene(scene);
         bg_scene_ = scene;
         background_kind_ = BackgroundKind::background;
         background_view_ = {
@@ -3452,6 +3530,7 @@ private:
             600.0f,
         };
         background_scroll_.reset();
+        update_background_sakura(scene, true);
         if (keep_characters) {
             apply_staged_characters();
         } else {
@@ -3489,6 +3568,7 @@ private:
             600.0f,
         };
         background_scroll_.reset();
+        update_background_sakura(visual, false);
         background_ = load_toned_texture(
             renderer_, graphics_, std::format("{}{:06d}.tga", prefix, visual),
             graphics_, background_tone_curves());
@@ -3692,25 +3772,9 @@ private:
             skipped_month_ = number(event, 0);
             skipped_day_ = number(event, 1);
         } else if (name == "SetSakura") {
-            if (!sakura_large_) {
-                sakura_large_ =
-                    load_texture(renderer_, graphics_, "sakura.bmp");
-                sakura_small_ =
-                    load_texture(renderer_, graphics_, "sakura2.bmp");
-            }
-            if (!sakura_) {
-                sakura_ = SakuraState{};
-                sakura_->updated = std::chrono::steady_clock::now();
-            }
-            sakura_->target_amount =
-                std::clamp(number(event, 0), 0, 200);
-            sakura_->wind = 1.0f;
-            sakura_->speed = 10;
-            sakura_->reset_frames = -1;
+            start_sakura(number(event, 0), true);
         } else if (name == "StopSakura") {
-            if (sakura_ && sakura_->reset_frames < 0) {
-                sakura_->reset_frames = 0;
-            }
+            stop_sakura(true);
         } else if (name == "SetTimeMode") {
             const int tone = number(event, 0) < 0 ? 0 : number(event, 0);
             const int effect = number(event, 1) < 0 ? 0 : number(event, 1);
@@ -4375,6 +4439,7 @@ private:
             write_i32(out, sakura_->speed);
             write_i32(out, sakura_->tick);
             write_i32(out, sakura_->reset_frames);
+            write_i32(out, sakura_->no_reset ? 1 : 0);
             for (int i = 0; i < sakura_->amount; ++i) {
                 const auto& petal = sakura_->petals[i];
                 write_i32(out, petal.active ? 1 : 0);
@@ -4617,6 +4682,7 @@ private:
             state.speed = read_i32(in);
             state.tick = read_i32(in);
             state.reset_frames = read_i32(in);
+            state.no_reset = read_i32(in) != 0;
             state.updated = std::chrono::steady_clock::now();
             if (state.amount < 0
                 || state.amount > static_cast<int>(state.petals.size())) {
