@@ -7715,6 +7715,7 @@ private:
             const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
             SDL_RenderFillRect(renderer_, &game_area);
         }
+        draw_sakura();
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
             if (overlay_states_[i].layer >= 1
                 && overlay_states_[i].layer < 18) {
@@ -7927,7 +7928,6 @@ private:
         if (ui_mode_ == UiMode::game || ui_mode_ == UiMode::backlog) {
             draw_sidebar();
         }
-        draw_sakura();
         if (screen_flash_) {
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(
