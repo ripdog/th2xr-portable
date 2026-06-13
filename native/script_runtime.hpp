@@ -31,6 +31,7 @@ public:
     std::int32_t game_flag(std::size_t index) const;
     void set_flag(std::size_t index, std::int32_t value);
     void set_game_flag(std::size_t index, std::int32_t value);
+    void reset_flags();
     void set_reg(std::size_t index, std::int32_t value);
     std::int32_t reg(std::size_t index) const;
     const std::string& script_name() const { return script_name_; }

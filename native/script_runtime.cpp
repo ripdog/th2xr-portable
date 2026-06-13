@@ -85,6 +85,11 @@ void ScriptRuntime::set_game_flag(std::size_t index, std::int32_t value)
     game_flags_.at(index) = value;
 }
 
+void ScriptRuntime::reset_flags()
+{
+    flags_.fill(0);
+}
+
 void ScriptRuntime::set_reg(std::size_t index, std::int32_t value)
 {
     vm_->set_reg(index, value);

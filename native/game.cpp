@@ -3322,8 +3322,7 @@ private:
         auto name = standard_name;
         auto& voice_channel = voice_channels_[channel];
         voice_channel.stop();
-        if (!th2::uses_default_voice_name(
-                config_.player_name, default_player_name_)) {
+        if (runtime_.flag(5) == 0) {
             const auto alternate_name = std::format(
                 "K{:09d}_{:03d}{:03d}A.OGG",
                 scenario, voice, character);
@@ -5020,11 +5019,18 @@ private:
 
     void start_new_game()
     {
+        runtime_.reset_flags();
         runtime_.set_flag(0, 3);
         runtime_.set_flag(1, 1);
         runtime_.set_flag(2, 0);
         runtime_.set_flag(3, -1);
         runtime_.set_flag(4, 0);
+        runtime_.set_flag(
+            5, th2::uses_default_voice_name(
+                   config_.player_name, default_player_name_)
+                ? 1 : 0);
+        runtime_.set_flag(6, 0);
+        runtime_.set_flag(7, 0);
         map_events_.clear();
         runtime_.load("EV_0301MORNING.SDT");
         ui_mode_ = UiMode::game;
