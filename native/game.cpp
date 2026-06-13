@@ -7715,9 +7715,15 @@ private:
             const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
             SDL_RenderFillRect(renderer_, &game_area);
         }
-        draw_sakura();
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
             if (overlay_states_[i].layer >= 1
+                && overlay_states_[i].layer < 5) {
+                draw_overlay(i);
+            }
+        }
+        draw_sakura();
+        for (std::size_t i = 0; i < overlays_.size(); ++i) {
+            if (overlay_states_[i].layer >= 5
                 && overlay_states_[i].layer < 18) {
                 draw_overlay(i);
             }
