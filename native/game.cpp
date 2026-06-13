@@ -3370,6 +3370,15 @@ private:
 
     void set_background(const th2::Event& event, bool keep_characters)
     {
+        if (number(event, 1) < 0) {
+            background_.reset();
+            bg_scene_ = -1;
+            background_kind_ = BackgroundKind::background;
+            background_tone_curve_.clear();
+            background_view_ = {0.0f, 0.0f, 800.0f, 600.0f};
+            background_scroll_.reset();
+            return;
+        }
         const int scene = number(event, 1) * 10
             + std::max<std::int32_t>(0, number(event, 2));
         bg_scene_ = scene;
@@ -3537,12 +3546,10 @@ private:
     {
         const auto name = event.instruction.name;
         if (name == "B" || name == "BT" || name == "BC" || name == "BCT") {
-            if (number(event, 1) >= 0) {
-                begin_transition(
-                    number(event, 0), number(event, 3), number(event, 6), true);
-                set_background(
-                    event, name == "BC" || name == "BCT");
-            }
+            begin_transition(
+                number(event, 0), number(event, 3), number(event, 6), true);
+            set_background(
+                event, name == "BC" || name == "BCT");
         } else if (name == "H" || name == "HT") {
             if (number(event, 1) >= 0) {
                 begin_transition(
