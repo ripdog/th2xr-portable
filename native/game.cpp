@@ -3569,19 +3569,11 @@ private:
             begin_transition(
                 number(event, 0), number(event, 3), number(event, 7), true);
             set_cg(event, BackgroundKind::visual, 'v');
-        } else if (name == "FI") {
-            begin_background_fade(128, 128, 128, 30);
-        } else if (name == "FIF") {
-            begin_background_fade(128, 128, 128, number(event, 0));
-        } else if (name == "FO") {
-            begin_background_fade(0, 0, 0, 30);
-        } else if (name == "FOF") {
-            begin_background_fade(0, 0, 0, number(event, 0));
         } else if (name == "FB") {
             begin_background_fade(
                 number(event, 0), number(event, 1), number(event, 2),
                 number(event, 3));
-        } else if (name == "F" || name == "SetFlash") {
+        } else if (name == "F") {
             screen_flash_ = ScreenFlash{
                 std::clamp(number(event, 0), 0, 255),
                 std::clamp(number(event, 1), 0, 255),
@@ -3601,8 +3593,6 @@ private:
                 0,
                 std::chrono::steady_clock::now(),
             };
-        } else if (name == "StopShake") {
-            shake_.reset();
         } else if (name == "S") {
             begin_background_scroll(
                 number(event, 0), number(event, 1), 800.0f, 600.0f,
@@ -3632,9 +3622,7 @@ private:
             const int ending = number(event, 1) == 1 || number(event, 0) == 10
                 ? 0 : number(event, 0);
             start_movie(1, ending, true);
-        } else if (name == "SetOpening") {
-            start_movie(0, 0, true);
-        } else if (name == "SetTitle" || name == "GameEnd") {
+        } else if (name == "SetTitle") {
             return_to_title();
         } else if (name == "SetDemoFlag") {
             demo_mode_ = number(event, 0) != 0;
@@ -3670,23 +3658,12 @@ private:
             if (sakura_ && sakura_->reset_frames < 0) {
                 sakura_->reset_frames = 0;
             }
-        } else if (name == "BD") {
-            background_.reset();
-            bg_scene_ = -1;
         } else if (name == "SetTimeMode") {
             const int tone = number(event, 0) < 0 ? 0 : number(event, 0);
             const int effect = number(event, 1) < 0 ? 0 : number(event, 1);
             tone_ = tone + effect * 4;
             tone_back_ = -1;
             tone_char_ = -1;
-        } else if (name == "SetTimeBack") {
-            const int tone = number(event, 0) < 0 ? 0 : number(event, 0);
-            const int effect = number(event, 1) < 0 ? 0 : number(event, 1);
-            tone_back_ = tone + effect * 4;
-        } else if (name == "SetTimeChar") {
-            const int tone = number(event, 0) < 0 ? 0 : number(event, 0);
-            const int effect = number(event, 1) < 0 ? 0 : number(event, 1);
-            tone_char_ = tone + effect * 4;
         } else if (name == "SetWeatherMode") {
             weather_ = std::max<std::int32_t>(0, number(event, 0));
         } else if (name == "SetBmpEx") {
@@ -3702,29 +3679,11 @@ private:
                 overlay_pixels_[*slot].reset();
                 overlay_states_[*slot] = {};
             }
-        } else if (name == "ResetBmpAll") {
-            for (std::size_t i = 0; i < overlays_.size(); ++i) {
-                overlays_[i].reset();
-                overlay_pixels_[i].reset();
-                overlay_states_[i] = {};
-            }
-        } else if (name == "SetBmpDisp") {
-            if (const auto slot = overlay_index(number(event, 0))) {
-                overlay_states_[*slot].visible = number(event, 1) != 0;
-            }
-        } else if (name == "SetBmpLayer") {
-            if (const auto slot = overlay_index(number(event, 0))) {
-                overlay_states_[*slot].layer = number(event, 1);
-            }
         } else if (name == "SetBmpParam") {
             if (const auto slot = overlay_index(number(event, 0))) {
                 overlay_states_[*slot].parameter = number(event, 1);
                 overlay_states_[*slot].parameter_value =
                     number(event, 2) < 0 ? 0 : number(event, 2);
-            }
-        } else if (name == "SetBmpRevParam") {
-            if (const auto slot = overlay_index(number(event, 0))) {
-                overlay_states_[*slot].reverse = number(event, 1);
             }
         } else if (name == "SetBmpBright") {
             if (const auto slot = overlay_index(number(event, 0))) {
@@ -3741,17 +3700,6 @@ private:
                 overlay_states_[*slot].destination_x = number(event, 1);
                 overlay_states_[*slot].destination_y = number(event, 2);
             }
-        } else if (name == "SetBmpPos") {
-            if (const auto slot = overlay_index(number(event, 0))) {
-                auto& state = overlay_states_[*slot];
-                state.destination_x = number(event, 1);
-                state.destination_y = number(event, 2);
-                state.source_x = number(event, 3);
-                state.source_y = number(event, 4);
-                state.destination_width = state.source_width = number(event, 5);
-                state.destination_height = state.source_height = number(event, 6);
-                state.zoom = 0;
-            }
         } else if (name == "SetBmpZoom") {
             if (const auto slot = overlay_index(number(event, 0))) {
                 auto& state = overlay_states_[*slot];
@@ -3761,16 +3709,9 @@ private:
                 state.destination_height = number(event, 4);
                 state.zoom = 0;
             }
-        } else if (name == "SetBmpZoom2") {
-            if (const auto slot = overlay_index(number(event, 0))) {
-                auto& state = overlay_states_[*slot];
-                state.zoom_center_x = number(event, 1);
-                state.zoom_center_y = number(event, 2);
-                state.zoom = number(event, 3);
-            }
-        } else if (name == "C" || name == "CW" || name == "SetChar") {
+        } else if (name == "C" || name == "CW") {
             set_character(event);
-        } else if (name == "CR" || name == "CRW" || name == "ResetChar") {
+        } else if (name == "CR" || name == "CRW") {
             const int character_number = number(event, 0);
             const auto index = character_index(character_number);
             const int type = name == "CRW" ? 3
@@ -3792,7 +3733,7 @@ private:
                         character_number, std::move(animation));
                 }
             }
-        } else if (name == "CP" || name == "SetCharPose") {
+        } else if (name == "CP") {
             const int character_number = number(event, 0);
             if (auto* character = characters_.find(character_number)) {
                 if (character->pose == number(event, 1)) {
@@ -3818,7 +3759,7 @@ private:
                 start_character_animation(
                     character_number, std::move(animation));
             }
-        } else if (name == "CL" || name == "SetCharLocate") {
+        } else if (name == "CL") {
             if (auto* character = characters_.find(number(event, 0))) {
                 CharacterAnimation animation;
                 animation.kind = CharacterAnimationKind::locate;
@@ -3830,36 +3771,6 @@ private:
                 start_character_animation(
                     character->number, std::move(animation));
             }
-        } else if (name == "CY" || name == "SetCharLayer") {
-            if (auto* character = characters_.find(number(event, 0))) {
-                character->layer = number(event, 1);
-            }
-        } else if (name == "CB") {
-            if (auto* character = characters_.find(number(event, 0))) {
-                CharacterAnimation animation;
-                animation.kind = CharacterAnimationKind::brightness;
-                animation.frames = number(event, 2);
-                animation.from_brightness = character->brightness;
-                animation.to_brightness = number(event, 1);
-                animation.blocking = true;
-                character->brightness = number(event, 1);
-                start_character_animation(
-                    character->number, std::move(animation));
-            }
-        } else if (name == "CA") {
-            if (auto* character = characters_.find(number(event, 0))) {
-                CharacterAnimation animation;
-                animation.kind = CharacterAnimationKind::alpha;
-                animation.frames = number(event, 2);
-                animation.from_alpha = character->alpha;
-                animation.to_alpha = number(event, 1);
-                animation.blocking = true;
-                character->alpha = number(event, 1);
-                start_character_animation(
-                    character->number, std::move(animation));
-            }
-        } else if (name == "WaitChar") {
-            // Character operations already suspend the script until complete.
         } else if (name == "SetMessage2") {
             push_backlog();
             message_.set(th2::substitute_player_name(
@@ -3879,12 +3790,12 @@ private:
             auto_next_time_.reset();
         } else if (name == "T") {
             message_visible_ = number(event, 0) != 0;
-        } else if (name == "K" || name == "WaitKey") {
+        } else if (name == "K") {
             waiting_for_input_ = true;
             message_ends_block_ = true;
             auto_next_time_.reset();
-        } else if (name == "W" || name == "WR") {
-            // These compatibility opcodes are explicit no-ops in the original.
+        } else if (name == "W") {
+            // Explicit no-op in the original.
         } else if (name == "M") {
             const int music = number(event, 0);
             const int fade = number(event, 1) < 0 ? 0 : number(event, 1);
@@ -3908,8 +3819,6 @@ private:
             bgm_.fade_to(
                 0.0f, std::chrono::milliseconds(fade * 1000 / 60), true);
             bgm_track_ = -1;
-        } else if (name == "MP") {
-            bgm_.pause(number(event, 0) != 0);
         } else if (name == "MV") {
             bgm_volume_ = number(event, 0);
             const int fade = number(event, 1) < 0 ? 0 : number(event, 1);
@@ -3945,17 +3854,12 @@ private:
                     se_gain(se_volume_[channel]),
                     std::chrono::milliseconds(fade * 1000 / 60));
             }
-        } else if (name == "SEW" || name == "SEVW") {
+        } else if (name == "SEW") {
             const auto channel = number(event, 0);
-            const bool wait_for_playback = name == "SEW"
-                && channel >= 0
+            const bool wait_for_playback = channel >= 0
                 && static_cast<std::size_t>(channel) < se_channels_.size()
                 && !se_loop_[channel] && se_channels_[channel].playing();
-            const bool wait_for_fade = name == "SEVW"
-                && channel >= 0
-                && static_cast<std::size_t>(channel) < se_channels_.size()
-                && se_channels_[channel].fading();
-            if (wait_for_playback || wait_for_fade) {
+            if (wait_for_playback) {
                 audio_wait_ = AudioWait{
                     AudioWaitKind::sound_effect, static_cast<std::size_t>(channel)};
             }
@@ -3990,24 +3894,9 @@ private:
                 number(event, 1),
                 number(event, 2),
             });
-        } else if (name == "SetSelectMesEx") {
-            choices_.push_back(Choice{
-                interpret_newlines(th2::substitute_player_name(
-                    text(event, 0), config_.player_name)),
-                number(event, 2),
-                number(event, 3),
-                text(event, 1),
-            });
-            choice_ex_ = true;
         } else if (name == "SetSelect") {
             choice_result_register_ =
                 std::get<th2::RegisterTarget>(event.arguments.at(0)).index;
-            choosing_ = true;
-            choice_highlight_ = 0;
-            choice_selected_ = -1;
-        } else if (name == "SetSelectEx") {
-            choice_result_register_ = -1;
-            choice_ex_ = true;
             choosing_ = true;
             choice_highlight_ = 0;
             choice_selected_ = -1;
