@@ -7638,8 +7638,15 @@ private:
         SDL_SetRenderScale(renderer_, 1.0f, 1.0f);
         SDL_Texture* art_target = upscaler_->art_target();
         const auto shake = shake_sample();
-        const bool shake_art = shake_ && ui_mode_ == UiMode::game
-            && !shake.text_only;
+        const bool shake_background = shake_
+            && (shake_->type == 0 || shake_->type == 1
+                || shake_->type == 2 || shake_->type == 9
+                || shake_->type == 12 || shake_->type == 13
+                || shake_->type == 14);
+        const bool shake_characters = shake_ && shake_->type == 0;
+        const bool shake_art = shake_
+            && (shake_->type == 6 || shake_->type == 7
+                || shake_->type == 11 || shake_->type == 16);
         if (shake_art) {
             ensure_shake_target();
             SDL_SetRenderTarget(renderer_, shake_target_.get());
@@ -7707,9 +7714,20 @@ private:
             const auto view = current_background_view();
             const SDL_FRect source{
                 view.x, view.y, view.width, view.height};
-            const SDL_FRect destination{0.0f, 0.0f, 800.0f, 600.0f};
-            SDL_RenderTexture(
-                renderer_, background_.get(), &source, &destination);
+            SDL_FRect destination{0.0f, 0.0f, 800.0f, 600.0f};
+            double angle = 0.0;
+            if (shake_background) {
+                destination = {
+                    -shake.x + 400.0f * (1.0f - shake.scale),
+                    -shake.y + 300.0f * (1.0f - shake.scale),
+                    800.0f * shake.scale,
+                    600.0f * shake.scale,
+                };
+                angle = shake.angle;
+            }
+            SDL_RenderTextureRotated(
+                renderer_, background_.get(), &source, &destination,
+                angle, nullptr, SDL_FLIP_NONE);
         } else if (bg_scene_ == 0) {
             SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
             const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
@@ -7837,7 +7855,9 @@ private:
                 static_cast<Uint8>(
                     std::clamp(alpha_value, 0, 256) * 255 / 256));
             SDL_FRect destination{
-                x, 0.0f, 800.0f, 600.0f};
+                x + (shake_characters ? shake.x : 0.0f),
+                shake_characters ? shake.y : 0.0f,
+                800.0f, 600.0f};
             if (animation.kind == CharacterAnimationKind::pose
                 && animation.previous) {
                 SDL_SetTextureColorMod(
