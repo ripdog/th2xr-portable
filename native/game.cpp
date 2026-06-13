@@ -5393,6 +5393,31 @@ private:
         ui_mode_ = UiMode::game;
     }
 
+    bool backlog_older()
+    {
+        if (backlog_depth_ >= static_cast<int>(backlog_.size())) {
+            return false;
+        }
+        play_se(-1, 9012, false, 140);
+        ++backlog_depth_;
+        ui_mode_ = UiMode::backlog;
+        return true;
+    }
+
+    bool backlog_newer()
+    {
+        if (backlog_depth_ <= 0) {
+            return false;
+        }
+        play_se(-1, 9012, false, 140);
+        if (backlog_depth_ > 1) {
+            --backlog_depth_;
+        } else {
+            close_backlog();
+        }
+        return true;
+    }
+
     void execute_menu_item(int index)
     {
         switch (index) {
@@ -7279,19 +7304,10 @@ private:
             }
             switch (i) {
             case 0:
-                play_se(-1, 9012, false, 140);
-                if (backlog_depth_ < static_cast<int>(backlog_.size())) {
-                    ++backlog_depth_;
-                    ui_mode_ = UiMode::backlog;
-                }
+                backlog_older();
                 break;
             case 1:
-                play_se(-1, 9104, false, 255);
-                if (backlog_depth_ > 1) {
-                    --backlog_depth_;
-                } else if (backlog_depth_ == 1) {
-                    close_backlog();
-                } else {
+                if (!backlog_newer()) {
                     advance();
                 }
                 break;
@@ -7339,19 +7355,18 @@ private:
             if (event.key.key == SDLK_ESCAPE) {
                 close_backlog();
             } else if (event.key.key == SDLK_UP) {
-                if (backlog_depth_ < static_cast<int>(backlog_.size()))
-                    ++backlog_depth_;
+                backlog_older();
             } else if (event.key.key == SDLK_DOWN) {
-                if (backlog_depth_ > 1) --backlog_depth_;
-                else close_backlog();
+                backlog_newer();
             } else if (event.key.key == SDLK_PAGEUP) {
-                if (backlog_depth_ < static_cast<int>(backlog_.size()))
-                    ++backlog_depth_;
+                backlog_older();
             } else if (event.key.key == SDLK_PAGEDOWN) {
-                if (backlog_depth_ > 1) --backlog_depth_;
-                else close_backlog();
+                backlog_newer();
             } else if (event.key.key == SDLK_HOME) {
-                backlog_depth_ = static_cast<int>(backlog_.size());
+                if (backlog_depth_ != static_cast<int>(backlog_.size())) {
+                    play_se(-1, 9012, false, 140);
+                    backlog_depth_ = static_cast<int>(backlog_.size());
+                }
             } else if (event.key.key == SDLK_END) {
                 close_backlog();
             }
@@ -7366,11 +7381,9 @@ private:
             close_backlog();
         } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
             if (event.wheel.y > 0) {
-                if (backlog_depth_ < static_cast<int>(backlog_.size()))
-                    ++backlog_depth_;
-            } else {
-                if (backlog_depth_ > 1) --backlog_depth_;
-                else close_backlog();
+                backlog_older();
+            } else if (event.wheel.y < 0) {
+                backlog_newer();
             }
         } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
             update_sidebar_hover(event.motion.x, event.motion.y);
