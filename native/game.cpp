@@ -302,6 +302,15 @@ public:
         ui_save_controls_ = try_load("sys0203.tga");
         title_background_ = try_load("t0000.tga");
         title_menu_ = try_load("t0010.tga");
+        omake_cg_background_ = try_load("t1000.tga");
+        omake_cg_locked_ = try_load("t1100.tga");
+        omake_music_background_ = try_load("t2000.tga");
+        omake_music_selection_ = try_load("t2001.tga");
+        omake_music_labels_ = try_load("t2010.tga");
+        omake_music_title_ = try_load("t2020.tga");
+        omake_music_artist_ = try_load("t2021.tga");
+        omake_music_playing_ = try_load("t2100.tga");
+        omake_replay_background_ = try_load("t3000.tga");
         if (const auto* entry = graphics_.find("t0001.tga")) {
             Surface loaded(th2::load_image(graphics_.read(*entry), entry->name));
             title_foreground_pixels_.reset(
@@ -425,6 +434,18 @@ public:
                 // UI mode routing
                 if (ui_mode_ == UiMode::title) {
                     handle_title_input(event);
+                    continue;
+                }
+                if (ui_mode_ == UiMode::cg_gallery) {
+                    handle_cg_gallery_input(event);
+                    continue;
+                }
+                if (ui_mode_ == UiMode::music_room) {
+                    handle_music_room_input(event);
+                    continue;
+                }
+                if (ui_mode_ == UiMode::replay_gallery) {
+                    handle_replay_gallery_input(event);
                     continue;
                 }
                 if (ui_mode_ == UiMode::system_menu) {
@@ -1033,6 +1054,15 @@ private:
     Texture ui_save_controls_;
     Texture title_background_;
     Texture title_menu_;
+    Texture omake_cg_background_;
+    Texture omake_cg_locked_;
+    Texture omake_music_background_;
+    Texture omake_music_selection_;
+    Texture omake_music_labels_;
+    Texture omake_music_title_;
+    Texture omake_music_artist_;
+    Texture omake_music_playing_;
+    Texture omake_replay_background_;
     Texture map_frame_;
     Texture map_arrows_;
     Texture map_markers_;
@@ -1106,10 +1136,49 @@ private:
     bool choice_ex_ = false;
 
     // --- UI State ---
-    enum class UiMode { title, game, system_menu, backlog, save, load, map };
+    enum class UiMode {
+        title,
+        cg_gallery,
+        music_room,
+        replay_gallery,
+        game,
+        system_menu,
+        backlog,
+        save,
+        load,
+        map,
+    };
     UiMode ui_mode_ = UiMode::title;
     UiMode save_return_mode_ = UiMode::game;
     int title_highlight_ = 0;
+    bool title_extras_ = false;
+    bool title_extras_transition_from_ = false;
+    std::optional<std::chrono::steady_clock::time_point>
+        title_menu_transition_started_;
+    int omake_highlight_ = 0;
+    int omake_page_ = 0;
+    int omake_music_playing_slot_ = -1;
+    std::optional<int> omake_cg_view_;
+    struct OmakeCgEntry {
+        bool hcg = false;
+        std::vector<int> variants;
+    };
+    std::vector<OmakeCgEntry> omake_cg_entries_;
+    std::vector<Texture> omake_cg_thumbnails_;
+    Texture omake_cg_full_;
+    Texture omake_cg_previous_full_;
+    int omake_cg_variant_ = 0;
+    bool omake_cg_tall_scrolled_ = false;
+    enum class OmakeCgPhase {
+        viewing,
+        opening,
+        scrolling,
+        changing,
+        closing,
+    };
+    OmakeCgPhase omake_cg_phase_ = OmakeCgPhase::viewing;
+    std::chrono::steady_clock::time_point omake_cg_phase_started_{};
+    std::array<Texture, 9> omake_replay_thumbnails_;
     std::chrono::steady_clock::time_point title_started_{};
     std::optional<std::chrono::steady_clock::time_point> title_exit_started_;
     bool title_exit_game_ = false;
@@ -2565,6 +2634,49 @@ private:
                      << "mask_width=" << transition_->mask_width << '\n'
                      << "mask_height=" << transition_->mask_height << '\n';
         }
+    }
+
+    void draw_active_transition()
+    {
+        if (!transition_) {
+            return;
+        }
+        const auto elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - transition_->started);
+        const float progress = std::clamp(
+            static_cast<float>(
+                elapsed.count() * 60.0 / transition_->frames),
+            0.0f, 1.0f);
+        if (transition_->type >= 0x80) {
+            draw_pattern_transition(progress);
+        } else if (transition_->type == 0) {
+            if (progress < 0.5f) {
+                SDL_SetTextureAlphaModFloat(
+                    transition_->previous.get(), 1.0f);
+                SDL_RenderTexture(
+                    renderer_, transition_->previous.get(), nullptr, nullptr);
+            }
+            const float midpoint = progress < 0.5f
+                ? progress * 2.0f : (1.0f - progress) * 2.0f;
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(
+                renderer_, 0, 0, 0,
+                static_cast<Uint8>(
+                    std::clamp(midpoint, 0.0f, 1.0f) * 255.0f));
+            SDL_RenderFillRect(renderer_, nullptr);
+        } else if ((transition_->type >= 2 && transition_->type <= 10)
+                   || transition_->type == 21) {
+            draw_pixel_transition(progress);
+        } else if (transition_->type >= 11
+                   && transition_->type <= 24) {
+            draw_geometric_transition(progress);
+        } else {
+            SDL_SetTextureAlphaModFloat(
+                transition_->previous.get(), 1.0f - progress);
+            SDL_RenderTexture(
+                renderer_, transition_->previous.get(), nullptr, nullptr);
+        }
+        dump_transition_frame(progress);
     }
 
     void draw_script_position()
@@ -4860,8 +4972,26 @@ private:
         title_exit_started_ = std::chrono::steady_clock::now();
     }
 
+    void begin_title_menu_transition(bool extras)
+    {
+        if (title_menu_transition_started_ || title_extras_ == extras) {
+            return;
+        }
+        title_extras_transition_from_ = title_extras_;
+        title_extras_ = extras;
+        title_menu_transition_started_ = std::chrono::steady_clock::now();
+    }
+
     void update_title()
     {
+        if (title_menu_transition_started_) {
+            const auto elapsed = std::chrono::duration<double>(
+                std::chrono::steady_clock::now()
+                - *title_menu_transition_started_).count();
+            if (elapsed * 60.0 >= 24.0) {
+                title_menu_transition_started_.reset();
+            }
+        }
         if (!title_exit_started_) {
             return;
         }
@@ -4927,6 +5057,8 @@ private:
         for (auto& channel : voice_channels_) channel.stop();
         ui_mode_ = UiMode::title;
         title_highlight_ = 0;
+        title_extras_ = false;
+        title_menu_transition_started_.reset();
         title_exit_started_.reset();
         title_started_ = std::chrono::steady_clock::now();
         th2::save_config(config_path_, config_);
@@ -5417,6 +5549,468 @@ private:
         }
     }
 
+    bool title_extras_available() const
+    {
+        return runtime_.game_flag(80) != 0 || runtime_.game_flag(87) != 0;
+    }
+
+    bool title_item_disabled(int item) const
+    {
+        if (title_extras_) {
+            return item == 3;
+        }
+        return item == 3 && !title_extras_available();
+    }
+
+    static constexpr std::array<int, 649> cg_gallery_layout{
+        1010, 1011, 0, 1020, 0, 1030, 1031, 1032, 1033, 1034, 1035, 1036, 0, 1040, 1041, 1042,
+        0, 1050, 0, 1060, 0, 1070, 1071, 0, 1080, 0, 1090, 0, 1100, 1101, 0, 1110,
+        0, 1120, 0, 1130, 1131, 0, 1140, 0, 1150, 1151, 1152, 1153, 0, 1160, 0, 1170,
+        0, 1990, 1991, 0, 2010, 2011, 2012, 2013, 2014, 2015, 0, 2020, 2021, 2022, 2023, 2024,
+        0, 2030, 2031, 2032, 0, 2040, 2041, 2042, 0, 2050, 2051, 2052, 2053, 2054, 2055, 2056,
+        2057, 2058, 0, 2060, 0, 2070, 0, 2080, 2081, 2082, 0, 2090, 0, 2100, 2101, 0,
+        2110, 2111, 0, 2120, 0, 2140, 2141, 0, 2150, 0, 2160, 0, 2170, 0, 2180, 0,
+        2190, 0, 3010, 3011, 3012, 0, 3020, 3021, 0, 3030, 3031, 3032, 0, 3040, 0, 3050,
+        3051, 0, 3060, 0, 3070, 3071, 3072, 0, 3080, 3081, 3082, 3083, 3084, 3085, 0, 3090,
+        3086, 0, 3100, 3101, 3102, 3103, 3104, 3105, 0, 3110, 0, 3120, 0, 3130, 3131, 3132,
+        3133, 3134, 3135, 0, 3140, 0, 3150, 3151, 0, 4010, 0, 4020, 4021, 4022, 0, 4030,
+        4031, 4032, 4033, 0, 4040, 0, 4050, 4051, 4052, 0, 4060, 0, 4070, 0, 4080, 4081,
+        0, 4090, 4091, 4092, 4093, 4094, 0, 4100, 4101, 4102, 4103, 0, 4110, 4111, 4112, 0,
+        4120, 4121, 0, 4130, 0, 4140, 0, 4150, 0, 4160, 4161, 4162, 0, 5010, 0, 5020,
+        0, 5030, 0, 5040, 0, 5050, 0, 5060, 5061, 0, 5070, 0, 5080, 0, 5090, 5091,
+        0, 5100, 0, 5110, 0, 5120, 0, 5130, 0, 5140, 0, 5150, 0, 5160, 0, 7010,
+        7011, 7012, 0, 7020, 0, 7030, 0, 7040, 0, 7050, 0, 7060, 0, 7070, 7071, 0,
+        7080, 0, 7090, 7091, 7092, 7093, 0, 7100, 7101, 7102, 0, 7110, 7111, 7112, 0, 7120,
+        0, 7130, 0, 7140, 0, 7150, 0, 7160, 0, 8010, 0, 8020, 0, 8030, 0, 8040,
+        8041, 0, 8050, 0, 8060, 0, 8070, 8071, 0, 8080, 0, 8090, 0, 8100, 0, 8110,
+        0, 8120, 0, 8130, 0, 8140, 0, 8150, 0, 9010, 9011, 0, 9020, 9021, 9022, 0,
+        9030, 9031, 9032, 0, 9050, 9051, 0, 9060, 0, 9070, 0, 9080, 9081, 0, 9090, 9091,
+        9092, 0, 9100, 0, 9110, 0, 9120, 9121, 9122, 9123, 9124, 0, 10010, 10011, 0, 15000,
+        0, 28010, 0, 28020, 28021, 28022, 0, 28030, 28031, 28032, 0, 28040, 0, 28050, 0, 28060,
+        28061, 28062, 28063, 28064, 28065, 28066, 28067, 0, 28070, 28071, 0, 28080, 28081, 0, 28090, 0,
+        28100, 0, 28110, 28111, 0, 28120, 0, 28130, 28131, 0, 101000, 101001, 0, 101010, 101011, 101012,
+        101013, 101014, 101015, 0, 101020, 101021, 101022, 101023, 101024, 0, 101030, 101031, 101032, 101033, 101034, 101035,
+        0, 101040, 101041, 101042, 101043, 101044, 0, 102000, 102001, 0, 102010, 0, 102020, 102021, 102022, 0,
+        102030, 102031, 0, 102040, 102041, 0, 103000, 103001, 103002, 103003, 103004, 103005, 103006, 103007, 103008, 0,
+        103010, 103011, 103012, 103013, 103014, 0, 103020, 103021, 103022, 103023, 103024, 103025, 103026, 103027, 103028, 103029,
+        0, 103030, 103031, 103032, 103033, 0, 103040, 103041, 103042, 103043, 103044, 0, 103120, 103121, 103122, 0,
+        103103, 103104, 103105, 103106, 103107, 103108, 0, 103130, 103131, 103132, 103133, 0, 103140, 103141, 103142, 103143,
+        103144, 0, 103203, 103204, 103205, 103206, 103207, 103208, 0, 103220, 103221, 103222, 0, 103230, 103231, 103232,
+        103233, 0, 103240, 103241, 103242, 103243, 103244, 0, 104000, 104001, 104002, 104003, 0, 104010, 104011, 104012,
+        104013, 0, 104020, 104021, 0, 104030, 104031, 104032, 104033, 104034, 104035, 0, 105000, 0, 105010, 105011,
+        105012, 105013, 0, 105020, 105021, 105022, 0, 105030, 105031, 105032, 105033, 105034, 105035, 0, 105040, 105041,
+        0, 107000, 107001, 107002, 107003, 0, 107010, 0, 107020, 107021, 107022, 0, 107030, 107031, 0, 107040,
+        107041, 0, 108000, 0, 108010, 108011, 108012, 108013, 0, 108020, 108021, 108022, 0, 108030, 0, 109000,
+        109001, 109002, 109003, 109004, 109005, 109006, 109007, 0, 109010, 109011, 109012, 109013, 0, 109020, 109021, 109022,
+        109023, 109024, 109025, 109026, 109027, 0, 109030, 109031, 109032, 0, 128000, 128001, 0, 128010, 128011, 0,
+        128020, 128021, 128022, 128023, 0, 0, 0, 0, 0,
+    };
+
+    void draw_omake_cancel(int highlight)
+    {
+        if (!ui_sys_cancel_) {
+            return;
+        }
+        const SDL_FRect source{
+            highlight ? 188.0f : 0.0f, 0.0f, 188.0f, 32.0f};
+        const SDL_FRect destination{306.0f, 496.0f, 188.0f, 32.0f};
+        SDL_RenderTexture(
+            renderer_, ui_sys_cancel_.get(), &source, &destination);
+    }
+
+    void open_cg_gallery()
+    {
+        begin_transition(1, 15, 128, false);
+        omake_cg_entries_.clear();
+        omake_cg_thumbnails_.clear();
+        OmakeCgEntry entry;
+        int first_layout_cg = 0;
+        for (const int encoded_cg : cg_gallery_layout) {
+            if (encoded_cg != 0) {
+                if (first_layout_cg == 0) {
+                    first_layout_cg = encoded_cg;
+                    entry.hcg = encoded_cg >= 100000;
+                }
+                const int cg = encoded_cg % 100000;
+                const auto& unlocked = entry.hcg
+                    ? config_.unlocked_h_cgs
+                    : config_.unlocked_visual_cgs;
+                if (unlocked.contains(cg)) {
+                    entry.variants.push_back(cg);
+                }
+                continue;
+            }
+
+            Texture thumbnail;
+            if (!entry.variants.empty()) {
+                const auto name = std::format(
+                    "t{}0{:04d}{}.tga", entry.hcg ? 'h' : 'v',
+                    entry.variants.front() / 10, first_layout_cg % 10);
+                thumbnail = load_texture(renderer_, graphics_, name);
+            }
+            omake_cg_entries_.push_back(std::move(entry));
+            omake_cg_thumbnails_.push_back(std::move(thumbnail));
+            entry = {};
+            first_layout_cg = 0;
+        }
+        omake_page_ = 0;
+        omake_highlight_ = 0;
+        omake_cg_view_.reset();
+        omake_cg_variant_ = 0;
+        omake_cg_tall_scrolled_ = false;
+        omake_cg_full_.reset();
+        omake_cg_previous_full_.reset();
+        omake_cg_phase_ = OmakeCgPhase::viewing;
+        play_bgm(10, true, 255);
+        ui_mode_ = UiMode::cg_gallery;
+    }
+
+    void open_music_room()
+    {
+        begin_transition(1, 30, 128, false);
+        bgm_.fade_to(0.0f, std::chrono::milliseconds(500), true);
+        bgm_track_ = -1;
+        omake_highlight_ = 40;
+        omake_music_playing_slot_ = -1;
+        ui_mode_ = UiMode::music_room;
+    }
+
+    void open_replay_gallery()
+    {
+        begin_transition(1, 30, 128, false);
+        for (int slot = 0; slot < 9; ++slot) {
+            omake_replay_thumbnails_[slot].reset();
+            if (!config_.unlocked_replays.contains(replay_flags[slot])) {
+                continue;
+            }
+            const auto name =
+                std::format("th0{:05d}.tga", replay_thumbnails[slot]);
+            if (graphics_.find(name)) {
+                omake_replay_thumbnails_[slot] =
+                    load_texture(renderer_, graphics_, name);
+            }
+        }
+        omake_highlight_ = 14;
+        ui_mode_ = UiMode::replay_gallery;
+    }
+
+    void close_omake_screen()
+    {
+        begin_transition(
+            1, ui_mode_ == UiMode::cg_gallery ? 15 : 30, 128, false);
+        bgm_.fade_to(0.0f, std::chrono::milliseconds(1000), true);
+        bgm_track_ = -1;
+        omake_cg_full_.reset();
+        omake_cg_previous_full_.reset();
+        omake_cg_view_.reset();
+        ui_mode_ = UiMode::title;
+        title_extras_ = true;
+        title_highlight_ = 0;
+    }
+
+    void draw_cg_gallery_page()
+    {
+        if (omake_cg_background_) {
+            SDL_RenderTexture(
+                renderer_, omake_cg_background_.get(), nullptr, nullptr);
+        }
+        const int first = omake_page_ * 12;
+        for (int slot = 0; slot < 12; ++slot) {
+            const int index = first + slot;
+            const SDL_FRect destination{
+                55.0f + 177.0f * (slot % 4),
+                114.0f + 128.0f * (slot / 4), 160.0f, 120.0f};
+            if (index < static_cast<int>(omake_cg_thumbnails_.size())
+                && !omake_cg_entries_[index].variants.empty()) {
+                auto* texture = omake_cg_thumbnails_[index].get();
+                SDL_SetTextureAlphaMod(
+                    texture, omake_highlight_ == slot ? 255 : 192);
+                SDL_RenderTexture(renderer_, texture, nullptr, &destination);
+                SDL_SetTextureAlphaMod(texture, 255);
+            } else if (omake_cg_locked_) {
+                SDL_RenderTexture(
+                    renderer_, omake_cg_locked_.get(), nullptr, &destination);
+            }
+        }
+        const int page_count = std::max(
+            1, (static_cast<int>(omake_cg_entries_.size()) + 11) / 12);
+        font_.draw(
+            renderer_, 364.0f, 78.0f,
+            std::format("{:02d}/{:02d}", omake_page_ + 1, page_count),
+            255, 245, 225);
+        if (ui_save_controls_) {
+            const SDL_FRect previous_source{
+                0.0f, omake_highlight_ == 12 ? 64.0f : 0.0f,
+                130.0f, 32.0f};
+            const SDL_FRect next_source{
+                0.0f, 32.0f + (omake_highlight_ == 13 ? 64.0f : 0.0f),
+                130.0f, 32.0f};
+            const SDL_FRect previous_destination{
+                190.0f, 72.0f, 130.0f, 32.0f};
+            const SDL_FRect next_destination{
+                482.0f, 72.0f, 130.0f, 32.0f};
+            SDL_RenderTexture(
+                renderer_, ui_save_controls_.get(),
+                &previous_source, &previous_destination);
+            SDL_RenderTexture(
+                renderer_, ui_save_controls_.get(),
+                &next_source, &next_destination);
+        }
+        draw_omake_cancel(omake_highlight_ == 14);
+    }
+
+    void draw_cg_full(
+        SDL_Texture* texture, float source_y, const SDL_FRect& destination,
+        float alpha = 1.0f)
+    {
+        float width = 0.0f;
+        float height = 0.0f;
+        SDL_GetTextureSize(texture, &width, &height);
+        SDL_SetTextureAlphaModFloat(texture, alpha);
+        if (height > 600.0f) {
+            const SDL_FRect source{
+                0.0f, source_y, std::min(800.0f, width), 600.0f};
+            SDL_RenderTexture(renderer_, texture, &source, &destination);
+        } else {
+            SDL_RenderTexture(renderer_, texture, nullptr, &destination);
+        }
+        SDL_SetTextureAlphaModFloat(texture, 1.0f);
+    }
+
+    float omake_cg_phase_progress(int frames) const
+    {
+        return std::clamp(
+            static_cast<float>(
+                std::chrono::duration<double>(
+                    std::chrono::steady_clock::now()
+                    - omake_cg_phase_started_).count()
+                * 60.0 / frames),
+            0.0f, 1.0f);
+    }
+
+    void draw_cg_gallery()
+    {
+        if (!omake_cg_view_ || !omake_cg_full_) {
+            draw_cg_gallery_page();
+            return;
+        }
+
+        float height = 0.0f;
+        SDL_GetTextureSize(omake_cg_full_.get(), nullptr, &height);
+        const float bottom = std::max(0.0f, height - 600.0f);
+        const SDL_FRect full_screen{0.0f, 0.0f, 800.0f, 600.0f};
+
+        switch (omake_cg_phase_) {
+        case OmakeCgPhase::opening: {
+            draw_cg_gallery_page();
+            const float linear = omake_cg_phase_progress(15);
+            const float rate = 1.0f - (1.0f - linear) * (1.0f - linear);
+            const int slot = *omake_cg_view_ % 12;
+            const SDL_FRect destination{
+                (54.0f + 177.0f * (slot % 4)) * (1.0f - rate),
+                (77.0f + 130.0f * (slot / 4)) * (1.0f - rate),
+                160.0f * (1.0f - rate) + 800.0f * rate,
+                120.0f * (1.0f - rate) + 600.0f * rate};
+            draw_cg_full(
+                omake_cg_full_.get(), bottom, destination, linear);
+            if (linear >= 1.0f) {
+                omake_cg_phase_ = OmakeCgPhase::viewing;
+            }
+            break;
+        }
+        case OmakeCgPhase::scrolling: {
+            const float progress = omake_cg_phase_progress(180);
+            draw_cg_full(
+                omake_cg_full_.get(), bottom * (1.0f - progress),
+                full_screen);
+            if (progress >= 1.0f) {
+                omake_cg_tall_scrolled_ = true;
+                omake_cg_phase_ = OmakeCgPhase::viewing;
+            }
+            break;
+        }
+        case OmakeCgPhase::changing: {
+            draw_cg_full(
+                omake_cg_full_.get(), bottom, full_screen);
+            const float progress = omake_cg_phase_progress(15);
+            if (omake_cg_previous_full_) {
+                float previous_height = 0.0f;
+                SDL_GetTextureSize(
+                    omake_cg_previous_full_.get(),
+                    nullptr, &previous_height);
+                draw_cg_full(
+                    omake_cg_previous_full_.get(),
+                    std::max(0.0f, previous_height - 600.0f),
+                    full_screen, 1.0f - progress);
+            }
+            if (progress >= 1.0f) {
+                omake_cg_previous_full_.reset();
+                omake_cg_phase_ = OmakeCgPhase::viewing;
+            }
+            break;
+        }
+        case OmakeCgPhase::closing: {
+            draw_cg_gallery_page();
+            const float progress = omake_cg_phase_progress(15);
+            draw_cg_full(
+                omake_cg_full_.get(),
+                omake_cg_tall_scrolled_ ? 0.0f : bottom,
+                full_screen, 1.0f - progress);
+            if (progress >= 1.0f) {
+                omake_cg_view_.reset();
+                omake_cg_full_.reset();
+                omake_cg_previous_full_.reset();
+                omake_cg_phase_ = OmakeCgPhase::viewing;
+            }
+            break;
+        }
+        case OmakeCgPhase::viewing:
+            draw_cg_full(
+                omake_cg_full_.get(),
+                omake_cg_tall_scrolled_ ? 0.0f : bottom,
+                full_screen);
+            break;
+        }
+    }
+
+    static constexpr std::array<int, 40> music_room_tracks{
+        0, 10, 29, 11, 12, 13, 14, 30, 27, 1,
+        2, 4, 3, 5, 6, 8, 7, 9, 18, 37,
+        38, 41, 42, 39, 40, 15, 16, 17, 19, 20,
+        22, 32, 21, 23, 26, 31, 25, 24, 28, 50,
+    };
+    static constexpr std::array<std::array<int, 2>, 40>
+        music_room_artists{{
+            {3, 5}, {3, 3}, {4, 4}, {2, 2}, {1, 1},
+            {2, 2}, {1, 1}, {0, 0}, {2, 2}, {2, 2},
+            {0, 0}, {3, 3}, {0, 0}, {4, 4}, {4, 4},
+            {2, 2}, {1, 1}, {1, 1}, {2, 2}, {6, 4},
+            {6, 4}, {1, 1}, {0, 0}, {5, 5}, {0, 0},
+            {3, 3}, {3, 3}, {3, 3}, {2, 2}, {2, 2},
+            {1, 1}, {4, 4}, {2, 2}, {1, 1}, {2, 2},
+            {3, 3}, {1, 1}, {1, 1}, {3, 3}, {2, 5},
+        }};
+
+    void draw_music_room()
+    {
+        if (omake_music_background_) {
+            SDL_RenderTexture(
+                renderer_, omake_music_background_.get(), nullptr, nullptr);
+        }
+        for (int slot = 0; slot < 40; ++slot) {
+            if (runtime_.game_flag(128 + slot) == 0 || !omake_music_labels_) {
+                continue;
+            }
+            const int column = slot / 10;
+            const int row = slot % 10;
+            const SDL_FRect source{
+                static_cast<float>(column * 160),
+                static_cast<float>(row * 20), 160.0f, 20.0f};
+            const SDL_FRect destination{
+                static_cast<float>(40 + column * 192),
+                static_cast<float>(164 + row * 32), 160.0f, 20.0f};
+            SDL_RenderTexture(
+                renderer_, omake_music_labels_.get(), &source, &destination);
+        }
+        if (omake_highlight_ >= 0 && omake_highlight_ < 40
+            && runtime_.game_flag(128 + omake_highlight_) != 0
+            && omake_music_selection_) {
+            const int column = omake_highlight_ / 10;
+            const int row = omake_highlight_ % 10;
+            const SDL_FRect source{
+                static_cast<float>(20 + column * 192),
+                static_cast<float>(160 + row * 32), 184.0f, 28.0f};
+            const SDL_FRect destination = source;
+            SDL_RenderTexture(
+                renderer_, omake_music_selection_.get(),
+                &source, &destination);
+        }
+        if (omake_music_playing_slot_ >= 0 && omake_music_playing_) {
+            const int column = omake_music_playing_slot_ / 10;
+            const int row = omake_music_playing_slot_ % 10;
+            float width = 0.0f;
+            float height = 0.0f;
+            SDL_GetTextureSize(
+                omake_music_playing_.get(), &width, &height);
+            const SDL_FRect marker{
+                static_cast<float>(26 + column * 192),
+                static_cast<float>(164 + row * 32), width, height};
+            SDL_RenderTexture(
+                renderer_, omake_music_playing_.get(), nullptr, &marker);
+        }
+        if (omake_music_playing_slot_ >= 0) {
+            const int slot = omake_music_playing_slot_;
+            if (omake_music_title_) {
+                const SDL_FRect source{
+                    0.0f, static_cast<float>(slot * 24),
+                    282.0f, 24.0f};
+                const SDL_FRect destination{
+                    281.0f, 86.0f, 282.0f, 24.0f};
+                SDL_RenderTexture(
+                    renderer_, omake_music_title_.get(),
+                    &source, &destination);
+            }
+            if (omake_music_artist_) {
+                const SDL_FRect composer_source{
+                    0.0f,
+                    static_cast<float>(music_room_artists[slot][0] * 24),
+                    282.0f, 24.0f};
+                const SDL_FRect arranger_source{
+                    0.0f,
+                    static_cast<float>(music_room_artists[slot][1] * 24),
+                    282.0f, 24.0f};
+                const SDL_FRect composer_destination{
+                    291.0f, 122.0f, 282.0f, 24.0f};
+                const SDL_FRect arranger_destination{
+                    440.0f, 122.0f, 282.0f, 24.0f};
+                SDL_RenderTexture(
+                    renderer_, omake_music_artist_.get(),
+                    &composer_source, &composer_destination);
+                SDL_RenderTexture(
+                    renderer_, omake_music_artist_.get(),
+                    &arranger_source, &arranger_destination);
+            }
+        }
+        draw_omake_cancel(omake_highlight_ == 40);
+    }
+
+    static constexpr std::array<int, 9> replay_flags{
+        1, 2, 3, 4, 5, 7, 8, 9, 11,
+    };
+    static constexpr std::array<int, 9> replay_scripts{
+        10, 20, 30, 40, 50, 70, 80, 90, 110,
+    };
+    static constexpr std::array<int, 9> replay_thumbnails{
+        1000, 2010, 3000, 4000, 5000, 7010, 8000, 9000, 28000,
+    };
+
+    void draw_replay_gallery()
+    {
+        if (omake_replay_background_) {
+            SDL_RenderTexture(
+                renderer_, omake_replay_background_.get(), nullptr, nullptr);
+        }
+        for (int slot = 0; slot < 9; ++slot) {
+            const SDL_FRect destination{
+                55.0f + 177.0f * (slot % 4),
+                114.0f + 128.0f * (slot / 4), 160.0f, 120.0f};
+            const bool unlocked =
+                config_.unlocked_replays.contains(replay_flags[slot]);
+            if (unlocked && omake_replay_thumbnails_[slot]) {
+                SDL_SetTextureAlphaMod(
+                    omake_replay_thumbnails_[slot].get(),
+                    omake_highlight_ == slot ? 255 : 192);
+                SDL_RenderTexture(
+                    renderer_, omake_replay_thumbnails_[slot].get(),
+                    nullptr, &destination);
+            } else if (omake_cg_locked_) {
+                SDL_RenderTexture(
+                    renderer_, omake_cg_locked_.get(), nullptr, &destination);
+            }
+        }
+        draw_omake_cancel(omake_highlight_ == 14);
+    }
+
     void draw_title()
     {
         const auto now = std::chrono::steady_clock::now();
@@ -5505,20 +6099,50 @@ private:
             SDL_SetTextureBlendMode(title_menu_.get(), SDL_BLENDMODE_BLEND);
         }
 
-        for (int i = 0; i < 5; ++i) {
-            if (i == 3) {
-                continue;
-            }
-            const float alpha = std::clamp(
-                static_cast<float>(frame - 48 - 40 - i * 4) / 16.0f,
-                0.0f, 1.0f);
-            SDL_SetTextureAlphaModFloat(title_menu_.get(), alpha);
-            const float source_x = i == title_highlight_ ? 188.0f : 0.0f;
-            const SDL_FRect src{
-                source_x, static_cast<float>(32 * i), 188.0f, 32.0f};
-            const SDL_FRect dst{
-                306.0f, static_cast<float>(385 + 40 * i), 188.0f, 32.0f};
-            SDL_RenderTexture(renderer_, title_menu_.get(), &src, &dst);
+        const auto draw_menu_page =
+            [&](bool extras, float transition_tick, bool target_page) {
+                for (int i = 0; i < 5; ++i) {
+                    if (i == 3
+                        && (extras || !title_extras_available())) {
+                        continue;
+                    }
+                    float alpha = std::clamp(
+                        static_cast<float>(frame - 48 - 40 - i * 4)
+                            / 16.0f,
+                        0.0f, 1.0f);
+                    if (transition_tick >= 0.0f) {
+                        const float row_progress = std::clamp(
+                            (transition_tick - i * 2.0f) / 16.0f,
+                            0.0f, 1.0f);
+                        alpha = target_page
+                            ? row_progress : 1.0f - row_progress;
+                    }
+                    SDL_SetTextureAlphaModFloat(title_menu_.get(), alpha);
+                    const float source_x =
+                        target_page && i == title_highlight_
+                        && !title_menu_transition_started_
+                            ? 188.0f : 0.0f;
+                    const SDL_FRect source{
+                        source_x,
+                        static_cast<float>(32 * (i + (extras ? 5 : 0))),
+                        188.0f, 32.0f};
+                    const SDL_FRect destination{
+                        306.0f, static_cast<float>(385 + 40 * i),
+                        188.0f, 32.0f};
+                    SDL_RenderTexture(
+                        renderer_, title_menu_.get(),
+                        &source, &destination);
+                }
+            };
+        if (title_menu_transition_started_) {
+            const float tick = static_cast<float>(
+                std::chrono::duration<double>(
+                    now - *title_menu_transition_started_).count() * 60.0);
+            draw_menu_page(
+                title_extras_transition_from_, tick, false);
+            draw_menu_page(title_extras_, tick, true);
+        } else {
+            draw_menu_page(title_extras_, -1.0f, true);
         }
         SDL_SetTextureAlphaModFloat(title_menu_.get(), 1.0f);
     }
@@ -5526,7 +6150,28 @@ private:
     void activate_title_item()
     {
         play_se(
-            -1, title_highlight_ == 0 ? 9111 : 9104, false, 255);
+            -1, !title_extras_ && title_highlight_ == 0 ? 9111 : 9104,
+            false, 255);
+        if (title_extras_) {
+            switch (title_highlight_) {
+            case 0:
+                open_cg_gallery();
+                break;
+            case 1:
+                open_music_room();
+                break;
+            case 2:
+                open_replay_gallery();
+                break;
+            case 4:
+                begin_title_menu_transition(false);
+                title_highlight_ = 3;
+                break;
+            default:
+                break;
+            }
+            return;
+        }
         switch (title_highlight_) {
         case 0:
             begin_title_exit(true);
@@ -5537,6 +6182,10 @@ private:
             break;
         case 2:
             open_config();
+            break;
+        case 3:
+            begin_title_menu_transition(true);
+            title_highlight_ = 0;
             break;
         case 4:
             begin_title_exit(false);
@@ -5552,7 +6201,8 @@ private:
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - title_started_).count()
             * 60 / 1000);
-        if (frame < 120 || title_exit_started_) {
+        if (frame < 120 || transition_ || title_exit_started_
+            || title_menu_transition_started_) {
             return;
         }
         const int previous_highlight = title_highlight_;
@@ -5560,23 +6210,28 @@ private:
             if (event.key.key == SDLK_UP) {
                 do {
                     title_highlight_ = (title_highlight_ + 4) % 5;
-                } while (title_highlight_ == 3);
+                } while (title_item_disabled(title_highlight_));
             } else if (event.key.key == SDLK_DOWN) {
                 do {
                     title_highlight_ = (title_highlight_ + 1) % 5;
-                } while (title_highlight_ == 3);
+                } while (title_item_disabled(title_highlight_));
             } else if (event.key.key == SDLK_RETURN
                        || event.key.key == SDLK_SPACE) {
                 activate_title_item();
             } else if (event.key.key == SDLK_ESCAPE) {
-                title_highlight_ = 4;
+                if (title_extras_) {
+                    begin_title_menu_transition(false);
+                    title_highlight_ = 3;
+                } else {
+                    title_highlight_ = 4;
+                }
             }
         } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
             const float x = event.motion.x;
             const float y = event.motion.y;
             if (x >= 306.0f && x < 494.0f) {
                 for (int i = 0; i < 5; ++i) {
-                    if (i == 3) continue;
+                    if (title_item_disabled(i)) continue;
                     const float top = static_cast<float>(385 + 40 * i);
                     if (y >= top && y < top + 32.0f) {
                         title_highlight_ = i;
@@ -5590,7 +6245,7 @@ private:
             const float y = event.button.y;
             if (x >= 306.0f && x < 494.0f) {
                 for (int i = 0; i < 5; ++i) {
-                    if (i == 3) continue;
+                    if (title_item_disabled(i)) continue;
                     const float top = static_cast<float>(385 + 40 * i);
                     if (y >= top && y < top + 32.0f) {
                         title_highlight_ = i;
@@ -5601,6 +6256,357 @@ private:
             }
         }
         if (title_highlight_ != previous_highlight) {
+            play_se(-1, 9108, false, 255);
+        }
+    }
+
+    void activate_cg_gallery_item()
+    {
+        const int page_count = std::max(
+            1, (static_cast<int>(omake_cg_entries_.size()) + 11) / 12);
+        if (omake_highlight_ >= 0 && omake_highlight_ < 12) {
+            const int index = omake_page_ * 12 + omake_highlight_;
+            if (index >= static_cast<int>(omake_cg_entries_.size())
+                || omake_cg_entries_[index].variants.empty()) {
+                return;
+            }
+            const auto& entry = omake_cg_entries_[index];
+            omake_cg_variant_ = 0;
+            omake_cg_tall_scrolled_ = false;
+            const int cg = entry.variants.front();
+            omake_cg_full_ = load_texture(
+                renderer_, graphics_,
+                std::format("{}{:06d}.tga", entry.hcg ? 'h' : 'v', cg));
+            omake_cg_view_ = index;
+            omake_cg_phase_ = OmakeCgPhase::opening;
+            omake_cg_phase_started_ = std::chrono::steady_clock::now();
+            play_se(-1, 9104, false, 255);
+        } else if (omake_highlight_ == 12) {
+            begin_transition(1, 8, 128, false);
+            omake_page_ = (omake_page_ + page_count - 1) % page_count;
+            play_se(-1, 9104, false, 255);
+        } else if (omake_highlight_ == 13) {
+            begin_transition(1, 8, 128, false);
+            omake_page_ = (omake_page_ + 1) % page_count;
+            play_se(-1, 9104, false, 255);
+        } else if (omake_highlight_ == 14) {
+            play_se(-1, 9107, false, 255);
+            close_omake_screen();
+        }
+    }
+
+    void handle_cg_gallery_input(const SDL_Event& event)
+    {
+        if (transition_) {
+            return;
+        }
+        if (omake_cg_view_) {
+            if (omake_cg_phase_ != OmakeCgPhase::viewing) {
+                return;
+            }
+            const bool cancel = event.type == SDL_EVENT_KEY_DOWN
+                    && event.key.key == SDLK_ESCAPE
+                || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                    && event.button.button == SDL_BUTTON_RIGHT;
+            const bool advance = event.type == SDL_EVENT_KEY_DOWN
+                    && (event.key.key == SDLK_RETURN
+                        || event.key.key == SDLK_SPACE
+                        || event.key.key == SDLK_RIGHT)
+                || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                    && event.button.button == SDL_BUTTON_LEFT;
+            if (cancel) {
+                omake_cg_phase_ = OmakeCgPhase::closing;
+                omake_cg_phase_started_ = std::chrono::steady_clock::now();
+                play_se(-1, 9107, false, 255);
+            } else if (advance) {
+                const auto& entry =
+                    omake_cg_entries_.at(*omake_cg_view_);
+                float height = 0.0f;
+                SDL_GetTextureSize(omake_cg_full_.get(), nullptr, &height);
+                if (height > 600.0f) {
+                    omake_cg_phase_ = omake_cg_tall_scrolled_
+                        ? OmakeCgPhase::closing
+                        : OmakeCgPhase::scrolling;
+                    omake_cg_phase_started_ =
+                        std::chrono::steady_clock::now();
+                    play_se(
+                        -1, omake_cg_tall_scrolled_ ? 9107 : 9104,
+                        false, 255);
+                    return;
+                }
+                ++omake_cg_variant_;
+                if (omake_cg_variant_
+                    >= static_cast<int>(entry.variants.size())) {
+                    omake_cg_phase_ = OmakeCgPhase::closing;
+                    omake_cg_phase_started_ =
+                        std::chrono::steady_clock::now();
+                    play_se(-1, 9107, false, 255);
+                } else {
+                    omake_cg_tall_scrolled_ = false;
+                    omake_cg_previous_full_ = std::move(omake_cg_full_);
+                    omake_cg_full_ = load_texture(
+                        renderer_, graphics_,
+                        std::format(
+                            "{}{:06d}.tga", entry.hcg ? 'h' : 'v',
+                            entry.variants[omake_cg_variant_]));
+                    omake_cg_phase_ = OmakeCgPhase::changing;
+                    omake_cg_phase_started_ =
+                        std::chrono::steady_clock::now();
+                    play_se(-1, 9104, false, 255);
+                }
+            }
+            return;
+        }
+        const int previous = omake_highlight_;
+        if (event.type == SDL_EVENT_KEY_DOWN) {
+            if (event.key.key == SDLK_ESCAPE) {
+                omake_highlight_ = 14;
+                activate_cg_gallery_item();
+                return;
+            }
+            if (event.key.key == SDLK_LEFT) {
+                if (omake_highlight_ < 12) {
+                    omake_highlight_ = std::max(0, omake_highlight_ - 1);
+                } else if (omake_highlight_ == 13) {
+                    omake_highlight_ = 12;
+                }
+            } else if (event.key.key == SDLK_RIGHT) {
+                if (omake_highlight_ < 12) {
+                    omake_highlight_ = std::min(11, omake_highlight_ + 1);
+                } else if (omake_highlight_ == 12) {
+                    omake_highlight_ = 13;
+                }
+            } else if (event.key.key == SDLK_UP) {
+                if (omake_highlight_ == 14) {
+                    omake_highlight_ = 11;
+                } else if (omake_highlight_ < 4) {
+                    omake_highlight_ = omake_highlight_ < 3 ? 12 : 13;
+                } else if (omake_highlight_ < 12) {
+                    omake_highlight_ -= 4;
+                }
+            } else if (event.key.key == SDLK_DOWN) {
+                if (omake_highlight_ == 12) {
+                    omake_highlight_ = 2;
+                } else if (omake_highlight_ == 13) {
+                    omake_highlight_ = 3;
+                } else if (omake_highlight_ >= 8
+                           && omake_highlight_ < 12) {
+                    omake_highlight_ = 14;
+                } else if (omake_highlight_ < 8) {
+                    omake_highlight_ += 4;
+                }
+            } else if (event.key.key == SDLK_RETURN
+                       || event.key.key == SDLK_SPACE) {
+                activate_cg_gallery_item();
+            }
+        } else if (event.type == SDL_EVENT_MOUSE_MOTION
+                   || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            const float x = event.type == SDL_EVENT_MOUSE_MOTION
+                ? event.motion.x : event.button.x;
+            const float y = event.type == SDL_EVENT_MOUSE_MOTION
+                ? event.motion.y : event.button.y;
+            for (int slot = 0; slot < 12; ++slot) {
+                const SDL_FRect rectangle{
+                    55.0f + 177.0f * (slot % 4),
+                    114.0f + 128.0f * (slot / 4), 160.0f, 120.0f};
+                if (x >= rectangle.x && x < rectangle.x + rectangle.w
+                    && y >= rectangle.y && y < rectangle.y + rectangle.h) {
+                    omake_highlight_ = slot;
+                }
+            }
+            if (x >= 190.0f && x < 320.0f && y >= 72.0f && y < 104.0f) {
+                omake_highlight_ = 12;
+            } else if (x >= 482.0f && x < 612.0f
+                       && y >= 72.0f && y < 104.0f) {
+                omake_highlight_ = 13;
+            } else if (x >= 306.0f && x < 494.0f
+                       && y >= 496.0f && y < 528.0f) {
+                omake_highlight_ = 14;
+            }
+            if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                && event.button.button == SDL_BUTTON_LEFT) {
+                activate_cg_gallery_item();
+            }
+        }
+        if (previous != omake_highlight_) {
+            play_se(-1, 9108, false, 255);
+        }
+    }
+
+    void activate_music_room_item()
+    {
+        if (omake_highlight_ == 40) {
+            play_se(-1, 9107, false, 255);
+            close_omake_screen();
+            return;
+        }
+        if (omake_highlight_ < 0 || omake_highlight_ >= 40
+            || runtime_.game_flag(128 + omake_highlight_) == 0) {
+            return;
+        }
+        play_se(-1, 9104, false, 255);
+        if (omake_music_playing_slot_ == omake_highlight_) {
+            bgm_.fade_to(0.0f, std::chrono::seconds(1), true);
+            bgm_track_ = -1;
+            omake_music_playing_slot_ = -1;
+        } else {
+            omake_music_playing_slot_ = omake_highlight_;
+            play_bgm(
+                music_room_tracks[omake_music_playing_slot_], true, 255);
+        }
+    }
+
+    void handle_music_room_input(const SDL_Event& event)
+    {
+        if (transition_) {
+            return;
+        }
+        const int previous = omake_highlight_;
+        if (event.type == SDL_EVENT_KEY_DOWN) {
+            if (event.key.key == SDLK_ESCAPE) {
+                omake_highlight_ = 40;
+                activate_music_room_item();
+                return;
+            }
+            if (event.key.key == SDLK_UP && omake_highlight_ < 40) {
+                omake_highlight_ = std::max(0, omake_highlight_ - 1);
+            } else if (event.key.key == SDLK_DOWN
+                       && omake_highlight_ < 40) {
+                omake_highlight_ = std::min(39, omake_highlight_ + 1);
+            } else if (event.key.key == SDLK_LEFT) {
+                if (omake_highlight_ == 40) {
+                    omake_highlight_ = 39;
+                } else {
+                    omake_highlight_ = std::max(0, omake_highlight_ - 10);
+                }
+            } else if (event.key.key == SDLK_RIGHT) {
+                omake_highlight_ =
+                    omake_highlight_ >= 30 ? 40 : omake_highlight_ + 10;
+            } else if (event.key.key == SDLK_RETURN
+                       || event.key.key == SDLK_SPACE) {
+                activate_music_room_item();
+            }
+        } else if (event.type == SDL_EVENT_MOUSE_MOTION
+                   || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            const float x = event.type == SDL_EVENT_MOUSE_MOTION
+                ? event.motion.x : event.button.x;
+            const float y = event.type == SDL_EVENT_MOUSE_MOTION
+                ? event.motion.y : event.button.y;
+            for (int column = 0; column < 4; ++column) {
+                for (int row = 0; row < 10; ++row) {
+                    const SDL_FRect rectangle{
+                        static_cast<float>(20 + column * 192),
+                        static_cast<float>(160 + row * 32), 184.0f, 28.0f};
+                    if (x >= rectangle.x && x < rectangle.x + rectangle.w
+                        && y >= rectangle.y && y < rectangle.y + rectangle.h) {
+                        omake_highlight_ = column * 10 + row;
+                    }
+                }
+            }
+            if (x >= 306.0f && x < 494.0f
+                && y >= 496.0f && y < 528.0f) {
+                omake_highlight_ = 40;
+            }
+            if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                && event.button.button == SDL_BUTTON_LEFT) {
+                activate_music_room_item();
+            }
+        }
+        if (previous != omake_highlight_) {
+            play_se(-1, 9108, false, 255);
+        }
+    }
+
+    void start_replay(int slot)
+    {
+        bgm_.stop();
+        bgm_track_ = -1;
+        message_ = th2::Message{};
+        backlog_.clear();
+        clear_characters();
+        background_.reset();
+        bg_scene_ = -1;
+        runtime_.load(std::format(
+            "8000{:05d}.SDT", replay_scripts.at(slot)));
+        ui_mode_ = UiMode::game;
+        title_extras_ = false;
+        advance();
+    }
+
+    void activate_replay_gallery_item()
+    {
+        if (omake_highlight_ == 14) {
+            play_se(-1, 9107, false, 255);
+            close_omake_screen();
+            return;
+        }
+        if (omake_highlight_ < 0 || omake_highlight_ >= 9
+            || !config_.unlocked_replays.contains(
+                replay_flags[omake_highlight_])) {
+            return;
+        }
+        play_se(-1, 9104, false, 255);
+        start_replay(omake_highlight_);
+    }
+
+    void handle_replay_gallery_input(const SDL_Event& event)
+    {
+        if (transition_) {
+            return;
+        }
+        const int previous = omake_highlight_;
+        if (event.type == SDL_EVENT_KEY_DOWN) {
+            if (event.key.key == SDLK_ESCAPE) {
+                omake_highlight_ = 14;
+                activate_replay_gallery_item();
+                return;
+            }
+            if (event.key.key == SDLK_LEFT && omake_highlight_ < 9) {
+                omake_highlight_ = std::max(0, omake_highlight_ - 1);
+            } else if (event.key.key == SDLK_RIGHT
+                       && omake_highlight_ < 9) {
+                omake_highlight_ = std::min(8, omake_highlight_ + 1);
+            } else if (event.key.key == SDLK_UP) {
+                if (omake_highlight_ == 14) {
+                    omake_highlight_ = 7;
+                } else if (omake_highlight_ >= 4) {
+                    omake_highlight_ -= 4;
+                }
+            } else if (event.key.key == SDLK_DOWN) {
+                if (omake_highlight_ >= 4 && omake_highlight_ < 9) {
+                    omake_highlight_ = 14;
+                } else if (omake_highlight_ < 4) {
+                    omake_highlight_ += 4;
+                }
+            } else if (event.key.key == SDLK_RETURN
+                       || event.key.key == SDLK_SPACE) {
+                activate_replay_gallery_item();
+            }
+        } else if (event.type == SDL_EVENT_MOUSE_MOTION
+                   || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            const float x = event.type == SDL_EVENT_MOUSE_MOTION
+                ? event.motion.x : event.button.x;
+            const float y = event.type == SDL_EVENT_MOUSE_MOTION
+                ? event.motion.y : event.button.y;
+            for (int slot = 0; slot < 9; ++slot) {
+                const SDL_FRect rectangle{
+                    55.0f + 177.0f * (slot % 4),
+                    114.0f + 128.0f * (slot / 4), 160.0f, 120.0f};
+                if (x >= rectangle.x && x < rectangle.x + rectangle.w
+                    && y >= rectangle.y && y < rectangle.y + rectangle.h) {
+                    omake_highlight_ = slot;
+                }
+            }
+            if (x >= 306.0f && x < 494.0f
+                && y >= 496.0f && y < 528.0f) {
+                omake_highlight_ = 14;
+            }
+            if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                && event.button.button == SDL_BUTTON_LEFT) {
+                activate_replay_gallery_item();
+            }
+        }
+        if (previous != omake_highlight_) {
             play_se(-1, 9108, false, 255);
         }
     }
@@ -6386,12 +7392,31 @@ private:
         }
         if (ui_mode_ == UiMode::title) {
             draw_title();
-            if (!transition_) {
-                begin_overlay();
-    
-                present_frame();
-                return;
-            }
+            draw_active_transition();
+            begin_overlay();
+            present_frame();
+            return;
+        }
+        if (ui_mode_ == UiMode::cg_gallery) {
+            draw_cg_gallery();
+            draw_active_transition();
+            begin_overlay();
+            present_frame();
+            return;
+        }
+        if (ui_mode_ == UiMode::music_room) {
+            draw_music_room();
+            draw_active_transition();
+            begin_overlay();
+            present_frame();
+            return;
+        }
+        if (ui_mode_ == UiMode::replay_gallery) {
+            draw_replay_gallery();
+            draw_active_transition();
+            begin_overlay();
+            present_frame();
+            return;
         }
         if (ui_mode_ == UiMode::map) {
             draw_map(false);
@@ -6556,44 +7581,7 @@ private:
                 SDL_RenderFillRect(renderer_, &game_area);
             }
         }
-        if (transition_) {
-            const auto elapsed = std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - transition_->started);
-            const float progress = std::clamp(
-                static_cast<float>(
-                    elapsed.count() * 60.0 / transition_->frames),
-                0.0f, 1.0f);
-            if (transition_->type >= 0x80) {
-                draw_pattern_transition(progress);
-            } else if (transition_->type == 0) {
-                if (progress < 0.5f) {
-                    SDL_SetTextureAlphaModFloat(
-                        transition_->previous.get(), 1.0f);
-                    SDL_RenderTexture(
-                        renderer_, transition_->previous.get(), nullptr, nullptr);
-                }
-                const float midpoint = progress < 0.5f
-                    ? progress * 2.0f : (1.0f - progress) * 2.0f;
-                SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-                SDL_SetRenderDrawColor(
-                    renderer_, 0, 0, 0,
-                    static_cast<Uint8>(
-                        std::clamp(midpoint, 0.0f, 1.0f) * 255.0f));
-                SDL_RenderFillRect(renderer_, nullptr);
-            } else if ((transition_->type >= 2 && transition_->type <= 10)
-                       || transition_->type == 21) {
-                draw_pixel_transition(progress);
-            } else if (transition_->type >= 11
-                       && transition_->type <= 24) {
-                draw_geometric_transition(progress);
-            } else {
-                SDL_SetTextureAlphaModFloat(
-                    transition_->previous.get(), 1.0f - progress);
-                SDL_RenderTexture(
-                    renderer_, transition_->previous.get(), nullptr, nullptr);
-            }
-            dump_transition_frame(progress);
-        }
+        draw_active_transition();
         if (shake_art) {
             SDL_SetRenderTarget(renderer_, art_target);
             SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
