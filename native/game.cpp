@@ -637,6 +637,8 @@ public:
     }
 
 private:
+    static constexpr std::uint32_t save_version_ = 23;
+
     enum class AudioWaitKind {
         bgm,
         sound_effect,
@@ -1211,6 +1213,7 @@ private:
     bool confirm_return_title_ = false;
     bool name_input_open_ = false;
     std::string name_error_;
+    std::string load_error_;
     th2::PlayerName default_player_name_;
     std::array<char, 64> name_family_{};
     std::array<char, 64> name_given_{};
@@ -4187,14 +4190,14 @@ private:
         save_preview(slot);
     }
 
-    void load(int slot)
+    bool load(int slot)
     {
         const auto path = save_path(slot);
         std::ifstream file(path, std::ios::binary);
         if (!file) {
-            return;
+            return false;
         }
-        load_body(file);
+        return load_body(file);
     }
 
     std::filesystem::path save_path(int slot) const
@@ -4286,7 +4289,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 23);  // native version
+        write_u32(out, save_version_);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -4516,11 +4519,11 @@ private:
         }
     }
 
-    void load_body(std::istream& in)
+    bool load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 23) {
-            return;
+        if (version != save_version_) {
+            return false;
         }
 
         reset_play_state();
@@ -4804,6 +4807,7 @@ private:
         config_.player_name.nickname = read_name();
         config_.player_name.nickname_reading = read_name();
         th2::save_config(config_path_, config_);
+        return true;
     }
 
     void write_u32(std::ostream& out, std::uint32_t value) const
@@ -5358,6 +5362,7 @@ private:
         ui_mode_ = mode;
         save_confirm_slot_ = -1;
         save_hover_ = -1;
+        load_error_.clear();
         refresh_save_page();
         if (newest_save_slot_ >= 0) {
             save_page_ = newest_save_slot_ / 10;
@@ -5368,6 +5373,7 @@ private:
     void close_save_load()
     {
         save_confirm_slot_ = -1;
+        load_error_.clear();
         begin_transition(1, 12, 128, false);
         ui_mode_ = save_return_mode_;
     }
@@ -6803,6 +6809,11 @@ private:
                     &no_dst);
             }
         }
+
+        if (!load_error_.empty()) {
+            font_.draw(renderer_, 21.0f, 571.0f, load_error_, 0, 0, 0);
+            font_.draw(renderer_, 20.0f, 570.0f, load_error_, 255, 80, 80);
+        }
     }
 
     int save_load_hit(float x, float y) const
@@ -6827,6 +6838,7 @@ private:
 
     void activate_save_load_item(int item)
     {
+        load_error_.clear();
         if (item >= 0 && item < 10) {
             const int slot = save_page_ * 10 + item;
             if (ui_mode_ == UiMode::load && !visible_saves_[item].exists) {
@@ -6853,10 +6865,11 @@ private:
             if (ui_mode_ == UiMode::save) {
                 save(slot);
                 close_save_load();
-            } else {
-                load(slot);
+            } else if (load(slot)) {
                 save_confirm_slot_ = -1;
                 ui_mode_ = UiMode::game;
+            } else {
+                load_error_ = "Incompatible save version.";
             }
         } else if (item == 14) {
             play_se(-1, 9104, false, 255);
