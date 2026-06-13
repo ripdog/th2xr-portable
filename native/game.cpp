@@ -3301,28 +3301,48 @@ private:
         if (character >= 10 && character != 28) {
             character = 99;
         }
-        const int volume = number(event, 1) < 0 ? 255 : number(event, 1);
+        const int volume = number(event, 1) < 0
+            ? (event.instruction.name == "VV" ? 256 : 255)
+            : number(event, 1);
         const bool loop = number(event, 2) > 0;
         const int voice = number(event, 3);
         const int channel = number(event, 4) < 0 ? 0 : number(event, 4);
+        if (channel < 0
+            || static_cast<std::size_t>(channel) >= voice_channels_.size()) {
+            return;
+        }
         int scenario = scenario_number(runtime_.script_name());
         if (vi_event_voice_no_all_ >= 0) {
             scenario = vi_event_voice_no_all_;
         } else if (vi_event_voice_no_ >= 0) {
             scenario = scenario / 100 * 100 + vi_event_voice_no_;
         }
-        auto name = std::format(
+        const auto standard_name = std::format(
             "K{:09d}_{:03d}{:03d}.OGG", scenario, voice, character);
-        if (channel >= 0 && static_cast<std::size_t>(channel) < voice_channels_.size()) {
-            voice_channels_[channel].play(
-                load_audio(voice_archive_, name), loop,
-                voice_gain(volume, character));
-            voice_sound_[channel] = voice;
-            voice_character_[channel] = character;
-            voice_scenario_[channel] = scenario;
-            voice_volume_[channel] = volume;
-            voice_loop_[channel] = loop;
+        auto name = standard_name;
+        auto& voice_channel = voice_channels_[channel];
+        voice_channel.stop();
+        if (!th2::uses_default_voice_name(
+                config_.player_name, default_player_name_)) {
+            const auto alternate_name = std::format(
+                "K{:09d}_{:03d}{:03d}A.OGG",
+                scenario, voice, character);
+            if (voice_archive_.find(alternate_name)) {
+                name = alternate_name;
+            } else if (event.instruction.name == "VC") {
+                voice_sound_[channel] = -1;
+                voice_loop_[channel] = false;
+                return;
+            }
         }
+        voice_channel.play(
+            load_audio(voice_archive_, name), loop,
+            voice_gain(volume, character));
+        voice_sound_[channel] = voice;
+        voice_character_[channel] = character;
+        voice_scenario_[channel] = scenario;
+        voice_volume_[channel] = volume;
+        voice_loop_[channel] = loop;
     }
 
     void update_audio()

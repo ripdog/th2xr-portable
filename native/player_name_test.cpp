@@ -34,13 +34,22 @@ int main(int argc, char** argv)
         || defaults.nickname != "Taka") {
         return 2;
     }
+    auto changed = defaults;
+    changed.nickname_reading = "TAKA";
+    if (!th2::uses_default_voice_name(changed, defaults)) {
+        return 3;
+    }
+    changed.nickname = "Tak";
+    if (th2::uses_default_voice_name(changed, defaults)) {
+        return 4;
+    }
     if (argc > 1) {
         const auto patched = th2::load_default_player_name(argv[1]);
         if (patched.family != "Kouno" || patched.given != "Takaaki"
             || patched.nickname != "Taka") {
             std::cerr << patched.family << '/' << patched.given << '/'
                       << patched.nickname << '\n';
-            return 3;
+            return 5;
         }
     }
     return 0;

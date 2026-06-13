@@ -80,6 +80,16 @@ PlayerName load_default_player_name(const std::filesystem::path& executable)
     return result;
 }
 
+bool uses_default_voice_name(
+    const PlayerName& name, const PlayerName& default_name)
+{
+    return name.family == default_name.family
+        && name.given == default_name.given
+        && name.family_reading == default_name.family_reading
+        && name.given_reading == default_name.given_reading
+        && name.nickname == default_name.nickname;
+}
+
 std::string substitute_player_name(
     std::string_view source, const PlayerName& name)
 {
