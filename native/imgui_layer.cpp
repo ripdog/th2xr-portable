@@ -152,14 +152,10 @@ ImGuiLayer::~ImGuiLayer()
 void ImGuiLayer::process_event(const SDL_Event& event)
 {
     auto& io = ImGui::GetIO();
-    // SDL event coordinates are in window pixels; ImGui's logical coordinate
-    // system is the full window divided by the display scale.
-    auto to_imgui = [&](float x, float y) {
-        return std::pair{x / display_scale_, y / display_scale_};
-    };
+    // SDL mouse event coordinates are in window points, which matches the
+    // ImGui logical coordinate system set in new_frame().
     if (event.type == SDL_EVENT_MOUSE_MOTION) {
-        const auto [x, y] = to_imgui(event.motion.x, event.motion.y);
-        io.AddMousePosEvent(x, y);
+        io.AddMousePosEvent(event.motion.x, event.motion.y);
     } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
                || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
         int button = -1;
@@ -171,9 +167,7 @@ void ImGuiLayer::process_event(const SDL_Event& event)
                 button, event.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
         }
     } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
-        const auto [x, y] =
-            to_imgui(event.wheel.mouse_x, event.wheel.mouse_y);
-        io.AddMousePosEvent(x, y);
+        io.AddMousePosEvent(event.wheel.mouse_x, event.wheel.mouse_y);
         io.AddMouseWheelEvent(event.wheel.x, event.wheel.y);
     } else if (event.type == SDL_EVENT_TEXT_INPUT) {
         io.AddInputCharactersUTF8(event.text.text);
@@ -206,16 +200,16 @@ void ImGuiLayer::rebuild_font_atlas(float display_scale)
     }
     last_font_scale_ = display_scale;
 }
-
 void ImGuiLayer::new_frame(
     int window_width, int window_height, float display_scale)
 {
     auto& io = ImGui::GetIO();
     display_scale_ = display_scale > 0.0f ? display_scale : 1.0f;
-    // ImGui's logical canvas covers the full window; the display scale keeps
-    // the UI elements at a comfortable OS-DPI size.
+    // ImGui's logical canvas covers the full window in points; the display
+    // scale keeps the UI elements at a comfortable OS-DPI size when rendered.
     io.DisplaySize = ImVec2(
-        window_width / display_scale_, window_height / display_scale_);
+        static_cast<float>(window_width),
+        static_cast<float>(window_height));
     io.DisplayFramebufferScale = ImVec2(display_scale_, display_scale_);
 
     // Rebuild the font atlas when the scale changes so text stays crisp

@@ -6302,7 +6302,6 @@ private:
             SDL_RenderFillRect(renderer_, nullptr);
         }
         draw_script_position();
-        imgui_->render();
         present_frame();
     }
 };
