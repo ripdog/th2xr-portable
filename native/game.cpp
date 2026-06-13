@@ -126,7 +126,8 @@ Texture load_toned_texture(
     const th2::Archive& image_archive,
     std::string_view image_name,
     const th2::Archive& curve_archive,
-    const std::vector<ToneCurveSpec>& curves)
+    const std::vector<ToneCurveSpec>& curves,
+    Surface* pixels = nullptr)
 {
     const auto* image = image_archive.find(image_name);
     if (!image) {
@@ -148,8 +149,17 @@ Texture load_toned_texture(
         th2::apply_tone_curve(
             surface.get(), curve_archive.read(*entry), curve.vividness);
     }
+    SDL_Surface* texture_surface = surface.get();
+    if (pixels) {
+        pixels->reset(
+            SDL_ConvertSurface(surface.get(), SDL_PIXELFORMAT_RGBA32));
+        if (!*pixels) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        texture_surface = pixels->get();
+    }
     SDL_Texture* texture =
-        SDL_CreateTextureFromSurface(renderer, surface.get());
+        SDL_CreateTextureFromSurface(renderer, texture_surface);
     if (!texture) {
         throw std::runtime_error(SDL_GetError());
     }
@@ -870,6 +880,7 @@ private:
     BackgroundView background_view_;
     std::optional<BackgroundScroll> background_scroll_;
     std::array<Texture, 32> overlays_{};
+    std::array<Surface, 32> overlay_pixels_{};
     std::array<OverlayState, 32> overlay_states_{};
     th2::Characters characters_;
     std::array<CharacterTexture, 32> character_textures_{};
@@ -3434,7 +3445,8 @@ private:
             renderer_, source, name, graphics_,
             tone_type == 1
                 ? character_tone_curves()
-                : background_tone_curves());
+                : background_tone_curves(),
+            &overlay_pixels_[slot]);
         auto& state = overlay_states_[slot];
         state = {};
         state.name = std::move(name);
@@ -3447,6 +3459,39 @@ private:
         state.destination_height = static_cast<int>(height * 448.0f / 600.0f);
         state.source_width = state.destination_width;
         state.source_height = state.destination_height;
+    }
+
+    void apply_overlay_brightness(std::size_t slot)
+    {
+        const auto& source = overlay_pixels_[slot];
+        if (!source) {
+            return;
+        }
+        Surface adjusted(
+            SDL_ConvertSurface(source.get(), SDL_PIXELFORMAT_RGBA32));
+        if (!adjusted) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        const auto& state = overlay_states_[slot];
+        const std::array brightness{
+            state.red, state.green, state.blue};
+        auto* pixels = static_cast<std::uint8_t*>(adjusted->pixels);
+        for (int y = 0; y < adjusted->h; ++y) {
+            auto* row = pixels + static_cast<std::size_t>(y) * adjusted->pitch;
+            for (int x = 0; x < adjusted->w; ++x) {
+                auto* pixel = row + static_cast<std::size_t>(x) * 4;
+                for (int channel = 0; channel < 3; ++channel) {
+                    const int value = pixel[channel];
+                    const int light = brightness[channel];
+                    pixel[channel] = static_cast<std::uint8_t>(
+                        light < 128
+                            ? value * light / 128
+                            : value
+                                + (255 - value) * (light - 128) / 128);
+                }
+            }
+        }
+        overlays_[slot] = texture_from_surface(adjusted.get());
     }
 
     bool handle(const th2::Event& event)
@@ -3599,11 +3644,13 @@ private:
         } else if (name == "ResetBmp") {
             if (const auto slot = overlay_index(number(event, 0))) {
                 overlays_[*slot].reset();
+                overlay_pixels_[*slot].reset();
                 overlay_states_[*slot] = {};
             }
         } else if (name == "ResetBmpAll") {
             for (std::size_t i = 0; i < overlays_.size(); ++i) {
                 overlays_[i].reset();
+                overlay_pixels_[i].reset();
                 overlay_states_[i] = {};
             }
         } else if (name == "SetBmpDisp") {
@@ -3632,6 +3679,7 @@ private:
                     ? state.red : std::clamp(number(event, 2), 0, 255);
                 state.blue = number(event, 3) < 0
                     ? state.red : std::clamp(number(event, 3), 0, 255);
+                apply_overlay_brightness(*slot);
             }
         } else if (name == "SetBmpMove") {
             if (const auto slot = overlay_index(number(event, 0))) {
@@ -3915,6 +3963,7 @@ private:
         } else if (name == "LoadScript") {
             for (std::size_t i = 0; i < overlays_.size(); ++i) {
                 overlays_[i].reset();
+                overlay_pixels_[i].reset();
                 overlay_states_[i] = {};
             }
             runtime_.load(text(event, 0));
@@ -4632,6 +4681,7 @@ private:
         // Overlays
         for (std::size_t i = 0; i < overlays_.size(); ++i) {
             overlays_[i].reset();
+            overlay_pixels_[i].reset();
             overlay_states_[i] = {};
         }
         const auto overlay_count = read_u32(in);
@@ -4665,6 +4715,7 @@ private:
             if (slot < overlays_.size()) {
                 load_overlay(slot, name, archive, state.tone_type);
                 overlay_states_[slot] = std::move(state);
+                apply_overlay_brightness(slot);
             }
         }
 
@@ -7282,11 +7333,6 @@ private:
         }
         const auto& state = overlay_states_[slot];
         auto* texture = overlays_[slot].get();
-        SDL_SetTextureColorMod(
-            texture,
-            static_cast<Uint8>(std::clamp(state.red * 2, 0, 255)),
-            static_cast<Uint8>(std::clamp(state.green * 2, 0, 255)),
-            static_cast<Uint8>(std::clamp(state.blue * 2, 0, 255)));
         const int alpha = state.parameter == 11
             ? std::clamp(state.parameter_value, 0, 256) * 255 / 256
             : 255;
