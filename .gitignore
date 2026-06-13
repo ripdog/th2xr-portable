@@ -1,6 +1,9 @@
 /build/
 /game-data/
-
+/debug/
+/logs/
+/.agents/skills
+toheart2-config.ini
 
 # Save files
 save_*.sav
