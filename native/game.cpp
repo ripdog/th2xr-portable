@@ -4169,6 +4169,13 @@ private:
 
     void save(int slot)
     {
+        if (replay_mode_ || wake_time_ || audio_wait_ || transition_
+            || background_fade_ || screen_flash_
+            || (shake_ && shake_->frames > 0)
+            || background_scroll_ || character_animation_active()
+            || clock_state_ || calendar_state_ || movie_) {
+            return;
+        }
         std::filesystem::create_directories("save");
         const auto path = save_path(slot);
         std::ofstream file(path, std::ios::binary);
@@ -4279,7 +4286,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 22);  // native version
+        write_u32(out, 23);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -4415,62 +4422,20 @@ private:
         write_i32(out, bgm_loop_ ? 1 : 0);
         write_i32(out, bgm_volume_);
 
-        // SE transient
-        std::uint32_t se_count = 0;
-        for (const auto& ch : transient_se_) {
-            if (ch.playing()) {
-                ++se_count;
-            }
-        }
-        write_u32(out, se_count);
-
-        // SE channels - full state for each active channel
+        // The original restores only looping numbered SE channels.
         std::uint32_t se_ch_count = 0;
         for (std::size_t i = 0; i < se_channels_.size(); ++i) {
-            if (se_channels_[i].playing()) {
+            if (se_channels_[i].playing() && se_loop_[i]) {
                 ++se_ch_count;
             }
         }
         write_u32(out, se_ch_count);
         for (std::size_t i = 0; i < se_channels_.size(); ++i) {
-            if (se_channels_[i].playing()) {
+            if (se_channels_[i].playing() && se_loop_[i]) {
                 write_u32(out, static_cast<std::uint32_t>(i));
                 write_i32(out, se_sound_[i]);
-                write_i32(out, se_loop_[i] ? 1 : 0);
                 write_i32(out, se_volume_[i]);
             }
-        }
-
-        // Voice channels - full state for each active channel
-        std::uint32_t voice_count = 0;
-        for (std::size_t i = 0; i < voice_channels_.size(); ++i) {
-            if (voice_channels_[i].playing()) {
-                ++voice_count;
-            }
-        }
-        write_u32(out, voice_count);
-        for (std::size_t i = 0; i < voice_channels_.size(); ++i) {
-            if (voice_channels_[i].playing()) {
-                write_u32(out, static_cast<std::uint32_t>(i));
-                write_i32(out, voice_sound_[i]);
-                write_i32(out, voice_character_[i]);
-                write_i32(out, voice_scenario_[i]);
-                write_i32(out, voice_volume_[i]);
-                write_i32(out, voice_loop_[i] ? 1 : 0);
-            }
-        }
-
-        // VM wait state
-        write_i32(out, wake_time_.has_value() ? 1 : 0);
-        if (wake_time_) {
-            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-                *wake_time_ - std::chrono::steady_clock::now()).count();
-            write_i64(out, remaining > 0 ? remaining : 0);
-        }
-        write_i32(out, audio_wait_.has_value() ? 1 : 0);
-        if (audio_wait_) {
-            write_i32(out, static_cast<int>(audio_wait_->kind));
-            write_u32(out, static_cast<std::uint32_t>(audio_wait_->channel));
         }
 
         // Message state - full segments for correct text-block position
@@ -4554,18 +4519,11 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 22) {
+        if (version != 23) {
             return;
         }
 
-        // Stop all audio before restore
-        bgm_.stop();
-        for (auto& ch : transient_se_) { ch.stop(); }
-        for (auto& ch : se_channels_) { ch.stop(); }
-        for (auto& ch : voice_channels_) { ch.stop(); }
-        audio_wait_.reset();
-        wake_time_.reset();
-        bgm_track_ = -1;
+        reset_play_state();
         ui_mode_ = UiMode::game;
         message_visible_ = true;
 
@@ -4734,59 +4692,15 @@ private:
             play_bgm(bgm_track_, bgm_loop_, bgm_volume_);
         }
 
-        // SE transient
-        read_u32(in);
-
-        // SE channels - restore active channels
+        // SE channels - restore looping channels
         const auto se_ch_count = read_u32(in);
         for (std::uint32_t i = 0; i < se_ch_count; ++i) {
             const auto channel = static_cast<std::size_t>(read_u32(in));
             const auto sound = read_i32(in);
-            const auto loop = read_i32(in) != 0;
             const auto volume = read_i32(in);
             if (channel < se_channels_.size() && sound >= 0) {
-                play_se(static_cast<int>(channel), sound, loop, volume);
+                play_se(static_cast<int>(channel), sound, true, volume);
             }
-        }
-
-        // Voice channels - restore active channels
-        const auto voice_count = read_u32(in);
-        for (std::uint32_t i = 0; i < voice_count; ++i) {
-            const auto channel = static_cast<std::size_t>(read_u32(in));
-            const auto sound = read_i32(in);
-            const auto character = read_i32(in);
-            const auto scenario = read_i32(in);
-            const auto volume = read_i32(in);
-            const auto loop = read_i32(in) != 0;
-            if (channel < voice_channels_.size()) {
-                const auto name = std::format(
-                    "K{:09d}_{:03d}{:03d}.OGG", scenario, sound, character);
-                voice_channels_[channel].play(
-                    load_audio(voice_archive_, name), loop,
-                    voice_gain(volume, character));
-                voice_sound_[channel] = sound;
-                voice_character_[channel] = character;
-                voice_scenario_[channel] = scenario;
-                voice_volume_[channel] = volume;
-                voice_loop_[channel] = loop;
-            }
-        }
-
-        // VM wait state
-        if (read_i32(in)) {
-            const auto remaining = read_i64(in);
-            wake_time_ = std::chrono::steady_clock::now()
-                + std::chrono::milliseconds(remaining);
-        } else {
-            wake_time_.reset();
-        }
-        if (read_i32(in)) {
-            const auto kind_int = read_i32(in);
-            const auto channel = static_cast<std::size_t>(read_u32(in));
-            audio_wait_ = AudioWait{
-                static_cast<AudioWaitKind>(kind_int), channel};
-        } else {
-            audio_wait_.reset();
         }
 
         // Message state - restore full segments
@@ -4847,59 +4761,49 @@ private:
 
         backlog_.clear();
         backlog_depth_ = 0;
-        if (version >= 2) {
-            const auto backlog_count = read_u32(in);
-            backlog_.reserve(backlog_count);
-            for (std::uint32_t i = 0; i < backlog_count; ++i) {
-                const auto size = read_u32(in);
-                std::string history_text(size, '\0');
-                if (size > 0) {
-                    in.read(history_text.data(),
-                            static_cast<std::streamsize>(size));
-                }
-                backlog_.push_back({std::move(history_text)});
+        const auto backlog_count = read_u32(in);
+        backlog_.reserve(backlog_count);
+        for (std::uint32_t i = 0; i < backlog_count; ++i) {
+            const auto size = read_u32(in);
+            std::string history_text(size, '\0');
+            if (size > 0) {
+                in.read(history_text.data(),
+                        static_cast<std::streamsize>(size));
             }
-            backlog_depth_ = std::clamp(
-                read_i32(in), 0, static_cast<int>(backlog_.size()));
-            if (read_i32(in) != 0) {
-                ui_mode_ = UiMode::backlog;
-            }
+            backlog_.push_back({std::move(history_text)});
         }
-        message_ends_block_ = version >= 3 ? read_i32(in) != 0 : true;
-        current_line_key_.clear();
-        auto_mode_ = false;
-        skip_mode_ = false;
-        if (version >= 4) {
-            const auto key_size = read_u32(in);
-            current_line_key_.resize(key_size);
-            in.read(current_line_key_.data(),
-                    static_cast<std::streamsize>(key_size));
-            auto_mode_ = read_i32(in) != 0;
-            skip_mode_ = read_i32(in) != 0;
-            const auto read_count = read_u32(in);
-            for (std::uint32_t i = 0; i < read_count; ++i) {
-                const auto size = read_u32(in);
-                std::string key(size, '\0');
-                in.read(key.data(), static_cast<std::streamsize>(size));
-                config_.read_lines.insert(std::move(key));
-            }
-            th2::save_config(config_path_, config_);
+        backlog_depth_ = std::clamp(
+            read_i32(in), 0, static_cast<int>(backlog_.size()));
+        if (read_i32(in) != 0) {
+            ui_mode_ = UiMode::backlog;
         }
-        if (version >= 5) {
-            const auto read_name = [&]() {
-                const auto size = read_u32(in);
-                std::string value(size, '\0');
-                in.read(value.data(), static_cast<std::streamsize>(size));
-                return value;
-            };
-            config_.player_name.family = read_name();
-            config_.player_name.given = read_name();
-            config_.player_name.family_reading = read_name();
-            config_.player_name.given_reading = read_name();
-            config_.player_name.nickname = read_name();
-            config_.player_name.nickname_reading = read_name();
-            th2::save_config(config_path_, config_);
+        message_ends_block_ = read_i32(in) != 0;
+        const auto key_size = read_u32(in);
+        current_line_key_.resize(key_size);
+        in.read(current_line_key_.data(),
+                static_cast<std::streamsize>(key_size));
+        auto_mode_ = read_i32(in) != 0;
+        skip_mode_ = read_i32(in) != 0;
+        const auto read_count = read_u32(in);
+        for (std::uint32_t i = 0; i < read_count; ++i) {
+            const auto size = read_u32(in);
+            std::string key(size, '\0');
+            in.read(key.data(), static_cast<std::streamsize>(size));
+            config_.read_lines.insert(std::move(key));
         }
+        const auto read_name = [&]() {
+            const auto size = read_u32(in);
+            std::string value(size, '\0');
+            in.read(value.data(), static_cast<std::streamsize>(size));
+            return value;
+        };
+        config_.player_name.family = read_name();
+        config_.player_name.given = read_name();
+        config_.player_name.family_reading = read_name();
+        config_.player_name.given_reading = read_name();
+        config_.player_name.nickname = read_name();
+        config_.player_name.nickname_reading = read_name();
+        th2::save_config(config_path_, config_);
     }
 
     void write_u32(std::ostream& out, std::uint32_t value) const
