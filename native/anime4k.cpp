@@ -11,6 +11,19 @@ struct TextureDeleter {
     void operator()(SDL_Texture* texture) const { SDL_DestroyTexture(texture); }
 };
 
+SDL_FRect letterbox_rect(int output_width, int output_height)
+{
+    const float scale = std::min(
+        output_width / 800.0f, output_height / 600.0f);
+    const float width = 800.0f * scale;
+    const float height = 600.0f * scale;
+    return {
+        (output_width - width) / 2.0f,
+        (output_height - height) / 2.0f,
+        width,
+        height};
+}
+
 std::vector<std::uint8_t> read_file(const std::filesystem::path& path)
 {
     std::ifstream input(path, std::ios::binary);
@@ -100,11 +113,14 @@ struct Anime4K::Impl {
 
     void ensure_overlay()
     {
-        int width = 0;
-        int height = 0;
-        if (!SDL_GetRenderOutputSize(renderer, &width, &height)) {
+        int output_width = 0;
+        int output_height = 0;
+        if (!SDL_GetRenderOutputSize(renderer, &output_width, &output_height)) {
             throw std::runtime_error(SDL_GetError());
         }
+        const auto rect = letterbox_rect(output_width, output_height);
+        const int width = static_cast<int>(rect.w);
+        const int height = static_cast<int>(rect.h);
         if (overlay && width == overlay_width && height == overlay_height) {
             return;
         }
@@ -123,14 +139,21 @@ struct Anime4K::Impl {
     void present()
     {
         ensure_overlay();
+        int output_width = 0;
+        int output_height = 0;
+        if (!SDL_GetRenderOutputSize(renderer, &output_width, &output_height)) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        const auto destination = letterbox_rect(output_width, output_height);
+
         SDL_SetRenderScale(renderer, 1.0f, 1.0f);
         SDL_SetRenderTarget(renderer, nullptr);
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
         SDL_SetGPURenderState(renderer, states[0]);
-        SDL_RenderTexture(renderer, art.get(), nullptr, nullptr);
+        SDL_RenderTexture(renderer, art.get(), nullptr, &destination);
         SDL_SetGPURenderState(renderer, nullptr);
-        SDL_RenderTexture(renderer, overlay.get(), nullptr, nullptr);
+        SDL_RenderTexture(renderer, overlay.get(), nullptr, &destination);
     }
 };
 
@@ -141,6 +164,10 @@ Anime4K::Anime4K(
 }
 
 Anime4K::~Anime4K() = default;
+
+Anime4K::Anime4K(Anime4K&&) noexcept = default;
+
+Anime4K& Anime4K::operator=(Anime4K&&) noexcept = default;
 
 bool Anime4K::available() const
 {

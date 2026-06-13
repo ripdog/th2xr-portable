@@ -34,8 +34,6 @@ int main(int argc, char** argv)
         if (!window || !renderer) {
             throw std::runtime_error(SDL_GetError());
         }
-        SDL_SetRenderLogicalPresentation(
-            renderer, 800, 600, SDL_LOGICAL_PRESENTATION_LETTERBOX);
         th2::Anime4K anime4k(renderer, argv[1]);
         if (!anime4k.available()) {
             throw std::runtime_error("Anime4K unavailable");

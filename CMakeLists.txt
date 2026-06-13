@@ -151,6 +151,7 @@ add_executable(toheart2
     native/image.cpp
     native/imgui_layer.cpp
     native/message.cpp
+    native/upscaler.cpp
     native/video.cpp
 )
 set(ANIME4K_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders/anime4k")

@@ -1,6 +1,6 @@
-#include "anime4k.hpp"
 #include "archive.hpp"
 #include "audio.hpp"
+#include "upscaler.hpp"
 #include "character.hpp"
 #include "config.hpp"
 #include "font.hpp"
@@ -50,6 +50,43 @@ struct SurfaceDeleter {
     void operator()(SDL_Surface* surface) const { SDL_DestroySurface(surface); }
 };
 using Surface = std::unique_ptr<SDL_Surface, SurfaceDeleter>;
+
+// Convert window-coordinate mouse events to the fixed 800x600 logical
+// coordinate system used by the core game, applying 4:3 letterboxing.
+void convert_event_to_logical_coordinates(
+    SDL_Event& event, int window_width, int window_height)
+{
+    const float scale = std::min(
+        window_width / 800.0f, window_height / 600.0f);
+    const float logical_width = 800.0f * scale;
+    const float logical_height = 600.0f * scale;
+    const float offset_x = (window_width - logical_width) / 2.0f;
+    const float offset_y = (window_height - logical_height) / 2.0f;
+
+    auto convert = [&](float x, float y) {
+        return std::pair{(x - offset_x) / scale, (y - offset_y) / scale};
+    };
+
+    switch (event.type) {
+    case SDL_EVENT_MOUSE_MOTION:
+        std::tie(event.motion.x, event.motion.y) =
+            convert(event.motion.x, event.motion.y);
+        event.motion.xrel /= scale;
+        event.motion.yrel /= scale;
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        std::tie(event.button.x, event.button.y) =
+            convert(event.button.x, event.button.y);
+        break;
+    case SDL_EVENT_MOUSE_WHEEL:
+        std::tie(event.wheel.mouse_x, event.wheel.mouse_y) =
+            convert(event.wheel.mouse_x, event.wheel.mouse_y);
+        break;
+    default:
+        break;
+    }
+}
 
 std::int32_t number(const th2::Event& event, std::size_t index)
 {
@@ -184,17 +221,13 @@ public:
         if (!window_ || !renderer_) {
             throw std::runtime_error(SDL_GetError());
         }
-        SDL_SetRenderLogicalPresentation(
-            renderer_, 800, 600, SDL_LOGICAL_PRESENTATION_LETTERBOX);
-        try {
-            anime4k_ = std::make_unique<th2::Anime4K>(
-                renderer_, TH2_ANIME4K_SHADER_DIR);
-        } catch (const std::exception& error) {
-            std::cerr << "Anime4K disabled: " << error.what() << '\n';
-        }
         if (config_.fullscreen) {
             SDL_SetWindowFullscreen(window_, true);
         }
+        upscaler_ = th2::create_upscaler(
+            renderer_, TH2_ANIME4K_SHADER_DIR, config_.anime4k,
+            &anime4k_available_);
+        last_anime4k_wanted_ = config_.anime4k;
         imgui_ = std::make_unique<th2::ImGuiLayer>(window_, renderer_);
         auto try_load = [&](std::string_view name) -> Texture {
             const auto* entry = graphics_.find(name);
@@ -260,13 +293,17 @@ public:
             1'000'000'000 / 120);
         auto next_frame = std::chrono::steady_clock::now();
         while (running_) {
+            int window_width = 800;
+            int window_height = 600;
+            SDL_GetWindowSize(window_, &window_width, &window_height);
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
                 if (event.type == SDL_EVENT_QUIT) {
                     running_ = false;
                     continue;
                 }
-                SDL_ConvertEventToRenderCoordinates(renderer_, &event);
+                convert_event_to_logical_coordinates(
+                    event, window_width, window_height);
                 imgui_->process_event(event);
                 if (config_.show_script_position
                     && imgui_->wants_mouse()
@@ -484,6 +521,7 @@ public:
             update_map();
             update_playback_modes();
             update_title();
+            ensure_upscaler();
             int output_width = 800;
             int output_height = 600;
             SDL_GetRenderOutputSize(
@@ -744,7 +782,9 @@ private:
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     std::unique_ptr<th2::ImGuiLayer> imgui_;
-    std::unique_ptr<th2::Anime4K> anime4k_;
+    std::unique_ptr<th2::Upscaler> upscaler_;
+    bool anime4k_available_ = false;
+    bool last_anime4k_wanted_ = false;
     Texture background_;
     int bg_scene_ = -1;
     bool bg_is_visual_ = false;
@@ -794,6 +834,17 @@ private:
         }
         return std::clamp(volume, 0, 255) / 255.0f
             * config_.se_volume / 256.0f;
+    }
+
+    void ensure_upscaler()
+    {
+        if (last_anime4k_wanted_ == config_.anime4k) {
+            return;
+        }
+        last_anime4k_wanted_ = config_.anime4k;
+        upscaler_ = th2::create_upscaler(
+            renderer_, TH2_ANIME4K_SHADER_DIR, config_.anime4k,
+            &anime4k_available_);
     }
 
     std::size_t voice_character_index(int character) const
@@ -1928,14 +1979,11 @@ private:
 
     Surface capture_frame_pixels(bool art_only = false)
     {
+        (void)art_only;
         SDL_Texture* previous_target = SDL_GetRenderTarget(renderer_);
-        if (art_only && anime4k_active()) {
-            SDL_SetRenderTarget(renderer_, anime4k_->art_target());
-        }
+        SDL_SetRenderTarget(renderer_, upscaler_->art_target());
         SDL_Surface* surface = SDL_RenderReadPixels(renderer_, nullptr);
-        if (art_only && anime4k_active()) {
-            SDL_SetRenderTarget(renderer_, previous_target);
-        }
+        SDL_SetRenderTarget(renderer_, previous_target);
         if (!surface) {
             throw std::runtime_error(SDL_GetError());
         }
@@ -4589,11 +4637,11 @@ private:
                     if (ImGui::Checkbox("Fullscreen", &config_.fullscreen)) {
                         SDL_SetWindowFullscreen(window_, config_.fullscreen);
                     }
-                    ImGui::BeginDisabled(!anime4k_ || !anime4k_->available());
+                    ImGui::BeginDisabled(!anime4k_available_);
                     ImGui::Checkbox(
                         "Anime4K art upscaling", &config_.anime4k);
                     ImGui::EndDisabled();
-                    if (!anime4k_ || !anime4k_->available()) {
+                    if (!anime4k_available_) {
                         ImGui::TextDisabled(
                             "Anime4K requires SDL's GPU renderer with SPIR-V support.");
                     }
@@ -5860,17 +5908,9 @@ private:
         SDL_RenderTexture(renderer_, tex.get(), &src, &dst);
     }
 
-    bool anime4k_active() const
-    {
-        return config_.anime4k && anime4k_ && anime4k_->available();
-    }
-
     void begin_overlay()
     {
-        if (!anime4k_active()) {
-            return;
-        }
-        auto* overlay = anime4k_->overlay_target();
+        auto* overlay = upscaler_->overlay_target();
         SDL_SetRenderTarget(renderer_, overlay);
         float width = 0.0f;
         float height = 0.0f;
@@ -5941,9 +5981,7 @@ private:
 
     void present_frame()
     {
-        if (anime4k_active()) {
-            anime4k_->present();
-        }
+        upscaler_->present();
         SDL_RenderPresent(renderer_);
     }
 
@@ -5964,8 +6002,7 @@ private:
     void draw()
     {
         SDL_SetRenderScale(renderer_, 1.0f, 1.0f);
-        SDL_Texture* art_target =
-            anime4k_active() ? anime4k_->art_target() : nullptr;
+        SDL_Texture* art_target = upscaler_->art_target();
         const auto shake = shake_sample();
         const bool shake_art = shake_ && ui_mode_ == UiMode::game
             && !shake.text_only;
