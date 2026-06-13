@@ -36,8 +36,10 @@ public:
     void set_gain(float gain);
     void fade_to(float gain, std::chrono::milliseconds duration,
                  bool stop_after = false);
+    void finish_fade();
     void update();
     bool playing() const;
+    bool fading() const { return fade_started_.has_value(); }
 
 private:
     SDL_AudioStream* stream_ = nullptr;

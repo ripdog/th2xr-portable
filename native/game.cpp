@@ -3005,14 +3005,19 @@ private:
         }
     }
 
-    void play_se(int channel, int sound, bool loop, int volume,
+    void play_se(int channel, int sound, bool loop, int volume, int fade = 0,
                  bool wait_for_completion = false)
     {
         const auto name = std::format("SE_{:04d}.WAV", sound);
         if (channel >= 0 && static_cast<std::size_t>(channel) < se_channels_.size()) {
             se_channels_[channel].play(
                 load_audio(se_archive_, name), loop,
-                se_gain(volume));
+                fade > 0 ? 0.0f : se_gain(volume));
+            if (fade > 0) {
+                se_channels_[channel].fade_to(
+                    se_gain(volume),
+                    std::chrono::milliseconds(fade * 1000 / 60));
+            }
             se_sound_[channel] = sound;
             se_loop_[channel] = loop;
             se_volume_[channel] = volume;
@@ -3036,6 +3041,9 @@ private:
 
     void play_bgm(int music, bool loop, int volume)
     {
+        if (bgm_track_ == music) {
+            return;
+        }
         bgm_track_ = music;
         bgm_loop_ = loop;
         bgm_volume_ = volume;
@@ -3102,7 +3110,10 @@ private:
         }
         if (audio_wait_) {
             const auto& channel = waited_audio_channel();
-            if (!channel.playing()) {
+            const bool complete = audio_wait_->kind == AudioWaitKind::bgm
+                ? !channel.fading()
+                : !channel.playing();
+            if (complete) {
                 audio_wait_.reset();
                 advance();
             }
@@ -3594,7 +3605,7 @@ private:
                 bgm_gain(bgm_volume_),
                 std::chrono::milliseconds(fade * 1000 / 60));
         } else if (name == "MW") {
-            if (bgm_.playing()) {
+            if (bgm_.fading()) {
                 audio_wait_ = AudioWait{AudioWaitKind::bgm, 0};
             }
         } else if (name == "SE") {
@@ -3603,7 +3614,8 @@ private:
         } else if (name == "SEP") {
             play_se(
                 number(event, 0), number(event, 1), number(event, 3) != 0,
-                number(event, 4) < 0 ? 255 : number(event, 4));
+                number(event, 4) < 0 ? 255 : number(event, 4),
+                number(event, 2) < 0 ? 0 : number(event, 2));
         } else if (name == "SES") {
             const auto channel = number(event, 0);
             if (channel >= 0 && static_cast<std::size_t>(channel) < se_channels_.size()) {
@@ -3623,8 +3635,15 @@ private:
             }
         } else if (name == "SEW" || name == "SEVW") {
             const auto channel = number(event, 0);
-            if (channel >= 0 && static_cast<std::size_t>(channel) < se_channels_.size()
-                && se_channels_[channel].playing()) {
+            const bool wait_for_playback = name == "SEW"
+                && channel >= 0
+                && static_cast<std::size_t>(channel) < se_channels_.size()
+                && !se_loop_[channel] && se_channels_[channel].playing();
+            const bool wait_for_fade = name == "SEVW"
+                && channel >= 0
+                && static_cast<std::size_t>(channel) < se_channels_.size()
+                && se_channels_[channel].fading();
+            if (wait_for_playback || wait_for_fade) {
                 audio_wait_ = AudioWait{
                     AudioWaitKind::sound_effect, static_cast<std::size_t>(channel)};
             }
@@ -3835,7 +3854,11 @@ private:
                 }
                 if (audio_wait_) {
                     if (skipping) {
-                        waited_audio_channel().stop();
+                        if (audio_wait_->kind == AudioWaitKind::bgm) {
+                            waited_audio_channel().finish_fade();
+                        } else {
+                            waited_audio_channel().stop();
+                        }
                         audio_wait_.reset();
                         continue;
                     }

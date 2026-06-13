@@ -255,6 +255,22 @@ void AudioChannel::fade_to(
     fade_started_ = std::chrono::steady_clock::now();
 }
 
+void AudioChannel::finish_fade()
+{
+    if (!fade_started_) {
+        return;
+    }
+    const auto target = fade_to_;
+    const bool stop_after = fade_stop_;
+    fade_started_.reset();
+    fade_stop_ = false;
+    if (stop_after) {
+        stop();
+    } else {
+        set_gain(target);
+    }
+}
+
 void AudioChannel::update()
 {
     if (stream_ && fade_started_) {
