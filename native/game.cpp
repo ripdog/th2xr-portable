@@ -841,6 +841,8 @@ private:
     th2::Characters characters_;
     std::array<CharacterTexture, 32> character_textures_{};
     std::array<CharacterAnimation, 32> character_animations_{};
+    std::array<bool, 32> character_staged_{};
+    std::array<bool, 32> character_pending_removal_{};
     th2::AudioChannel bgm_;
     int bgm_track_ = -1;
     bool bgm_loop_ = false;
@@ -2792,6 +2794,31 @@ private:
         }
     }
 
+    void apply_staged_characters()
+    {
+        for (std::size_t index = 0; index < character_pending_removal_.size();
+             ++index) {
+            if (character_pending_removal_[index]) {
+                characters_.remove(static_cast<int>(index));
+                character_textures_[index] = {};
+                character_animations_[index] = {};
+            }
+            character_pending_removal_[index] = false;
+            character_staged_[index] = false;
+        }
+    }
+
+    std::size_t character_index(int character_number) const
+    {
+        if (character_number < 0
+            || static_cast<std::size_t>(character_number)
+                >= character_textures_.size()) {
+            throw std::out_of_range(std::format(
+                "invalid character number: {}", character_number));
+        }
+        return static_cast<std::size_t>(character_number);
+    }
+
     static std::vector<ToneCurveSpec> effect_tone_curves(
         int tone, bool character)
     {
@@ -2860,16 +2887,19 @@ private:
     void start_character_animation(
         int character_number, CharacterAnimation animation)
     {
+        const auto index = character_index(character_number);
         animation.frames = character_effect_frames(animation.frames);
         animation.started = std::chrono::steady_clock::now();
         if (animation.frames == 0) {
             if (animation.kind == CharacterAnimationKind::leave) {
                 characters_.remove(character_number);
-                character_textures_[character_number] = {};
+                character_textures_[index] = {};
+                character_staged_[index] = false;
+                character_pending_removal_[index] = false;
             }
             return;
         }
-        character_animations_.at(character_number) = std::move(animation);
+        character_animations_[index] = std::move(animation);
     }
 
     void update_character_animations()
@@ -2889,6 +2919,8 @@ private:
             if (animation.kind == CharacterAnimationKind::leave) {
                 characters_.remove(static_cast<int>(index));
                 character_textures_[index] = {};
+                character_staged_[index] = false;
+                character_pending_removal_[index] = false;
             }
             resume |= animation.blocking;
             animation = {};
@@ -2901,16 +2933,17 @@ private:
     void set_character(const th2::Event& event)
     {
         const int character_number = number(event, 0);
+        const auto index = character_index(character_number);
         const auto* previous = characters_.find(character_number);
         int locate = number(event, 2);
         if (locate < 0) {
             locate = event.instruction.name != "SetChar" && previous
                 ? previous->locate : 1;
         }
-        const bool staged = event.instruction.name == "CW";
-        const std::size_t layer_index = staged ? 3 : 4;
-        const std::size_t brightness_index = staged ? 4 : 5;
-        const std::size_t alpha_index = staged ? 5 : 6;
+        const bool wait_form = event.instruction.name == "CW";
+        const std::size_t layer_index = wait_form ? 3 : 4;
+        const std::size_t brightness_index = wait_form ? 4 : 5;
+        const std::size_t alpha_index = wait_form ? 5 : 6;
         const int layer = number(event, layer_index) < 0
             ? 0 : number(event, layer_index);
         const int brightness = number(event, brightness_index) < 0
@@ -2931,16 +2964,18 @@ private:
         animation.from_alpha = previous ? previous->alpha : alpha;
         animation.to_alpha = alpha;
         animation.blocking = event.instruction.name == "C";
+        bool stage = wait_form;
         if (event.instruction.name == "C") {
             animation.type = number(event, 3) == -2 ? -1
                 : number(event, 3) < 0 ? 0 : number(event, 3);
+            stage = animation.type == 3;
             animation.frames = animation.type == -1 ? 0 : number(event, 7);
             animation.kind = previous && previous->pose != number(event, 1)
                 ? CharacterAnimationKind::pose
                 : CharacterAnimationKind::enter;
         }
         if (animation.kind == CharacterAnimationKind::pose && previous) {
-            auto& loaded = character_texture(character_number);
+            auto& loaded = character_textures_[index];
             animation.previous = std::move(loaded.texture);
             loaded.pose = -1;
         }
@@ -2948,7 +2983,9 @@ private:
             character_number, number(event, 1), locate, layer,
             brightness, alpha);
         load_character_texture(character);
-        if (!staged && event.instruction.name != "SetChar") {
+        character_pending_removal_[index] = false;
+        character_staged_[index] = stage;
+        if (!stage && event.instruction.name != "SetChar") {
             start_character_animation(character_number, std::move(animation));
         }
     }
@@ -3065,13 +3102,7 @@ private:
         bg_is_visual_ = false;
         background_view_ = {};
         background_scroll_.reset();
-        if (scene == 0) {
-            background_.reset();
-            background_tone_curve_.clear();
-            characters_.clear();
-            character_textures_ = {};
-            return;
-        }
+        apply_staged_characters();
         const auto name = std::format(
             "B{:03d}{}{}{}.bmp", scene / 10,
             (tone_back_ < 0 ? tone_ : tone_back_) % 4,
@@ -3096,6 +3127,7 @@ private:
         bg_is_visual_ = true;
         background_view_ = {};
         background_scroll_.reset();
+        apply_staged_characters();
         background_ = load_toned_texture(
             renderer_, graphics_, std::format("v{:06d}.tga", visual),
             graphics_, background_tone_curves());
@@ -3103,6 +3135,9 @@ private:
         if (!keep_characters) {
             characters_.clear();
             character_textures_ = {};
+            character_animations_ = {};
+            character_staged_ = {};
+            character_pending_removal_ = {};
         } else {
             reload_character_textures();
         }
@@ -3389,10 +3424,15 @@ private:
             set_character(event);
         } else if (name == "CR" || name == "CRW" || name == "ResetChar") {
             const int character_number = number(event, 0);
-            if (name == "CR") {
+            const auto index = character_index(character_number);
+            const int type = name == "CRW" ? 3
+                : number(event, 1) < 0 ? 0 : number(event, 1);
+            if (type == 3) {
+                character_pending_removal_[index] = true;
+            } else {
                 CharacterAnimation animation;
                 animation.kind = CharacterAnimationKind::leave;
-                animation.type = number(event, 1) < 0 ? 0 : number(event, 1);
+                animation.type = type;
                 animation.frames = number(event, 2);
                 animation.blocking = true;
                 if (const auto* character = characters_.find(character_number)) {
@@ -3403,10 +3443,6 @@ private:
                     start_character_animation(
                         character_number, std::move(animation));
                 }
-            } else {
-                characters_.remove(character_number);
-                character_textures_[character_number] = {};
-                character_animations_[character_number] = {};
             }
         } else if (name == "CP" || name == "SetCharPose") {
             const int character_number = number(event, 0);
@@ -3916,7 +3952,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 17);  // native version
+        write_u32(out, 18);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -4003,6 +4039,9 @@ private:
             write_i32(out, ch.layer);
             write_i32(out, ch.brightness);
             write_i32(out, ch.alpha);
+            write_i32(out, character_staged_.at(ch.number) ? 1 : 0);
+            write_i32(
+                out, character_pending_removal_.at(ch.number) ? 1 : 0);
         }
 
         // Overlays
@@ -4187,7 +4226,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 17) {
+        if (version != 18) {
             return;
         }
 
@@ -4297,6 +4336,8 @@ private:
         characters_ = {};
         character_textures_ = {};
         character_animations_ = {};
+        character_staged_ = {};
+        character_pending_removal_ = {};
         const auto char_count = read_u32(in);
         for (std::uint32_t i = 0; i < char_count; ++i) {
             const auto number = read_i32(in);
@@ -4305,8 +4346,12 @@ private:
             const auto layer = read_i32(in);
             const auto brightness = read_i32(in);
             const auto alpha = read_i32(in);
+            const bool staged = read_i32(in) != 0;
+            const bool pending_removal = read_i32(in) != 0;
             auto& ch = characters_.set(
                 number, pose, locate, layer, brightness, alpha);
+            character_staged_.at(number) = staged;
+            character_pending_removal_.at(number) = pending_removal;
             load_character_texture(ch);
         }
 
@@ -6217,6 +6262,9 @@ private:
             }
         }
         for (const auto& character : characters_.ordered()) {
+            if (character_staged_.at(character.number)) {
+                continue;
+            }
             auto& loaded = character_texture(character.number);
             if (!loaded.texture) {
                 continue;
