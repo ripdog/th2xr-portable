@@ -3583,6 +3583,12 @@ private:
                 if (character->pose == number(event, 1)) {
                     return true;
                 }
+                if (number(event, 2) == 3) {
+                    character->pose = number(event, 1);
+                    load_character_texture(*character);
+                    character_staged_[character_index(character_number)] = true;
+                    return true;
+                }
                 CharacterAnimation animation;
                 animation.kind = CharacterAnimationKind::pose;
                 animation.type = number(event, 2) < 0 ? 0 : number(event, 2);
