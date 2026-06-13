@@ -529,7 +529,8 @@ public:
             const float scale_x = output_width / 800.0f;
             const float scale_y = output_height / 600.0f;
             const float framebuffer_scale = std::min(scale_x, scale_y);
-            imgui_->new_frame(framebuffer_scale);
+            const float display_scale = SDL_GetWindowDisplayScale(window_);
+            imgui_->new_frame(display_scale > 0.0f ? display_scale : 1.0f);
             font_.configure(
                 config_.authentic_font, config_.font_family,
                 config_.font_size, framebuffer_scale);
@@ -5983,6 +5984,16 @@ private:
     void present_frame()
     {
         upscaler_->present();
+
+        // ImGui is rendered directly to the window backbuffer using the OS
+        // display scale, so the debug/config UI stays crisp but does not
+        // balloon to the full screen magnification used for the 800x600 art.
+        const float display_scale = std::max(
+            1.0f, SDL_GetWindowDisplayScale(window_));
+        SDL_SetRenderTarget(renderer_, nullptr);
+        SDL_SetRenderScale(renderer_, display_scale, display_scale);
+        imgui_->render();
+
         SDL_RenderPresent(renderer_);
     }
 
@@ -6018,13 +6029,13 @@ private:
         if (movie_) {
             movie_->draw();
             begin_overlay();
-            imgui_->render();
+
             present_frame();
             return;
         }
         if (name_input_open_) {
             begin_overlay();
-            imgui_->render();
+
             present_frame();
             return;
         }
@@ -6032,7 +6043,7 @@ private:
             draw_title();
             if (!transition_) {
                 begin_overlay();
-                imgui_->render();
+    
                 present_frame();
                 return;
             }
@@ -6042,7 +6053,7 @@ private:
             begin_overlay();
             draw_map(true);
             draw_script_position();
-            imgui_->render();
+
             present_frame();
             return;
         }
@@ -6220,7 +6231,7 @@ private:
         if (clock_state_ || calendar_state_) {
             draw_clock_calendar();
             draw_script_position();
-            imgui_->render();
+
             present_frame();
             return;
         }
