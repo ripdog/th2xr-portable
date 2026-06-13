@@ -6559,7 +6559,7 @@ private:
                 800, 600};
             SDL_SetRenderViewport(renderer_, &viewport);
         }
-        if (!screen_flash_ && ui_mode_ != UiMode::backlog
+        if (ui_mode_ != UiMode::backlog
             && message_visible_ && !message_.empty()) {
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 150);
@@ -6575,7 +6575,7 @@ private:
                 }
             }
         }
-        if (!screen_flash_ && ui_mode_ != UiMode::backlog
+        if (ui_mode_ != UiMode::backlog
             && message_visible_ && choosing_ && !choices_.empty()) {
             float y = choice_y_start();
             for (int i = 0; i < static_cast<int>(choices_.size()); ++i) {
