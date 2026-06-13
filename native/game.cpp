@@ -741,6 +741,7 @@ private:
         BackgroundView to;
         int frames = 1;
         int easing = 0;
+        bool zoom = false;
         std::chrono::steady_clock::time_point started;
     };
 
@@ -2776,6 +2777,31 @@ private:
             : background_scroll_->easing == 2
                 ? 1.0f - (1.0f - raw) * (1.0f - raw)
                 : raw;
+        if (background_scroll_->zoom) {
+            const auto zoom_axis = [progress](
+                float from_position, float from_size,
+                float to_position, float to_size) {
+                const float inverse_size =
+                    (1.0f - progress) / from_size + progress / to_size;
+                const float size = 1.0f / inverse_size;
+                const float position =
+                    ((1.0f - progress) * from_position / from_size
+                     + progress * to_position / to_size)
+                    * size;
+                return std::pair{position, size};
+            };
+            const auto [x, width] = zoom_axis(
+                background_scroll_->from.x,
+                background_scroll_->from.width,
+                background_scroll_->to.x,
+                background_scroll_->to.width);
+            const auto [y, height] = zoom_axis(
+                background_scroll_->from.y,
+                background_scroll_->from.height,
+                background_scroll_->to.y,
+                background_scroll_->to.height);
+            return {x, y, width, height};
+        }
         const auto mix = [progress](float from, float to) {
             return from + (to - from) * progress;
         };
@@ -2808,8 +2834,9 @@ private:
         background_scroll_ = BackgroundScroll{
             current_background_view(),
             {x, y, width, height},
-            std::max(1, frames),
+            std::max(1, frames) * 2,
             type % 3,
+            type / 3 == 1,
             std::chrono::steady_clock::now(),
         };
     }
