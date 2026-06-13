@@ -190,13 +190,15 @@ std::set<std::string> reachable_script_targets(
 
 int main(int argc, char** argv)
 {
-    if (argc != 2) {
-        std::cerr << "usage: th2-script-audit GAME_DATA_DIRECTORY\n";
+    if (argc < 2 || argc > 3) {
+        std::cerr
+            << "usage: th2-script-audit GAME_DATA_DIRECTORY [OPCODE]\n";
         return 2;
     }
 
     try {
         const std::filesystem::path data(argv[1]);
+        const std::string_view queried_opcode = argc == 3 ? argv[2] : "";
         const th2::Archive archive(data / "SDT.PAK");
         const th2::Archive graphics(data / "GRP.PAK");
         const th2::Archive backgrounds(data / "bak.pak");
@@ -254,6 +256,47 @@ int main(int argc, char** argv)
                                 scenario.bytecode().subspan(
                                     instruction.offset, instruction.size),
                                 alternate_registers);
+                            if (instruction.name == queried_opcode) {
+                                std::cout << entry.name << ':'
+                                          << instruction.offset << ' '
+                                          << instruction.name;
+                                for (std::size_t i = 0;
+                                     i < event.arguments.size(); ++i) {
+                                    std::cout << ' ';
+                                    const auto& argument = event.arguments[i];
+                                    const auto& alternate =
+                                        alternate_event.arguments[i];
+                                    if (const auto* value =
+                                            std::get_if<std::int32_t>(
+                                                &argument)) {
+                                        const auto* alternate_value =
+                                            std::get_if<std::int32_t>(
+                                                &alternate);
+                                        if (alternate_value
+                                            && *alternate_value != *value) {
+                                            std::cout << '{' << *value << '|'
+                                                      << *alternate_value << '}';
+                                        } else {
+                                            std::cout << *value;
+                                        }
+                                    } else if (const auto* value =
+                                                   std::get_if<std::string>(
+                                                       &argument)) {
+                                        std::cout << std::quoted(*value);
+                                    } else if (const auto* target =
+                                                   std::get_if<
+                                                       th2::RegisterTarget>(
+                                                       &argument)) {
+                                        std::cout << "register["
+                                                  << static_cast<int>(
+                                                         target->index)
+                                                  << ']';
+                                    } else {
+                                        std::cout << "comparison";
+                                    }
+                                }
+                                std::cout << '\n';
+                            }
                             const auto dynamic_asset = [&] {
                                 ++dynamic_asset_references;
                                 dynamic_assets[
