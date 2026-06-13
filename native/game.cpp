@@ -686,8 +686,8 @@ private:
     };
 
     struct BackgroundFade {
-        float from = 0.0f;
-        float to = 0.0f;
+        std::array<float, 3> from{128.0f, 128.0f, 128.0f};
+        std::array<float, 3> to{128.0f, 128.0f, 128.0f};
         std::chrono::steady_clock::time_point started;
         std::chrono::milliseconds duration;
     };
@@ -1068,7 +1068,7 @@ private:
     std::optional<ScreenFlash> screen_flash_;
     std::optional<ShakeState> shake_;
     Texture shake_target_;
-    float background_darkness_ = 0.0f;
+    std::array<float, 3> background_brightness_{128.0f, 128.0f, 128.0f};
     std::chrono::steady_clock::time_point skip_next_time_{};
     std::optional<std::chrono::steady_clock::time_point> auto_next_time_;
     std::string current_line_key_;
@@ -1609,9 +1609,9 @@ private:
                 if (!petal.active) {
                     continue;
                 }
-                petal.x += static_cast<float>(
-                    std::sin((petal.counter % 3600)
-                             * std::numbers::pi / 1800.0))
+                petal.x += std::sin(
+                    static_cast<float>(petal.counter % 256)
+                    * 2.0f * std::numbers::pi_v<float> / 256.0f)
                     * petal.axis_x + sakura_->wind;
                 petal.y += petal.axis_y;
                 if (petal.y > 600.0f) {
@@ -1625,8 +1625,16 @@ private:
                     }
                 }
                 if (petal.x >= 800.0f) {
+                    if (sakura_->reset_frames >= 0) {
+                        petal.active = false;
+                        continue;
+                    }
                     petal.x -= 830.0f;
                 } else if (petal.x < -30.0f) {
+                    if (sakura_->reset_frames >= 0) {
+                        petal.active = false;
+                        continue;
+                    }
                     petal.x += 830.0f;
                 }
                 ++petal.counter;
@@ -1659,19 +1667,24 @@ private:
                 const int frame = petal.counter / 2 % 23;
                 source = {
                     static_cast<float>(40 * (frame % 10)),
-                    static_cast<float>(27 * (frame / 10)), 40.0f, 27.0f};
+                    static_cast<float>(static_cast<int>(
+                        26.6666667f * (frame / 10))),
+                    40.0f, 27.0f};
                 texture = &sakura_small_;
             } else if (petal.type == 1) {
                 const int frame = petal.counter / 2 % 20;
                 source = {
-                    static_cast<float>(27 * (frame % 15)),
+                    static_cast<float>(static_cast<int>(
+                        26.6666667f * (frame % 15))),
                     static_cast<float>(80 + 20 * (frame / 15)),
                     27.0f, 20.0f};
                 texture = &sakura_small_;
             } else if (petal.type == 2) {
                 const int frame = petal.counter / 2 % 17;
                 source = {
-                    static_cast<float>(13 * (frame % 30)), 120.0f,
+                    static_cast<float>(static_cast<int>(
+                        13.3333333f * (frame % 30))),
+                    120.0f,
                     13.0f, 13.0f};
                 texture = &sakura_small_;
             } else if (petal.type == 3) {
@@ -2574,12 +2587,16 @@ private:
         ImGui::End();
     }
 
-    void begin_background_fade(float target, int frames)
+    void begin_background_fade(int red, int green, int blue, int frames)
     {
         const int effective_frames = frames > 0 ? frames : 30;
         background_fade_ = BackgroundFade{
-            background_darkness_,
-            std::clamp(target, 0.0f, 1.0f),
+            background_brightness_,
+            {
+                static_cast<float>(std::clamp(red, 0, 256)),
+                static_cast<float>(std::clamp(green, 0, 256)),
+                static_cast<float>(std::clamp(blue, 0, 256)),
+            },
             std::chrono::steady_clock::now(),
             std::chrono::milliseconds(effective_frames * 1000 / 60),
         };
@@ -2596,10 +2613,13 @@ private:
             std::chrono::duration<float>(elapsed).count()
                 / std::chrono::duration<float>(background_fade_->duration).count(),
             0.0f, 1.0f);
-        background_darkness_ = background_fade_->from
-            + (background_fade_->to - background_fade_->from) * progress;
+        for (std::size_t i = 0; i < background_brightness_.size(); ++i) {
+            background_brightness_[i] = background_fade_->from[i]
+                + (background_fade_->to[i] - background_fade_->from[i])
+                    * progress;
+        }
         if (progress >= 1.0f) {
-            background_darkness_ = background_fade_->to;
+            background_brightness_ = background_fade_->to;
             background_fade_.reset();
             advance();
         }
@@ -3278,18 +3298,17 @@ private:
                 number(event, 0), number(event, 3), number(event, 7), true);
             set_cg(event, BackgroundKind::visual, 'v');
         } else if (name == "FI") {
-            begin_background_fade(0.0f, 30);
+            begin_background_fade(128, 128, 128, 30);
         } else if (name == "FIF") {
-            begin_background_fade(0.0f, number(event, 0));
+            begin_background_fade(128, 128, 128, number(event, 0));
         } else if (name == "FO") {
-            begin_background_fade(1.0f, 30);
+            begin_background_fade(0, 0, 0, 30);
         } else if (name == "FOF") {
-            begin_background_fade(1.0f, number(event, 0));
+            begin_background_fade(0, 0, 0, number(event, 0));
         } else if (name == "FB") {
-            const float average = (
-                number(event, 0) + number(event, 1) + number(event, 2))
-                / (3.0f * 128.0f);
-            begin_background_fade(1.0f - average, number(event, 3));
+            begin_background_fade(
+                number(event, 0), number(event, 1), number(event, 2),
+                number(event, 3));
         } else if (name == "F" || name == "SetFlash") {
             screen_flash_ = ScreenFlash{
                 std::clamp(number(event, 0), 0, 255),
@@ -4025,7 +4044,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 20);  // native version
+        write_u32(out, 21);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -4102,6 +4121,9 @@ private:
         write_i32(out, static_cast<std::int32_t>(background_view_.y));
         write_i32(out, static_cast<std::int32_t>(background_view_.width));
         write_i32(out, static_cast<std::int32_t>(background_view_.height));
+        for (const float brightness : background_brightness_) {
+            write_i32(out, static_cast<std::int32_t>(brightness));
+        }
 
         // Characters
         const auto ordered = characters_.ordered();
@@ -4300,7 +4322,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 20) {
+        if (version != 21) {
             return;
         }
 
@@ -4405,6 +4427,9 @@ private:
         background_view_.y = static_cast<float>(read_i32(in));
         background_view_.width = static_cast<float>(read_i32(in));
         background_view_.height = static_cast<float>(read_i32(in));
+        for (auto& brightness : background_brightness_) {
+            brightness = static_cast<float>(read_i32(in));
+        }
         background_scroll_.reset();
         restore_background();
 
@@ -4745,6 +4770,8 @@ private:
         character_textures_ = {};
         background_.reset();
         bg_scene_ = -1;
+        background_brightness_ = {128.0f, 128.0f, 128.0f};
+        background_fade_.reset();
         advance();
     }
 
@@ -6429,13 +6456,44 @@ private:
                 draw_overlay(i);
             }
         }
-        if (background_darkness_ > 0.0f) {
-            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(
-                renderer_, 0, 0, 0,
-                static_cast<Uint8>(background_darkness_ * 255.0f));
+        if (background_brightness_ != std::array<float, 3>{
+                128.0f, 128.0f, 128.0f}) {
             const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
-            SDL_RenderFillRect(renderer_, &game_area);
+            std::array<Uint8, 3> multiply{};
+            std::array<Uint8, 3> screen{};
+            bool needs_multiply = false;
+            bool needs_screen = false;
+            for (std::size_t i = 0; i < background_brightness_.size(); ++i) {
+                const float value =
+                    std::clamp(background_brightness_[i], 0.0f, 256.0f);
+                multiply[i] = static_cast<Uint8>(
+                    value < 128.0f ? value * 255.0f / 128.0f : 255.0f);
+                screen[i] = static_cast<Uint8>(
+                    value > 128.0f
+                        ? (value - 128.0f) * 255.0f / 128.0f
+                        : 0.0f);
+                needs_multiply |= value < 128.0f;
+                needs_screen |= value > 128.0f;
+            }
+            if (needs_multiply) {
+                SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_MOD);
+                SDL_SetRenderDrawColor(
+                    renderer_, multiply[0], multiply[1], multiply[2], 255);
+                SDL_RenderFillRect(renderer_, &game_area);
+            }
+            if (needs_screen) {
+                const auto screen_blend = SDL_ComposeCustomBlendMode(
+                    SDL_BLENDFACTOR_ONE,
+                    SDL_BLENDFACTOR_ONE_MINUS_SRC_COLOR,
+                    SDL_BLENDOPERATION_ADD,
+                    SDL_BLENDFACTOR_ZERO,
+                    SDL_BLENDFACTOR_ONE,
+                    SDL_BLENDOPERATION_ADD);
+                SDL_SetRenderDrawBlendMode(renderer_, screen_blend);
+                SDL_SetRenderDrawColor(
+                    renderer_, screen[0], screen[1], screen[2], 0);
+                SDL_RenderFillRect(renderer_, &game_area);
+            }
         }
         if (transition_) {
             const auto elapsed = std::chrono::duration<double>(
