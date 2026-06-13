@@ -1928,9 +1928,16 @@ private:
                 return;
             }
         } else {
-            runtime_.load(selected.script);
+            load_script(selected.script);
         }
         advance();
+    }
+
+    void load_script(std::string name)
+    {
+        runtime_.load(std::move(name));
+        vi_event_voice_no_ = -1;
+        vi_event_voice_no_all_ = -1;
     }
 
     bool load_scheduled_script()
@@ -2010,7 +2017,7 @@ private:
         runtime_.set_flag(time_flag, time);
         runtime_.set_flag(event_end_flag, 0);
         runtime_.set_flag(event_next_flag, -1);
-        runtime_.load(std::format(
+        load_script(std::format(
             "EV_{:02d}{:02d}{}.SDT", month, day, periods[time]));
         if (show_calendar) {
             begin_calendar(-1, -1);
@@ -3735,8 +3742,10 @@ private:
             if (const auto slot = overlay_index(number(event, 0))) {
                 auto& state = overlay_states_[*slot];
                 state.red = std::clamp(number(event, 1), 0, 255);
-                state.green = std::clamp(number(event, 2), 0, 255);
-                state.blue = std::clamp(number(event, 3), 0, 255);
+                state.green = number(event, 2) < 0
+                    ? state.red : std::clamp(number(event, 2), 0, 255);
+                state.blue = number(event, 3) < 0
+                    ? state.red : std::clamp(number(event, 3), 0, 255);
                 apply_overlay_brightness(*slot);
             }
         } else if (name == "SetBmpMove") {
@@ -3954,7 +3963,7 @@ private:
                 overlay_pixels_[i].reset();
                 overlay_states_[i] = {};
             }
-            runtime_.load(text(event, 0));
+            load_script(text(event, 0));
         } else {
             return false;
         }
@@ -4093,7 +4102,7 @@ private:
                 return;
             }
             if (choice_ex_) {
-                runtime_.load(choices_.at(choice_selected_).sno);
+                load_script(choices_.at(choice_selected_).sno);
             } else if (choice_result_register_ >= 0) {
                 runtime_.set_reg(
                     static_cast<std::size_t>(choice_result_register_),
@@ -5039,7 +5048,7 @@ private:
     {
         reset_play_state();
         initialize_scenario_flags();
-        runtime_.load("EV_0301MORNING.SDT");
+        load_script("EV_0301MORNING.SDT");
         ui_mode_ = UiMode::game;
         advance();
     }
@@ -6667,7 +6676,7 @@ private:
         reset_play_state();
         initialize_scenario_flags();
         replay_mode_ = true;
-        runtime_.load(std::format(
+        load_script(std::format(
             "8000{:05d}.SDT", replay_scripts.at(slot)));
         ui_mode_ = UiMode::game;
         title_extras_ = false;
