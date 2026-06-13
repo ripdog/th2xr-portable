@@ -1499,11 +1499,11 @@ private:
     {
         const int current = std::clamp(runtime_.flag(7), 0, 19);
         int target = std::clamp(requested, 0, 19);
-        if (weekday(runtime_.flag(0), runtime_.flag(1)) == 6) {
-            target = std::min(target, 11);
-        }
         if (current == target) {
             return;
+        }
+        if (weekday(runtime_.flag(0), runtime_.flag(1)) == 6) {
+            target = std::min(target, 11);
         }
         if (!clock_background_) {
             clock_background_ =
