@@ -99,6 +99,12 @@ add_executable(th2-script-info
 )
 target_link_libraries(th2-script-info PRIVATE th2_runtime)
 
+add_executable(th2-script-audit
+    native/script_audit.cpp
+)
+target_link_libraries(th2-script-audit PRIVATE
+    th2_archive th2_scenario th2_bytecode)
+
 if(BUILD_TESTING)
     add_executable(th2-scenario-test
         native/scenario_test.cpp
