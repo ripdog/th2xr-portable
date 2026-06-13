@@ -242,6 +242,9 @@ public:
         if (config_.player_name.family.empty()) {
             config_.player_name = default_player_name_;
         }
+        for (std::size_t i = 0; i < config_.game_flags.size(); ++i) {
+            runtime_.set_game_flag(i, config_.game_flags[i]);
+        }
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
             throw std::runtime_error(SDL_GetError());
         }
@@ -3070,6 +3073,16 @@ private:
         }
     }
 
+    void sync_game_flags()
+    {
+        const auto flags = runtime_.all_game_flags();
+        if (std::ranges::equal(flags, config_.game_flags)) {
+            return;
+        }
+        std::ranges::copy(flags, config_.game_flags.begin());
+        th2::save_config(config_path_, config_);
+    }
+
     void play_bgm(int music, bool loop, int volume)
     {
         static constexpr std::array music_room_tracks{
@@ -3078,10 +3091,14 @@ private:
             38, 41, 42, 39, 40, 15, 16, 17, 19, 20,
             22, 32, 21, 23, 26, 31, 25, 24, 28, 50,
         };
-        if (std::ranges::find(music_room_tracks, music)
-                != music_room_tracks.end()
-            && config_.unlocked_music.emplace(music).second) {
-            th2::save_config(config_path_, config_);
+        const auto music_slot =
+            std::ranges::find(music_room_tracks, music);
+        if (music_slot != music_room_tracks.end()) {
+            runtime_.set_game_flag(
+                128 + static_cast<std::size_t>(
+                    std::distance(music_room_tracks.begin(), music_slot)),
+                1);
+            sync_game_flags();
         }
         if (bgm_track_ == music) {
             return;
@@ -3859,6 +3876,7 @@ private:
         }
         while (running_ && !waiting_for_input_ && !choosing_) {
             const auto step = runtime_.run();
+            sync_game_flags();
             if (step.reason == th2::VmYield::ended) {
                 if (!load_scheduled_script()) {
                     return_to_title();
@@ -4060,7 +4078,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 21);  // native version
+        write_u32(out, 22);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -4124,9 +4142,6 @@ private:
 
         // Flags
         for (const auto f : runtime_.all_flags()) {
-            write_i32(out, f);
-        }
-        for (const auto f : runtime_.all_game_flags()) {
             write_i32(out, f);
         }
 
@@ -4338,7 +4353,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 21) {
+        if (version != 22) {
             return;
         }
 
@@ -4429,9 +4444,6 @@ private:
         // Flags
         for (std::size_t i = 0; i < 1024; ++i) {
             runtime_.set_flag(i, read_i32(in));
-        }
-        for (std::size_t i = 0; i < 1024; ++i) {
-            runtime_.set_game_flag(i, read_i32(in));
         }
         runtime_.vm_restore(regs, stack_data, pc);
 
