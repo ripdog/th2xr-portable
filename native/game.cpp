@@ -2159,7 +2159,10 @@ private:
     float choice_y_start() const
     {
         if (!message_.empty()) {
-            return 104.0f;
+            return message_text_y()
+                + static_cast<float>(display_lines(message_.visible()).size())
+                    * 31.0f
+                + 1.0f;
         }
         return 468.0f;
     }
