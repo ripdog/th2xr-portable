@@ -5024,8 +5024,93 @@ private:
         menu_highlight_ = 4;
     }
 
+    void reset_play_state()
+    {
+        bgm_.stop();
+        bgm_track_ = -1;
+        bgm_loop_ = false;
+        bgm_volume_ = 255;
+        for (auto& channel : transient_se_) {
+            channel.stop();
+        }
+        transient_se_volume_ = {};
+        for (auto& channel : se_channels_) {
+            channel.stop();
+        }
+        se_sound_.fill(-1);
+        se_loop_ = {};
+        se_volume_ = {};
+        for (auto& channel : voice_channels_) {
+            channel.stop();
+        }
+        voice_sound_.fill(-1);
+        voice_character_ = {};
+        voice_scenario_ = {};
+        voice_volume_ = {};
+        voice_loop_ = {};
+        vi_event_voice_no_ = -1;
+        vi_event_voice_no_all_ = -1;
+        movie_.reset();
+        movie_bytes_.clear();
+        movie_resume_script_ = false;
+        movie_mode_ = -1;
+
+        background_.reset();
+        bg_scene_ = -1;
+        background_kind_ = BackgroundKind::background;
+        background_view_ = {0.0f, 0.0f, 800.0f, 600.0f};
+        background_scroll_.reset();
+        background_tone_curve_.clear();
+        background_brightness_ = {128.0f, 128.0f, 128.0f};
+        tone_ = 0;
+        tone_back_ = -1;
+        tone_char_ = -1;
+        weather_ = 0;
+        for (std::size_t i = 0; i < overlays_.size(); ++i) {
+            overlays_[i].reset();
+            overlay_pixels_[i].reset();
+            overlay_states_[i] = {};
+        }
+        clear_characters();
+        sakura_.reset();
+
+        message_ = th2::Message{};
+        message_visible_ = true;
+        message_ends_block_ = true;
+        waiting_for_input_ = false;
+        current_line_key_.clear();
+        backlog_.clear();
+        backlog_depth_ = 0;
+        choices_.clear();
+        choosing_ = false;
+        choice_highlight_ = 0;
+        choice_selected_ = -1;
+        choice_result_register_ = -1;
+        choice_ex_ = false;
+        map_events_.clear();
+        map_characters_.clear();
+        map_selected_ = -1;
+
+        wake_time_.reset();
+        audio_wait_.reset();
+        transition_.reset();
+        background_fade_.reset();
+        screen_flash_.reset();
+        shake_.reset();
+        clock_state_.reset();
+        calendar_state_.reset();
+        skipped_month_ = 0;
+        skipped_day_ = 0;
+        auto_next_time_.reset();
+        auto_mode_ = false;
+        skip_mode_ = false;
+        demo_mode_ = false;
+        demo_delay_frames_ = 0;
+    }
+
     void start_new_game()
     {
+        reset_play_state();
         runtime_.reset_flags();
         runtime_.set_flag(0, 3);
         runtime_.set_flag(1, 1);
@@ -5038,17 +5123,8 @@ private:
                 ? 1 : 0);
         runtime_.set_flag(6, 0);
         runtime_.set_flag(7, 0);
-        map_events_.clear();
         runtime_.load("EV_0301MORNING.SDT");
         ui_mode_ = UiMode::game;
-        message_ = th2::Message{};
-        backlog_.clear();
-        characters_.clear();
-        character_textures_ = {};
-        background_.reset();
-        bg_scene_ = -1;
-        background_brightness_ = {128.0f, 128.0f, 128.0f};
-        background_fade_.reset();
         advance();
     }
 
