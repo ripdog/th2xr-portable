@@ -52,6 +52,33 @@ struct SurfaceDeleter {
 };
 using Surface = std::unique_ptr<SDL_Surface, SurfaceDeleter>;
 
+struct SdlSubsystem {
+    SdlSubsystem()
+    {
+        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
+            throw std::runtime_error(SDL_GetError());
+        }
+    }
+    ~SdlSubsystem() { SDL_Quit(); }
+
+    SdlSubsystem(const SdlSubsystem&) = delete;
+    SdlSubsystem& operator=(const SdlSubsystem&) = delete;
+};
+
+struct WindowDeleter {
+    void operator()(SDL_Window* window) const { SDL_DestroyWindow(window); }
+};
+
+struct RendererDeleter {
+    void operator()(SDL_Renderer* renderer) const
+    {
+        SDL_DestroyRenderer(renderer);
+    }
+};
+
+using WindowPtr = std::unique_ptr<SDL_Window, WindowDeleter>;
+using RendererPtr = std::unique_ptr<SDL_Renderer, RendererDeleter>;
+
 // Convert window-coordinate mouse events to the fixed 800x600 logical
 // coordinate system used by the core game, applying 4:3 letterboxing.
 void convert_event_to_logical_coordinates(
@@ -244,8 +271,10 @@ public:
           backgrounds_(data / "bak.pak"), fonts_(data / "FNT.PAK"),
           bgm_archive_(data / "bgm.PAK"), se_archive_(data / "SE.PAK"),
           voice_archive_(data / "voice.pak"), movie_archive_(data / "mov.pak"),
-          runtime_(scripts_), font_(fonts_),
-          config_(th2::load_config(config_path_))
+          runtime_(scripts_),
+          config_(th2::load_config(config_path_)),
+          sdl_subsystem_(),
+          font_(fonts_)
     {
         default_player_name_ =
             th2::load_default_player_name(data / "TOHEART2.EXE");
@@ -255,11 +284,9 @@ public:
         for (std::size_t i = 0; i < config_.game_flags.size(); ++i) {
             runtime_.set_game_flag(i, config_.game_flags[i]);
         }
-        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
-            throw std::runtime_error(SDL_GetError());
-        }
         window_ = SDL_CreateWindow(
             "ToHeart2 XRATED", 1600, 1200, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+        window_holder_.reset(window_);
         SDL_PropertiesID renderer_properties = SDL_CreateProperties();
         SDL_SetStringProperty(
             renderer_properties, SDL_PROP_RENDERER_CREATE_NAME_STRING,
@@ -272,6 +299,7 @@ public:
             SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true);
         renderer_ = window_
             ? SDL_CreateRendererWithProperties(renderer_properties) : nullptr;
+        renderer_holder_.reset(renderer_);
         SDL_DestroyProperties(renderer_properties);
         if (!window_ || !renderer_) {
             throw std::runtime_error(SDL_GetError());
@@ -340,15 +368,11 @@ public:
 
     ~Game()
     {
+        // All SDL resources are owned by members declared after
+        // window_holder_/renderer_holder_, so they are destroyed before the
+        // renderer/window and before SDL_Quit().  Only the config needs an
+        // explicit teardown step.
         th2::save_config(config_path_, config_);
-        imgui_.reset();
-        for (auto& overlay : overlays_) {
-            overlay.reset();
-        }
-        background_.reset();
-        SDL_DestroyRenderer(renderer_);
-        SDL_DestroyWindow(window_);
-        SDL_Quit();
     }
 
     int run()
@@ -869,13 +893,21 @@ private:
     th2::Archive voice_archive_;
     th2::Archive movie_archive_;
     th2::ScriptRuntime runtime_;
-    th2::GameFont font_;
     const std::filesystem::path config_path_{"toheart2-config.ini"};
     th2::GameConfig config_;
+
+    // SDL subsystem lifetime.  window_/renderer_ holders are declared before
+    // every other SDL-dependent member so that textures, audio streams, etc.
+    // are destroyed while the renderer and SDL subsystems are still alive.
+    SdlSubsystem sdl_subsystem_;
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
+    WindowPtr window_holder_;
+    RendererPtr renderer_holder_;
+
     std::unique_ptr<th2::ImGuiLayer> imgui_;
     std::unique_ptr<th2::Upscaler> upscaler_;
+    th2::GameFont font_;
     bool anime4k_available_ = false;
     bool last_anime4k_wanted_ = false;
     Texture background_;
