@@ -34,7 +34,12 @@ std::vector<std::string> split_segments(std::string_view source)
             }
             continue;
         }
-        segments.back().push_back(source[position++]);
+        const auto character =
+            static_cast<unsigned char>(source[position++]);
+        if (character == '\n'
+            || (character >= ' ' && character <= '~')) {
+            segments.back().push_back(static_cast<char>(character));
+        }
     }
     if (segments.size() > 1 && segments.back().empty()) {
         segments.pop_back();

@@ -56,4 +56,9 @@ int main()
     if (message.visible() != "spoken line") {
         return 9;
     }
+
+    message.set("I'm eating an egg sandwich\x01\x80");
+    if (message.visible() != "I'm eating an egg sandwich") {
+        return 10;
+    }
 }
