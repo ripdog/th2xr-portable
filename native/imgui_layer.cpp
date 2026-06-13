@@ -2,6 +2,8 @@
 
 #include <imgui.h>
 
+#include <fontconfig/fontconfig.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <stdexcept>
@@ -9,6 +11,32 @@
 
 namespace th2 {
 namespace {
+
+std::string find_imgui_font_path()
+{
+    if (!FcInit()) {
+        return {};
+    }
+    FcPattern* pattern = FcNameParse(
+        reinterpret_cast<const FcChar8*>("sans-serif"));
+    if (!pattern) {
+        return {};
+    }
+    FcConfigSubstitute(nullptr, pattern, FcMatchPattern);
+    FcDefaultSubstitute(pattern);
+    FcResult result = FcResultNoMatch;
+    FcPattern* match = FcFontMatch(nullptr, pattern, &result);
+    std::string path;
+    if (match) {
+        FcChar8* file = nullptr;
+        if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch) {
+            path = reinterpret_cast<const char*>(file);
+        }
+        FcPatternDestroy(match);
+    }
+    FcPatternDestroy(pattern);
+    return path;
+}
 
 ImTextureID texture_id(SDL_Texture* texture)
 {
@@ -105,6 +133,7 @@ ImGuiLayer::ImGuiLayer(SDL_Window* window, SDL_Renderer* renderer)
     io.IniFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+    imgui_font_path_ = find_imgui_font_path();
 }
 
 ImGuiLayer::~ImGuiLayer()
@@ -154,13 +183,33 @@ void ImGuiLayer::process_event(const SDL_Event& event)
     }
 }
 
-void ImGuiLayer::new_frame(
-    float framebuffer_scale_x, float framebuffer_scale_y)
+void ImGuiLayer::rebuild_font_atlas(float framebuffer_scale)
+{
+    auto& io = ImGui::GetIO();
+    io.Fonts->Clear();
+    if (!imgui_font_path_.empty()) {
+        // Scale the reference 13px default size to the monitor DPI.
+        io.Fonts->AddFontFromFileTTF(
+            imgui_font_path_.c_str(), 13.0f * framebuffer_scale);
+    }
+    if (io.Fonts->Fonts.empty()) {
+        io.Fonts->AddFontDefault();
+    }
+    last_font_scale_ = framebuffer_scale;
+}
+
+void ImGuiLayer::new_frame(float framebuffer_scale)
 {
     auto& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(800.0f, 600.0f);
-    io.DisplayFramebufferScale =
-        ImVec2(framebuffer_scale_x, framebuffer_scale_y);
+    io.DisplayFramebufferScale = ImVec2(framebuffer_scale, framebuffer_scale);
+
+    // Rebuild the font atlas when the scale changes so text stays crisp
+    // at the monitor's native resolution.
+    if (std::abs(framebuffer_scale - last_font_scale_) > 0.05f) {
+        rebuild_font_atlas(framebuffer_scale);
+    }
+
     const auto ticks = SDL_GetTicks();
     io.DeltaTime = last_frame_ticks_ == 0
         ? 1.0f / 60.0f

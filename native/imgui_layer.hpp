@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <string>
 
 namespace th2 {
 
@@ -15,16 +16,19 @@ public:
     ImGuiLayer& operator=(const ImGuiLayer&) = delete;
 
     void process_event(const SDL_Event& event);
-    void new_frame(float framebuffer_scale_x = 1.0f,
-                   float framebuffer_scale_y = 1.0f);
+    void new_frame(float framebuffer_scale = 1.0f);
     void render();
     bool wants_input() const;
     bool wants_mouse() const;
 
 private:
+    void rebuild_font_atlas(float framebuffer_scale);
+
     SDL_Window* window_;
     SDL_Renderer* renderer_;
     std::uint64_t last_frame_ticks_ = 0;
+    std::string imgui_font_path_;
+    float last_font_scale_ = 0.0f;
 };
 
 }  // namespace th2

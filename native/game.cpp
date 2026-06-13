@@ -528,10 +528,11 @@ public:
                 renderer_, &output_width, &output_height);
             const float scale_x = output_width / 800.0f;
             const float scale_y = output_height / 600.0f;
-            imgui_->new_frame(scale_x, scale_y);
+            const float framebuffer_scale = std::min(scale_x, scale_y);
+            imgui_->new_frame(framebuffer_scale);
             font_.configure(
                 config_.authentic_font, config_.font_family,
-                config_.font_size, std::min(scale_x, scale_y));
+                config_.font_size, framebuffer_scale);
             draw_config();
             draw_name_input();
             draw();

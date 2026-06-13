@@ -90,6 +90,7 @@ private:
             throw std::runtime_error(SDL_GetError());
         }
         SDL_SetTextureBlendMode(overlay_.get(), SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(overlay_.get(), SDL_SCALEMODE_LINEAR);
         overlay_width_ = width;
         overlay_height_ = height;
     }
