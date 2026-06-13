@@ -1,6 +1,7 @@
 #include "vm.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <stdexcept>
 
 namespace th2 {
@@ -109,8 +110,7 @@ void Vm::execute(const Instruction& instruction)
         pc_ += instruction.size;
         break;
     case 5:
-        registers_.at(code[pc + 2]) =
-            static_cast<std::int32_t>((pc_ * 1103515245u + 12345u) & 0xffff);
+        registers_.at(code[pc + 2]) = std::rand() % 65535;
         pc_ += instruction.size;
         break;
     case 6:

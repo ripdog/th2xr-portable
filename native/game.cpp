@@ -725,6 +725,12 @@ private:
         float height = 600.0f;
     };
 
+    enum class BackgroundKind : std::int32_t {
+        background,
+        visual,
+        hcg,
+    };
+
     struct BackgroundScroll {
         BackgroundView from;
         BackgroundView to;
@@ -833,7 +839,7 @@ private:
     bool last_anime4k_wanted_ = false;
     Texture background_;
     int bg_scene_ = -1;
-    bool bg_is_visual_ = false;
+    BackgroundKind background_kind_ = BackgroundKind::background;
     BackgroundView background_view_;
     std::optional<BackgroundScroll> background_scroll_;
     std::array<Texture, 32> overlays_{};
@@ -2808,6 +2814,15 @@ private:
         }
     }
 
+    void clear_characters()
+    {
+        characters_.clear();
+        character_textures_ = {};
+        character_animations_ = {};
+        character_staged_ = {};
+        character_pending_removal_ = {};
+    }
+
     std::size_t character_index(int character_number) const
     {
         if (character_number < 0
@@ -3094,15 +3109,24 @@ private:
         }
     }
 
-    void set_background(const th2::Event& event)
+    void set_background(const th2::Event& event, bool keep_characters)
     {
         const int scene = number(event, 1) * 10
             + std::max<std::int32_t>(0, number(event, 2));
         bg_scene_ = scene;
-        bg_is_visual_ = false;
-        background_view_ = {};
+        background_kind_ = BackgroundKind::background;
+        background_view_ = {
+            static_cast<float>(std::max(0, number(event, 4))),
+            static_cast<float>(std::max(0, number(event, 5))),
+            800.0f,
+            600.0f,
+        };
         background_scroll_.reset();
-        apply_staged_characters();
+        if (keep_characters) {
+            apply_staged_characters();
+        } else {
+            clear_characters();
+        }
         const auto name = std::format(
             "B{:03d}{}{}{}.bmp", scene / 10,
             (tone_back_ < 0 ? tone_ : tone_back_) % 4,
@@ -3114,32 +3138,36 @@ private:
         background_ = load_toned_texture(
             renderer_, backgrounds_, name, graphics_,
             background_tone_curves());
-        reload_character_textures();
+        if (keep_characters) {
+            reload_character_textures();
+        }
     }
 
-    void set_visual(const th2::Event& event)
+    void set_cg(
+        const th2::Event& event, BackgroundKind kind, char prefix)
     {
         int visual = number(event, 1) * 10;
         if (number(event, 2) >= 0) {
             visual += number(event, 2);
         }
         bg_scene_ = visual;
-        bg_is_visual_ = true;
-        background_view_ = {};
+        background_kind_ = kind;
+        background_view_ = {
+            static_cast<float>(std::max(0, number(event, 5))),
+            static_cast<float>(std::max(0, number(event, 6))),
+            800.0f,
+            600.0f,
+        };
         background_scroll_.reset();
-        apply_staged_characters();
         background_ = load_toned_texture(
-            renderer_, graphics_, std::format("v{:06d}.tga", visual),
+            renderer_, graphics_, std::format("{}{:06d}.tga", prefix, visual),
             graphics_, background_tone_curves());
         const bool keep_characters = number(event, 4) > 0;
-        if (!keep_characters) {
-            characters_.clear();
-            character_textures_ = {};
-            character_animations_ = {};
-            character_staged_ = {};
-            character_pending_removal_ = {};
-        } else {
+        if (keep_characters) {
+            apply_staged_characters();
             reload_character_textures();
+        } else {
+            clear_characters();
         }
     }
 
@@ -3148,10 +3176,12 @@ private:
         if (bg_scene_ < 0) {
             return;
         }
-        if (bg_is_visual_) {
+        if (background_kind_ != BackgroundKind::background) {
+            const char prefix =
+                background_kind_ == BackgroundKind::visual ? 'v' : 'h';
             background_ = load_toned_texture(
                 renderer_, graphics_,
-                std::format("v{:06d}.tga", bg_scene_),
+                std::format("{}{:06d}.tga", prefix, bg_scene_),
                 graphics_, background_tone_curves());
         } else {
             const auto name = std::format(
@@ -3212,18 +3242,19 @@ private:
             if (number(event, 1) >= 0) {
                 begin_transition(
                     number(event, 0), number(event, 3), number(event, 6), true);
-                set_background(event);
+                set_background(
+                    event, name == "BC" || name == "BCT");
             }
         } else if (name == "H" || name == "HT") {
             if (number(event, 1) >= 0) {
                 begin_transition(
                     number(event, 0), number(event, 3), number(event, 7), true);
-                set_background(event);
+                set_cg(event, BackgroundKind::hcg, 'h');
             }
         } else if (name == "V" || name == "VT") {
             begin_transition(
                 number(event, 0), number(event, 3), number(event, 7), true);
-            set_visual(event);
+            set_cg(event, BackgroundKind::visual, 'v');
         } else if (name == "FI") {
             begin_background_fade(0.0f, 30);
         } else if (name == "FIF") {
@@ -3653,6 +3684,12 @@ private:
             map_events_.push_back(MapEvent{
                 number(event, 0), number(event, 1), number(event, 2),
                 text(event, 3)});
+        } else if (name == "LoadScript") {
+            for (std::size_t i = 0; i < overlays_.size(); ++i) {
+                overlays_[i].reset();
+                overlay_states_[i] = {};
+            }
+            runtime_.load(text(event, 0));
         } else {
             return false;
         }
@@ -3705,7 +3742,8 @@ private:
             output << value << ' ';
         }
         output << "\nbackground=" << bg_scene_
-               << "\nvisual=" << bg_is_visual_
+               << "\nbackground_kind="
+               << static_cast<std::int32_t>(background_kind_)
                << "\ntone=" << tone_
                << "\ntone_back=" << tone_back_
                << "\ntone_char=" << tone_char_
@@ -3952,7 +3990,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 18);  // native version
+        write_u32(out, 19);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -4023,7 +4061,7 @@ private:
 
         // Background
         write_i32(out, bg_scene_);
-        write_i32(out, bg_is_visual_ ? 1 : 0);
+        write_i32(out, static_cast<std::int32_t>(background_kind_));
         write_i32(out, static_cast<std::int32_t>(background_view_.x));
         write_i32(out, static_cast<std::int32_t>(background_view_.y));
         write_i32(out, static_cast<std::int32_t>(background_view_.width));
@@ -4226,7 +4264,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 18) {
+        if (version != 19) {
             return;
         }
 
@@ -4324,7 +4362,8 @@ private:
 
         // Background
         bg_scene_ = read_i32(in);
-        bg_is_visual_ = read_i32(in) != 0;
+        background_kind_ =
+            static_cast<BackgroundKind>(read_i32(in));
         background_view_.x = static_cast<float>(read_i32(in));
         background_view_.y = static_cast<float>(read_i32(in));
         background_view_.width = static_cast<float>(read_i32(in));

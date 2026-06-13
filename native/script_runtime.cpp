@@ -130,7 +130,18 @@ bool ScriptRuntime::handle(const Event& event)
     if (event.instruction.name == "SetFlag") {
         const auto index = integer(event, 0);
         const auto value = integer(event, 1);
-        (index >= 50 && index < 100 ? game_flags_ : flags_).at(index) = value;
+        if (index >= 50 && index < 100) {
+            game_flags_.at(index) = value;
+            static constexpr std::array completion_flags{
+                81, 83, 84, 85, 86, 88, 89, 90, 93,
+            };
+            game_flags_[80] = static_cast<std::int32_t>(std::ranges::count_if(
+                completion_flags, [this](int flag) {
+                    return game_flags_[flag] != 0;
+                }));
+        } else {
+            flags_.at(index) = value;
+        }
         return true;
     }
     if (event.instruction.name == "GetFlag") {
@@ -146,10 +157,6 @@ bool ScriptRuntime::handle(const Event& event)
     }
     if (event.instruction.name == "GetGameFlag") {
         vm_->set_reg(target(event, 1).index, game_flags_.at(integer(event, 0)));
-        return true;
-    }
-    if (event.instruction.name == "LoadScript") {
-        load(std::get<std::string>(event.arguments.at(0)));
         return true;
     }
     if (event.instruction.name == "LoadScriptNum") {
