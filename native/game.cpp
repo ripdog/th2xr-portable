@@ -12,6 +12,7 @@
 #include "video.hpp"
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_video.h>
 #include <imgui.h>
 
 #include <algorithm>
@@ -166,7 +167,7 @@ public:
             throw std::runtime_error(SDL_GetError());
         }
         window_ = SDL_CreateWindow(
-            "ToHeart2 XRATED", 1600, 1200, SDL_WINDOW_RESIZABLE);
+            "ToHeart2 XRATED", 1600, 1200, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
         SDL_PropertiesID renderer_properties = SDL_CreateProperties();
         SDL_SetStringProperty(
             renderer_properties, SDL_PROP_RENDERER_CREATE_NAME_STRING,
