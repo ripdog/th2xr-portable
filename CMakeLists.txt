@@ -130,6 +130,13 @@ if(BUILD_TESTING)
     target_link_libraries(th2-expression-test PRIVATE th2_bytecode)
     add_test(NAME expression-evaluator COMMAND th2-expression-test)
 
+    add_executable(th2-tone-curve-test
+        native/tone_curve_test.cpp
+        native/image.cpp
+    )
+    target_link_libraries(th2-tone-curve-test PRIVATE SDL3::SDL3)
+    add_test(NAME tone-curve COMMAND th2-tone-curve-test)
+
 endif()
 
 add_executable(th2-sdl-smoke

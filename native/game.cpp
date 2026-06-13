@@ -115,6 +115,47 @@ Texture load_texture(SDL_Renderer* renderer, const th2::Archive& archive,
     return Texture(texture);
 }
 
+struct ToneCurveSpec {
+    std::string name;
+    int vividness = 256;
+};
+
+Texture load_toned_texture(
+    SDL_Renderer* renderer,
+    const th2::Archive& image_archive,
+    std::string_view image_name,
+    const th2::Archive& curve_archive,
+    const std::vector<ToneCurveSpec>& curves)
+{
+    const auto* image = image_archive.find(image_name);
+    if (!image) {
+        throw std::runtime_error(
+            "image not found: " + std::string(image_name));
+    }
+    Surface surface(
+        th2::load_image(image_archive.read(*image), image->name));
+    for (const auto& curve : curves) {
+        if (curve.name.empty()) {
+            th2::apply_tone_curve(surface.get(), {}, curve.vividness);
+            continue;
+        }
+        const auto* entry = curve_archive.find(curve.name);
+        if (!entry) {
+            throw std::runtime_error(
+                "tone curve not found: " + curve.name);
+        }
+        th2::apply_tone_curve(
+            surface.get(), curve_archive.read(*entry), curve.vividness);
+    }
+    SDL_Texture* texture =
+        SDL_CreateTextureFromSurface(renderer, surface.get());
+    if (!texture) {
+        throw std::runtime_error(SDL_GetError());
+    }
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    return Texture(texture);
+}
+
 th2::AudioClip load_audio(const th2::Archive& archive, std::string_view name)
 {
     const auto* entry = archive.find(name);
@@ -605,6 +646,7 @@ private:
         std::string archive;
         bool visible = true;
         int layer = 0;
+        int tone_type = 0;
         int parameter = 0;
         int parameter_value = 0;
         int reverse = 0;
@@ -1006,6 +1048,7 @@ private:
     int tone_back_ = -1;
     int tone_char_ = -1;
     int weather_ = 0;
+    std::string background_tone_curve_;
     bool running_ = true;
     bool waiting_for_input_ = false;
     std::optional<std::chrono::steady_clock::time_point> wake_time_;
@@ -2733,11 +2776,72 @@ private:
     {
         auto& loaded = character_texture(character.number);
         if (loaded.pose != character.pose || !loaded.texture) {
-            loaded.texture = load_texture(
+            loaded.texture = load_toned_texture(
                 renderer_, graphics_,
-                th2::character_asset_name(character.number, character.pose));
+                th2::character_asset_name(character.number, character.pose),
+                graphics_, character_tone_curves());
             loaded.pose = character.pose;
         }
+    }
+
+    void reload_character_textures()
+    {
+        character_textures_ = {};
+        for (const auto& character : characters_.ordered()) {
+            load_character_texture(character);
+        }
+    }
+
+    static std::vector<ToneCurveSpec> effect_tone_curves(
+        int tone, bool character)
+    {
+        switch (tone / 4) {
+        case 1: return {{"sepia.amp", 0}};
+        case 2: return {{"nega.amp", 256}};
+        case 3: return {{"", 0}};
+        case 4: return {{"blue.amp", 128}};
+        case 5: return {{"red.amp", 128}};
+        case 6: return {{"green.amp", 128}};
+        case 7: return {{"blue2.amp", 128}};
+        case 8: return {{"brown.amp", 128}};
+        case 9: return {{"sepia_half.amp", 128}};
+        case 10: return {{"black.amp", character ? 0 : 256}};
+        case 11: return {{"yoritomo.amp", character ? 0 : 256}};
+        default: return {};
+        }
+    }
+
+    static std::string base_tone_curve(int tone)
+    {
+        switch (tone % 4) {
+        case 1: return "evening.amp";
+        case 2: return "night.amp";
+        case 3: return "indoor.amp";
+        default: return {};
+        }
+    }
+
+    std::vector<ToneCurveSpec> background_tone_curves() const
+    {
+        const int tone = tone_back_ < 0 ? tone_ : tone_back_;
+        return effect_tone_curves(tone, false);
+    }
+
+    std::vector<ToneCurveSpec> character_tone_curves() const
+    {
+        const int tone = tone_char_ < 0 ? tone_ : tone_char_;
+        std::vector<ToneCurveSpec> result;
+        if (tone_char_ < 0 && !background_tone_curve_.empty()) {
+            result.push_back({background_tone_curve_, 256});
+        } else if (const auto base = base_tone_curve(tone); !base.empty()) {
+            result.push_back({base, 256});
+        }
+        if (weather_ != 0) {
+            result.push_back({"rain.amp", 256});
+        }
+        auto effect = effect_tone_curves(tone, true);
+        result.insert(result.end(), effect.begin(), effect.end());
+        return result;
     }
 
     static int character_effect_frames(int frames)
@@ -2963,6 +3067,7 @@ private:
         background_scroll_.reset();
         if (scene == 0) {
             background_.reset();
+            background_tone_curve_.clear();
             characters_.clear();
             character_textures_ = {};
             return;
@@ -2971,7 +3076,14 @@ private:
             "B{:03d}{}{}{}.bmp", scene / 10,
             (tone_back_ < 0 ? tone_ : tone_back_) % 4,
             weather_, scene % 10);
-        background_ = load_texture(renderer_, backgrounds_, name);
+        const auto curve_name =
+            std::filesystem::path(name).replace_extension(".amp").string();
+        background_tone_curve_ =
+            graphics_.find(curve_name) ? curve_name : std::string{};
+        background_ = load_toned_texture(
+            renderer_, backgrounds_, name, graphics_,
+            background_tone_curves());
+        reload_character_textures();
     }
 
     void set_visual(const th2::Event& event)
@@ -2984,12 +3096,15 @@ private:
         bg_is_visual_ = true;
         background_view_ = {};
         background_scroll_.reset();
-        background_ = load_texture(
-            renderer_, graphics_, std::format("v{:06d}.tga", visual));
+        background_ = load_toned_texture(
+            renderer_, graphics_, std::format("v{:06d}.tga", visual),
+            graphics_, background_tone_curves());
         const bool keep_characters = number(event, 4) > 0;
         if (!keep_characters) {
             characters_.clear();
             character_textures_ = {};
+        } else {
+            reload_character_textures();
         }
     }
 
@@ -2999,16 +3114,24 @@ private:
             return;
         }
         if (bg_is_visual_) {
-            background_ = load_texture(
+            background_ = load_toned_texture(
                 renderer_, graphics_,
-                std::format("v{:06d}.tga", bg_scene_));
+                std::format("v{:06d}.tga", bg_scene_),
+                graphics_, background_tone_curves());
         } else {
             const auto name = std::format(
                 "B{:03d}{}{}{}.bmp", bg_scene_ / 10,
                 (tone_back_ < 0 ? tone_ : tone_back_) % 4,
                 weather_, bg_scene_ % 10);
-            background_ = load_texture(renderer_, backgrounds_, name);
+            const auto curve_name =
+                std::filesystem::path(name).replace_extension(".amp").string();
+            background_tone_curve_ =
+                graphics_.find(curve_name) ? curve_name : std::string{};
+            background_ = load_toned_texture(
+                renderer_, backgrounds_, name, graphics_,
+                background_tone_curves());
         }
+        reload_character_textures();
     }
 
     std::optional<std::size_t> overlay_index(int requested) const
@@ -3023,14 +3146,21 @@ private:
         return static_cast<std::size_t>(requested);
     }
 
-    void load_overlay(std::size_t slot, std::string name, std::string archive)
+    void load_overlay(
+        std::size_t slot, std::string name, std::string archive,
+        int tone_type = 0)
     {
         const auto& source = archive == "bak" ? backgrounds_ : graphics_;
-        overlays_[slot] = load_texture(renderer_, source, name);
+        overlays_[slot] = load_toned_texture(
+            renderer_, source, name, graphics_,
+            tone_type == 1
+                ? character_tone_curves()
+                : background_tone_curves());
         auto& state = overlay_states_[slot];
         state = {};
         state.name = std::move(name);
         state.archive = std::move(archive);
+        state.tone_type = tone_type;
         float width = 0.0f;
         float height = 0.0f;
         SDL_GetTextureSize(overlays_[slot].get(), &width, &height);
@@ -3181,7 +3311,9 @@ private:
             weather_ = std::max<std::int32_t>(0, number(event, 0));
         } else if (name == "SetBmpEx") {
             if (const auto slot = overlay_index(number(event, 0))) {
-                load_overlay(*slot, text(event, 2), text(event, 6));
+                load_overlay(
+                    *slot, text(event, 2), text(event, 6),
+                    number(event, 5) < 0 ? 1 : number(event, 5));
                 overlay_states_[*slot].layer = number(event, 3);
             }
         } else if (name == "ResetBmp") {
@@ -3784,7 +3916,7 @@ private:
 
     void save_body(std::ostream& out) const
     {
-        write_u32(out, 16);  // native version
+        write_u32(out, 17);  // native version
 
         // Script identity
         write_str(out, runtime_.script_name(), 64);
@@ -3891,6 +4023,7 @@ private:
             write_str(out, state.archive, 16);
             write_i32(out, state.visible ? 1 : 0);
             write_i32(out, state.layer);
+            write_i32(out, state.tone_type);
             write_i32(out, state.parameter);
             write_i32(out, state.parameter_value);
             write_i32(out, state.reverse);
@@ -4054,7 +4187,7 @@ private:
     void load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != 16) {
+        if (version != 17) {
             return;
         }
 
@@ -4192,6 +4325,7 @@ private:
             state.archive = archive;
             state.visible = read_i32(in) != 0;
             state.layer = read_i32(in);
+            state.tone_type = read_i32(in);
             state.parameter = read_i32(in);
             state.parameter_value = read_i32(in);
             state.reverse = read_i32(in);
@@ -4210,7 +4344,7 @@ private:
             state.zoom_center_y = read_i32(in);
             state.zoom = read_i32(in);
             if (slot < overlays_.size()) {
-                load_overlay(slot, name, archive);
+                load_overlay(slot, name, archive, state.tone_type);
                 overlay_states_[slot] = std::move(state);
             }
         }

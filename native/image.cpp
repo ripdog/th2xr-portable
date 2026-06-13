@@ -1,6 +1,7 @@
 #include "image.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cctype>
 #include <stdexcept>
 #include <string>
@@ -35,7 +36,13 @@ SDL_Surface* load_image(
         if (!input) {
             throw std::runtime_error(SDL_GetError());
         }
-        SDL_Surface* surface = SDL_LoadBMP_IO(input, true);
+        SDL_Surface* loaded = SDL_LoadBMP_IO(input, true);
+        if (!loaded) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        SDL_Surface* surface =
+            SDL_ConvertSurface(loaded, SDL_PIXELFORMAT_RGBA32);
+        SDL_DestroySurface(loaded);
         if (!surface) {
             throw std::runtime_error(SDL_GetError());
         }
@@ -119,6 +126,70 @@ SDL_Surface* load_tga(std::span<const std::uint8_t> bytes)
         }
     }
     return surface;
+}
+
+void apply_tone_curve(
+    SDL_Surface* surface,
+    std::span<const std::uint8_t> curve,
+    int vividness)
+{
+    if (!surface) {
+        throw std::invalid_argument("tone curve surface is null");
+    }
+    if (!curve.empty() && curve.size() != 256
+        && curve.size() != 768 && curve.size() != 1280) {
+        throw std::runtime_error("invalid tone curve size");
+    }
+
+    vividness = std::clamp(vividness, 0, 256);
+    if (surface->format != SDL_PIXELFORMAT_RGBA32) {
+        throw std::runtime_error("tone curve requires an RGBA32 surface");
+    }
+    auto map_channel = [&](std::uint8_t value, int channel) {
+        if (curve.empty()) {
+            return value;
+        }
+        if (curve.size() == 256) {
+            return curve[value];
+        }
+        if (curve.size() == 768) {
+            return curve[static_cast<std::size_t>(channel) * 256 + value];
+        }
+        const auto channel_value =
+            curve[256 + static_cast<std::size_t>(channel) * 256 + value];
+        return curve[channel_value];
+    };
+
+    const auto* format = SDL_GetPixelFormatDetails(surface->format);
+    const auto* palette = SDL_GetSurfacePalette(surface);
+    auto* pixels = static_cast<std::uint32_t*>(surface->pixels);
+    const auto pitch = surface->pitch / sizeof(std::uint32_t);
+    for (int y = 0; y < surface->h; ++y) {
+        for (int x = 0; x < surface->w; ++x) {
+            auto& pixel = pixels[static_cast<std::size_t>(y) * pitch + x];
+            std::uint8_t red = 0;
+            std::uint8_t green = 0;
+            std::uint8_t blue = 0;
+            std::uint8_t alpha = 0;
+            SDL_GetRGBA(
+                pixel, format, palette, &red, &green, &blue, &alpha);
+            if (vividness != 256) {
+                const int gray = (red * 77 + green * 28 + blue * 151) >> 8;
+                red = static_cast<std::uint8_t>(
+                    (gray * (256 - vividness) + red * vividness) >> 8);
+                green = static_cast<std::uint8_t>(
+                    (gray * (256 - vividness) + green * vividness) >> 8);
+                blue = static_cast<std::uint8_t>(
+                    (gray * (256 - vividness) + blue * vividness) >> 8);
+            }
+            pixel = SDL_MapRGBA(
+                format, palette,
+                map_channel(red, 0),
+                map_channel(green, 1),
+                map_channel(blue, 2),
+                alpha);
+        }
+    }
 }
 
 }  // namespace th2
