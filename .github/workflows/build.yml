@@ -73,67 +73,31 @@ jobs:
     runs-on: windows-latest
     strategy:
       fail-fast: false
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup vcpkg
-        run: |
-          Remove-Item -Recurse -Force C:\vcpkg -ErrorAction SilentlyContinue
-          git clone https://github.com/microsoft/vcpkg.git C:/vcpkg
-          C:/vcpkg/bootstrap-vcpkg.bat
-
-      - name: Install vcpkg packages (no ffmpeg)
-        shell: bash
-        run: |
-          C:/vcpkg/vcpkg install --triplet x64-windows
-
-      - name: Find glslangValidator (diagnostic)
-        shell: bash
-        run: |
-          echo "=== Searching workspace ==="
-          find . -name 'glslangValidator*' 2>/dev/null || true
-          echo "=== Searching C:/vcpkg ==="
-          find /c/vcpkg -name 'glslangValidator*' 2>/dev/null || true
-          echo "=== Listing C:/vcpkg/installed tools ==="
-          ls -R /c/vcpkg/installed/*/tools/glslang/ 2>/dev/null || true
-          echo "=== PATH ==="
-          echo "$PATH"
-
-      - name: Download pre-built FFmpeg
-        shell: bash
-        run: |
-          curl -fsSL -o ffmpeg.7z \
-            'https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-essentials.7z'
-          7z x ffmpeg.7z "-oC:/ffmpeg" -y
-
-      - name: Generate FFmpeg pkg-config files
-        shell: bash
-        run: |
-          FF_DIR=$(ls -d /c/ffmpeg/ffmpeg-* 2>/dev/null || ls -d C:/ffmpeg/ffmpeg-*)
-          mkdir -p "$FF_DIR/lib/pkgconfig"
-          for lib in avformat avcodec avutil swscale swresample; do
-            cat > "$FF_DIR/lib/pkgconfig/lib${lib}.pc" << EOF
-          prefix=$FF_DIR
-          exec_prefix=\${prefix}
-          libdir=\${exec_prefix}/lib
-          includedir=\${prefix}/include
-
-          Name: lib${lib}
-          Description: FFmpeg ${lib} library
-          Version: 61.0.0
-          Libs: -L\${libdir} -l${lib}
-          Cflags: -I\${includedir}
-          EOF
-          done
-          echo "PKG_CONFIG_PATH=$FF_DIR/lib/pkgconfig" >> $GITHUB_ENV
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-SDL3
+            mingw-w64-ucrt-x86_64-SDL3_ttf
+            mingw-w64-ucrt-x86_64-libsndfile
+            mingw-w64-ucrt-x86_64-fontconfig
+            mingw-w64-ucrt-x86_64-ffmpeg
+            mingw-w64-ucrt-x86_64-glslang
 
       - name: Configure
-        run: |
-          cmake -S . -B build -DBUILD_TESTING=ON `
-            -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
+        run: cmake -S . -B build -DBUILD_TESTING=ON -G 'Ninja'
 
       - name: Build
-        run: cmake --build build --config Release -- -j $env:NUMBER_OF_PROCESSORS
+        run: cmake --build build
 
       - name: Test
-        run: ctest --test-dir build --config Release --output-on-failure
+        run: ctest --test-dir build --output-on-failure
