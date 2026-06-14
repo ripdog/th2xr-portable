@@ -8411,19 +8411,32 @@ private:
                             0.0f, fade_width) / fade_width;
                     }
                     if (glyph_alpha > 0.0f) {
+                        const auto glyph_end = glyph_offset + glyph_bytes;
                         const auto prefix =
                             std::string_view(line).substr(0, glyph_offset);
-                        const float glyph_x = x + font_.text_width(prefix);
+                        const auto through_glyph =
+                            std::string_view(line).substr(0, glyph_end);
+                        const float glyph_left =
+                            x + font_.text_width(prefix);
+                        const float glyph_right =
+                            x + font_.text_width(through_glyph);
                         const auto alpha = static_cast<std::uint8_t>(
                             glyph_alpha * 255.0f);
-                        const auto glyph = std::string_view(line).substr(
-                            glyph_offset, glyph_bytes);
+                        const SDL_Rect clip{
+                            static_cast<int>(std::floor(glyph_left)),
+                            static_cast<int>(std::floor(y)),
+                            std::max(
+                                1, static_cast<int>(
+                                    std::ceil(glyph_right - glyph_left))),
+                            31};
+                        SDL_SetRenderClipRect(renderer_, &clip);
                         font_.draw(
-                            renderer_, glyph_x + 2.0f, y + 2.0f,
-                            glyph, 0, 0, 0, alpha);
+                            renderer_, x + 2.0f, y + 2.0f,
+                            line, 0, 0, 0, alpha);
                         font_.draw(
-                            renderer_, glyph_x, y, glyph,
+                            renderer_, x, y, line,
                             255, 255, 255, alpha);
+                        SDL_SetRenderClipRect(renderer_, nullptr);
                     }
                     glyph_offset += glyph_bytes;
                 }
