@@ -138,6 +138,7 @@ private:
 
     void start_route()
     {
+        game_.retire_soak_gpu_work(true);
         for (std::size_t i = 0; i < game_flags_.size(); ++i) {
             game_.runtime_.set_game_flag(i, game_flags_[i]);
             game_.config_.game_flags[i] = game_flags_[i];
@@ -148,6 +149,7 @@ private:
         last_progress_.clear();
         stagnant_ticks_ = 0;
         game_.start_new_game();
+        game_.retire_soak_gpu_work(true);
     }
 
     std::string progress_key() const

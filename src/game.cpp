@@ -708,6 +708,7 @@ public:
                 update_character_animations();
                 update_clock_calendar();
                 update_sakura();
+                retire_soak_gpu_work();
                 next_frame = std::chrono::steady_clock::now();
                 continue;
             }
@@ -985,6 +986,7 @@ private:
     const std::filesystem::path config_path_;
     th2::GameConfig config_;
     std::unique_ptr<th2::SoakGameDriver<Game>> soak_;
+    std::size_t soak_renderer_ticks_ = 0;
 
     // SDL subsystem lifetime.  window_/renderer_ holders are declared before
     // every other SDL-dependent member so that textures, audio streams, etc.
@@ -2428,6 +2430,25 @@ private:
         }
         SDL_SetTextureBlendMode(raw, SDL_BLENDMODE_BLEND);
         return Texture(raw);
+    }
+
+    void retire_soak_gpu_work(bool force = false)
+    {
+        constexpr std::size_t flush_interval = 64;
+        if (!force && ++soak_renderer_ticks_ < flush_interval) {
+            return;
+        }
+        soak_renderer_ticks_ = 0;
+        // SDL_GPU retires transient uploads at present boundaries. Without
+        // these, accelerated soak runs retain every scene's staging buffers.
+        if (!SDL_SetRenderTarget(renderer_, nullptr)) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        SDL_SetRenderScale(renderer_, 1.0f, 1.0f);
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+        if (!SDL_RenderClear(renderer_) || !SDL_RenderPresent(renderer_)) {
+            throw std::runtime_error(SDL_GetError());
+        }
     }
 
     std::vector<std::uint8_t> load_transition_mask(
