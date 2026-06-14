@@ -5,8 +5,10 @@
 #include <cctype>
 #include <cmath>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <stdexcept>
 
 namespace th2 {
@@ -28,6 +30,32 @@ bool ends_with_sdt(const std::string& name)
         return static_cast<char>(std::tolower(byte));
     });
     return extension == ".sdt";
+}
+
+std::string lowercase(std::string value)
+{
+    std::ranges::transform(value, value.begin(), [](unsigned char byte) {
+        return static_cast<char>(std::tolower(byte));
+    });
+    return value;
+}
+
+std::optional<std::filesystem::path> find_loose_script(
+    const std::filesystem::path& directory, const std::string& name)
+{
+    if (std::filesystem::is_regular_file(directory / name)) {
+        return directory / name;
+    }
+    const auto target = lowercase(name);
+    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+        if (lowercase(entry.path().filename().string()) == target) {
+            return entry.path();
+        }
+    }
+    return std::nullopt;
 }
 
 std::int32_t integer(const Event& event, std::size_t index)
@@ -59,9 +87,8 @@ void ScriptRuntime::load(std::string name)
         name += ".sdt";
     }
     if (!loose_script_directory_.empty()) {
-        const auto path = loose_script_directory_ / name;
-        if (std::filesystem::is_regular_file(path)) {
-            load_file(path);
+        if (const auto path = find_loose_script(loose_script_directory_, name)) {
+            load_file(*path);
             return;
         }
     }

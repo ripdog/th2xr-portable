@@ -105,6 +105,20 @@ add_executable(th2-script-audit
 target_link_libraries(th2-script-audit PRIVATE
     th2_runtime)
 
+add_executable(th2-conformance-generator
+    conformance/make_th2_conformance.cpp
+)
+target_link_libraries(th2-conformance-generator PRIVATE th2_bytecode)
+
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/conformance/999999999.SDT"
+    COMMAND th2-conformance-generator
+        "${CMAKE_CURRENT_SOURCE_DIR}/conformance/999999999.SDT"
+    DEPENDS th2-conformance-generator
+    VERBATIM)
+add_custom_target(th2-conformance ALL
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/conformance/999999999.SDT")
+
 if(BUILD_TESTING)
     add_executable(th2-scenario-test
         native/scenario_test.cpp
@@ -135,6 +149,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(th2-expression-test PRIVATE th2_bytecode)
     add_test(NAME expression-evaluator COMMAND th2-expression-test)
+
+    add_executable(th2-script-runtime-test
+        native/script_runtime_test.cpp
+    )
+    target_link_libraries(th2-script-runtime-test PRIVATE th2_runtime)
+    add_test(NAME script-runtime-loose-lookup COMMAND th2-script-runtime-test)
 
     add_executable(th2-tone-curve-test
         native/tone_curve_test.cpp

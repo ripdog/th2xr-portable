@@ -4126,7 +4126,28 @@ private:
                 overlay_pixels_[i].reset();
                 overlay_states_[i] = {};
             }
+            choices_.clear();
+            choosing_ = false;
+            choice_highlight_ = 0;
+            choice_selected_ = -1;
+            choice_result_register_ = -1;
+            choice_ex_ = false;
+            waiting_for_input_ = false;
+            message_ends_block_ = false;
             load_script(text(event, 0));
+        } else if (name == "SetSelectMes") {
+            choices_.push_back(Choice{
+                interpret_newlines(th2::substitute_player_name(
+                    text(event, 0), config_.player_name)),
+                number(event, 1),
+                number(event, 2),
+            });
+        } else if (name == "SetSelect") {
+            choice_result_register_ =
+                std::get<th2::RegisterTarget>(event.arguments.at(0)).index;
+            choosing_ = true;
+            choice_highlight_ = 0;
+            choice_selected_ = -1;
         } else {
             return false;
         }
