@@ -14,6 +14,12 @@ int main(int argc, char** argv)
         != "Alex Smith (Al) l/i/A") {
         return 1;
     }
+    if (th2::substitute_player_name("*h2", name) != "Komaki"
+        || th2::substitute_player_name("*h2", name, true) != "Manaka"
+        || th2::substitute_player_name(
+               "*h2 and *nf", name, true) != "Manaka and Alex") {
+        return 6;
+    }
     const auto path =
         std::filesystem::temp_directory_path() / "th2-name-defaults.exe";
     {

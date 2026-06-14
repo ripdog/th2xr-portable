@@ -91,7 +91,8 @@ bool uses_default_voice_name(
 }
 
 std::string substitute_player_name(
-    std::string_view source, const PlayerName& name)
+    std::string_view source, const PlayerName& name,
+    bool use_komaki_given_name)
 {
     struct Replacement {
         std::string_view token;
@@ -108,6 +109,11 @@ std::string substitute_player_name(
 
     std::string result;
     for (std::size_t position = 0; position < source.size();) {
+        if (source.substr(position).starts_with("*h2")) {
+            result += use_komaki_given_name ? "Manaka" : "Komaki";
+            position += 3;
+            continue;
+        }
         bool replaced = false;
         for (const auto& replacement : replacements) {
             if (source.substr(position).starts_with(replacement.token)) {

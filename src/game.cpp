@@ -4071,7 +4071,8 @@ private:
         } else if (name == "SetMessage2") {
             push_backlog();
             message_.set(th2::substitute_player_name(
-                text(event, 0), config_.player_name));
+                text(event, 0), config_.player_name,
+                runtime_.flag(213) != 0));
             message_visible_ = true;
             current_line_key_ = runtime_.script_name() + ':'
                 + std::to_string(runtime_.vm_pc());
@@ -4080,7 +4081,8 @@ private:
             auto_next_time_.reset();
         } else if (name == "AddMessage2") {
             message_.append(th2::substitute_player_name(
-                text(event, 0), config_.player_name));
+                text(event, 0), config_.player_name,
+                runtime_.flag(213) != 0));
             message_visible_ = true;
             current_line_key_ = runtime_.script_name() + ':'
                 + std::to_string(runtime_.vm_pc());
@@ -4189,7 +4191,8 @@ private:
         } else if (name == "SetSelectMes") {
             choices_.push_back(Choice{
                 interpret_newlines(th2::substitute_player_name(
-                    text(event, 0), config_.player_name)),
+                    text(event, 0), config_.player_name,
+                    runtime_.flag(213) != 0)),
                 number(event, 1),
                 number(event, 2),
             });
@@ -4221,7 +4224,8 @@ private:
         } else if (name == "SetSelectMes") {
             choices_.push_back(Choice{
                 interpret_newlines(th2::substitute_player_name(
-                    text(event, 0), config_.player_name)),
+                    text(event, 0), config_.player_name,
+                    runtime_.flag(213) != 0)),
                 number(event, 1),
                 number(event, 2),
             });
