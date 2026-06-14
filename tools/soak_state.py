@@ -53,6 +53,40 @@ def remove_all(routes: list[str], removed: Iterable[str]) -> None:
     routes[:] = [route for route in routes if route not in removed_set]
 
 
+def is_subtree_path(route: str, prefix: str) -> bool:
+    return not prefix or route == prefix or route.startswith(prefix + ",")
+
+
+def prune_subtree(state: SoakState, prefix: str) -> tuple[int, int]:
+    removed_routes = unique(
+        route
+        for route in [*state.active, *state.pending, *state.completed]
+        if is_subtree_path(route, prefix)
+    )
+    state.active = [
+        route for route in state.active
+        if not is_subtree_path(route, prefix)
+    ]
+    state.pending = [
+        route for route in state.pending
+        if not is_subtree_path(route, prefix)
+    ]
+    state.completed = [
+        route for route in state.completed
+        if not is_subtree_path(route, prefix)
+    ]
+
+    removed_nodes = [
+        route for route in state.nodes if is_subtree_path(route, prefix)
+    ]
+    for route in removed_nodes:
+        del state.nodes[route]
+
+    state.pending.insert(0, prefix)
+    state.pending_records = len(state.pending)
+    return len(removed_routes), len(removed_nodes)
+
+
 def quoted(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 

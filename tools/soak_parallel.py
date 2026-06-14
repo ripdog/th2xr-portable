@@ -63,6 +63,11 @@ def lease_routes(state: SoakState, count: int) -> list[str]:
     return leased
 
 
+def requeue_failed_routes(state: SoakState, routes: list[str]) -> None:
+    remove_all(state.pending, routes)
+    state.pending = [*routes, *state.pending]
+
+
 def merge_worker(
     global_state: SoakState, worker_directory: Path, leased_route: str
 ) -> None:
@@ -183,8 +188,17 @@ def main() -> int:
                     )
 
                 try:
+                    results: list[tuple[int, str, Path, int]] = []
                     for index, route, worker_directory, process in processes:
                         return_code = process.wait()
+                        results.append(
+                            (
+                                index,
+                                route,
+                                worker_directory,
+                                return_code,
+                            )
+                        )
                         print(
                             f"[worker {index}] exited {return_code}: "
                             f"{route or '<root>'}",
@@ -203,14 +217,26 @@ def main() -> int:
                     raise
 
                 state = parse_state(state_path)
-                for index, route, worker_directory, process in processes:
+                failed: list[tuple[int, str, int]] = []
+                for (
+                    index,
+                    route,
+                    worker_directory,
+                    return_code,
+                ) in results:
                     remove_all(state.active, [route])
                     merge_worker(state, worker_directory, route)
                     append_worker_log(
                         arguments.state / "runs.log", worker_directory
                     )
-                    completed += 1
+                    if return_code == 0:
+                        completed += 1
+                    else:
+                        failed.append((index, route, return_code))
                 remove_all(state.pending, state.completed)
+                requeue_failed_routes(
+                    state, [route for _, route, _ in failed]
+                )
                 state.pending_records = len(state.pending)
                 write_state(state_path, state)
                 print(
@@ -218,6 +244,15 @@ def main() -> int:
                     f"finished, {len(state.remaining)} known remaining",
                     flush=True,
                 )
+                if failed:
+                    for index, route, return_code in failed:
+                        print(
+                            f"parallel soak stopped: worker {index} failed "
+                            f"with exit code {return_code} on route "
+                            f"{route or '<root>'}",
+                            file=sys.stderr,
+                        )
+                    return 1
     except KeyboardInterrupt:
         print("parallel soak interrupted", file=sys.stderr)
         return 130

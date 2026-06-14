@@ -155,6 +155,17 @@ Independent routes can be processed concurrently:
 python3 tools/soak_parallel.py --workers 4 --runs 20
 ```
 
+If a decision baseline was recorded from invalid engine state, stop the
+parallel coordinator and preview pruning that decision and its descendants:
+
+```sh
+python3 tools/soak_prune.py 1,0,0 --state logs/soak
+python3 tools/soak_prune.py 1,0,0 --state logs/soak --apply
+```
+
+The decision prefix is queued again so its current options and all descendant
+routes are rediscovered without discarding unrelated campaign progress.
+
 Each worker receives an isolated state and configuration directory. The
 coordinator leases distinct paths, waits for the batch, then atomically merges
 new branches and results into `logs/soak/state.txt`. Only one coordinator or

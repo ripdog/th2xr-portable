@@ -4,13 +4,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from soak_parallel import lease_routes, merge_worker, worker_state
+from soak_parallel import (
+    lease_routes,
+    merge_worker,
+    requeue_failed_routes,
+    worker_state,
+)
 from soak_state import (
     SoakNode,
     SoakOption,
     SoakState,
     merge_state,
     parse_state,
+    prune_subtree,
     write_state,
 )
 
@@ -97,6 +103,34 @@ class SoakStateTest(unittest.TestCase):
         self.assertEqual(leased, ["interrupted", "deep-live-path"])
         self.assertEqual(state.active, leased)
         self.assertEqual(state.pending, ["0", "0,0"])
+
+    def test_prune_subtree_invalidates_descendants(self) -> None:
+        state = SoakState(
+            active=["1,0,2"],
+            pending=["0", "1,0,1", "2"],
+            completed=["1,0,0", "3"],
+            nodes={
+                "": SoakNode("choice", "root", ()),
+                "1,0": SoakNode("map", "stale", ()),
+                "1,0,0": SoakNode("choice", "descendant", ()),
+                "2": SoakNode("choice", "unrelated", ()),
+            },
+        )
+
+        removed_routes, removed_nodes = prune_subtree(state, "1,0")
+
+        self.assertEqual((removed_routes, removed_nodes), (3, 2))
+        self.assertEqual(state.active, [])
+        self.assertEqual(state.pending, ["1,0", "0", "2"])
+        self.assertEqual(state.completed, ["3"])
+        self.assertEqual(list(state.nodes), ["", "2"])
+
+    def test_failed_routes_return_to_front_in_lease_order(self) -> None:
+        state = SoakState(pending=["later", "failed-1"])
+        requeue_failed_routes(state, ["failed-1", "failed-2"])
+        self.assertEqual(
+            state.pending, ["failed-1", "failed-2", "later"]
+        )
 
 
 if __name__ == "__main__":
