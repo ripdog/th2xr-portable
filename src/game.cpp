@@ -23,6 +23,11 @@
 #include <cstdlib>
 #include <cstdio>
 #include <ctime>
+
+#ifdef _WIN32
+#define localtime_r(timep, result) localtime_s(result, timep)
+#endif
+
 #include <cstring>
 #include <exception>
 #include <fstream>
