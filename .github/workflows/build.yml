@@ -28,7 +28,7 @@ jobs:
             libxfixes-dev libxi-dev libxss-dev libxtst-dev \
             libxkbcommon-dev libdrm-dev libgbm-dev \
             libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
-            libfuse2
+            libasound2-dev libpulse-dev libfuse2
 
       - name: Build SDL3 from source
         run: |
