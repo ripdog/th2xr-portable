@@ -7,9 +7,11 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace th2 {
 
@@ -25,6 +27,7 @@ public:
     explicit ScriptRuntime(const Archive& archive);
 
     void load(std::string name);
+    void load_file(const std::filesystem::path& path);
     ScriptStep run();
 
     std::int32_t flag(std::size_t index) const;
@@ -53,8 +56,10 @@ private:
     std::array<std::int32_t, 1024> flags_{};
     std::array<std::int32_t, 1024> game_flags_{};
     std::string script_name_;
+    std::filesystem::path loose_script_directory_;
 
     bool handle(const Event& event);
+    void load_bytes(std::vector<std::uint8_t> bytes, std::string name);
 };
 
 }  // namespace th2

@@ -266,7 +266,9 @@ std::string interpret_newlines(std::string text)
 
 class Game {
 public:
-    explicit Game(const std::filesystem::path& data)
+    explicit Game(
+        const std::filesystem::path& data,
+        const std::optional<std::filesystem::path>& scenario)
         : scripts_(data / "SDT.PAK"), graphics_(data / "GRP.PAK"),
           backgrounds_(data / "bak.pak"), fonts_(data / "FNT.PAK"),
           bgm_archive_(data / "bgm.PAK"), se_archive_(data / "SE.PAK"),
@@ -363,7 +365,15 @@ public:
             SDL_SetTextureBlendMode(title_masked_.get(), SDL_BLENDMODE_BLEND);
         }
         title_started_ = std::chrono::steady_clock::now();
-        start_movie(3, 0, false);
+        if (scenario) {
+            reset_play_state();
+            initialize_scenario_flags();
+            runtime_.load_file(*scenario);
+            ui_mode_ = UiMode::game;
+            advance();
+        } else {
+            start_movie(3, 0, false);
+        }
     }
 
     ~Game()
@@ -7977,7 +7987,25 @@ private:
 int main(int argc, char** argv)
 {
     try {
-        return Game(argc > 1 ? argv[1] : "game-data").run();
+        std::filesystem::path data = "game-data";
+        std::optional<std::filesystem::path> scenario;
+        bool data_set = false;
+        for (int index = 1; index < argc; ++index) {
+            const std::string_view argument = argv[index];
+            if (argument == "--scenario") {
+                if (++index >= argc) {
+                    throw std::runtime_error("--scenario requires an SDT path");
+                }
+                scenario = argv[index];
+            } else if (!data_set) {
+                data = argv[index];
+                data_set = true;
+            } else {
+                throw std::runtime_error(
+                    "usage: toheart2 [GAME_DATA_DIRECTORY] [--scenario FILE.SDT]");
+            }
+        }
+        return Game(data, scenario).run();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

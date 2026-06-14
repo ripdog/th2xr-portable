@@ -5,6 +5,8 @@
 #include <cctype>
 #include <cmath>
 #include <ctime>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 
 namespace th2 {
@@ -56,11 +58,36 @@ void ScriptRuntime::load(std::string name)
     if (!ends_with_sdt(name)) {
         name += ".sdt";
     }
+    if (!loose_script_directory_.empty()) {
+        const auto path = loose_script_directory_ / name;
+        if (std::filesystem::is_regular_file(path)) {
+            load_file(path);
+            return;
+        }
+    }
     const auto* entry = archive_->find(name);
     if (!entry) {
         throw std::runtime_error("scenario not found: " + name);
     }
-    scenario_ = std::make_unique<Scenario>(archive_->read(*entry));
+    load_bytes(archive_->read(*entry), std::move(name));
+}
+
+void ScriptRuntime::load_file(const std::filesystem::path& path)
+{
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error("cannot open scenario: " + path.string());
+    }
+    std::vector<std::uint8_t> bytes(
+        std::istreambuf_iterator<char>(input), {});
+    loose_script_directory_ = path.parent_path();
+    load_bytes(std::move(bytes), path.filename().string());
+}
+
+void ScriptRuntime::load_bytes(
+    std::vector<std::uint8_t> bytes, std::string name)
+{
+    scenario_ = std::make_unique<Scenario>(bytes);
     vm_ = std::make_unique<Vm>(*scenario_);
     script_name_ = std::move(name);
 }
