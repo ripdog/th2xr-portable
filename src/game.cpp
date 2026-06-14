@@ -4667,7 +4667,7 @@ private:
     void save_preview(int slot)
     {
         if (save_snapshot_) {
-            Surface thumbnail(SDL_CreateSurface(80, 60, SDL_PIXELFORMAT_RGBA32));
+            Surface thumbnail(SDL_CreateSurface(160, 120, SDL_PIXELFORMAT_RGBA32));
             if (thumbnail
                 && SDL_BlitSurfaceScaled(
                     save_snapshot_.get(), nullptr, thumbnail.get(), nullptr,
