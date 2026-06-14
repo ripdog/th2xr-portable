@@ -198,7 +198,7 @@ add_executable(toheart2
     src/upscaler.cpp
     src/video.cpp
 )
-set(ANIME4K_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders/anime4k")
+set(ANIME4K_SHADER_DIR "shaders/anime4k")
 set(ANIME4K_SHADERS apply)
 foreach(SHADER IN LISTS ANIME4K_SHADERS)
     add_custom_command(

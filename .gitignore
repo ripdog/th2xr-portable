@@ -10,5 +10,12 @@ save_*.sav
 save_*.bmp
 save_*.meta
 /save/
+
+# Downloaded binaries
 ffmpeg-*.7z
+
+# Build artifacts (local testing)
 *.AppImage
+*.dmg
+*-windows-x64.zip
+/buildtest/

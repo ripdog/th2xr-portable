@@ -67,6 +67,8 @@ jobs:
         run: |
           mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
           cp build/toheart2 AppDir/usr/bin/
+          mkdir -p AppDir/usr/bin/shaders/anime4k
+          cp build/shaders/anime4k/apply.frag.spv AppDir/usr/bin/shaders/anime4k/
 
           cat > AppDir/usr/share/applications/toheart2.desktop << 'EOF'
           [Desktop Entry]
@@ -114,6 +116,8 @@ jobs:
           APP="toheart2.app"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
           cp build/toheart2 "$APP/Contents/MacOS/"
+          mkdir -p "$APP/Contents/MacOS/shaders/anime4k"
+          cp build/shaders/anime4k/apply.frag.spv "$APP/Contents/MacOS/shaders/anime4k/"
 
           cat > "$APP/Contents/Info.plist" << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
@@ -188,6 +192,8 @@ jobs:
         run: |
           mkdir dist
           cp build/toheart2.exe dist/
+          mkdir -p dist/shaders/anime4k
+          cp build/shaders/anime4k/apply.frag.spv dist/shaders/anime4k/
           ldd build/toheart2.exe 2>/dev/null | grep '/ucrt64/bin/' | awk '{print $3}' | while read dll; do
             cp "$dll" dist/ 2>/dev/null || true
           done
