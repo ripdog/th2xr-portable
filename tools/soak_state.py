@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -22,15 +23,34 @@ class SoakNode:
 
 @dataclass
 class SoakState:
-    active: set[str] = field(default_factory=set)
-    pending: set[str] = field(default_factory=set)
-    completed: set[str] = field(default_factory=set)
+    active: list[str] = field(default_factory=list)
+    pending: list[str] = field(default_factory=list)
+    completed: list[str] = field(default_factory=list)
     nodes: dict[str, SoakNode] = field(default_factory=dict)
     pending_records: int = 0
 
     @property
-    def remaining(self) -> set[str]:
-        return (self.active | self.pending) - self.completed
+    def remaining(self) -> list[str]:
+        completed = set(self.completed)
+        return unique(
+            route
+            for route in [*self.active, *self.pending]
+            if route not in completed
+        )
+
+
+def unique(routes: Iterable[str]) -> list[str]:
+    return list(dict.fromkeys(routes))
+
+
+def append_unique(routes: list[str], route: str) -> None:
+    if route not in routes:
+        routes.append(route)
+
+
+def remove_all(routes: list[str], removed: Iterable[str]) -> None:
+    removed_set = set(removed)
+    routes[:] = [route for route in routes if route not in removed_set]
 
 
 def quoted(value: str) -> str:
@@ -75,12 +95,12 @@ def parse_state(path: Path) -> SoakState:
         elif record in {"ACTIVE", "PENDING", "COMPLETED"}:
             route = take(record)
             if record == "ACTIVE":
-                state.active.add(route)
+                append_unique(state.active, route)
             elif record == "PENDING":
                 state.pending_records += 1
-                state.pending.add(route)
+                append_unique(state.pending, route)
             else:
-                state.completed.add(route)
+                append_unique(state.completed, route)
         elif record == "NODE":
             route = take(record)
             kind = take(record)
@@ -116,14 +136,13 @@ def write_state(path: Path, state: SoakState) -> None:
     temporary = path.with_name(path.name + ".tmp")
     with temporary.open("w", encoding="utf-8", newline="\n") as output:
         output.write("VERSION 1\n")
-        for route in sorted(state.active, key=route_key):
+        for route in state.active:
             output.write(f"ACTIVE {quoted(route)}\n")
-        for route in sorted(state.pending, key=route_key):
+        for route in state.pending:
             output.write(f"PENDING {quoted(route)}\n")
-        for route in sorted(state.completed, key=route_key):
+        for route in state.completed:
             output.write(f"COMPLETED {quoted(route)}\n")
-        for route in sorted(state.nodes, key=route_key):
-            node = state.nodes[route]
+        for route, node in state.nodes.items():
             output.write(
                 f"NODE {quoted(route)} {node.kind} "
                 f"{quoted(node.checkpoint)} {len(node.options)}"
@@ -137,9 +156,12 @@ def write_state(path: Path, state: SoakState) -> None:
 
 
 def merge_state(destination: SoakState, source: SoakState) -> None:
-    destination.pending.update(source.pending)
-    destination.pending.update(source.active)
-    destination.completed.update(source.completed)
+    destination.pending = unique(
+        [*destination.pending, *source.pending, *source.active]
+    )
+    destination.completed = unique(
+        [*destination.completed, *source.completed]
+    )
     for route, node in source.nodes.items():
         previous = destination.nodes.get(route)
         if previous is not None and previous != node:
@@ -148,16 +170,6 @@ def merge_state(destination: SoakState, source: SoakState) -> None:
                 f"{previous!r} != {node!r}"
             )
         destination.nodes[route] = node
-    destination.pending.difference_update(destination.completed)
-    destination.active.difference_update(destination.completed)
+    remove_all(destination.pending, destination.completed)
+    remove_all(destination.active, destination.completed)
     destination.pending_records = len(destination.pending)
-
-
-def route_key(route: str) -> tuple[int, tuple[int, ...]]:
-    if not route:
-        return (0, ())
-    try:
-        values = tuple(int(value) for value in route.split(","))
-    except ValueError:
-        return (2, tuple(ord(value) for value in route))
-    return (1, values)

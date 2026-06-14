@@ -24,10 +24,13 @@ class SoakSummary:
 
 def summarize_state(path: Path) -> SoakSummary:
     state = parse_state(path)
+    completed = set(state.completed)
+    active = set(state.active)
+    pending = set(state.pending)
     return SoakSummary(
         known_runs_remaining=len(state.remaining),
-        active_runs=len(state.active - state.completed),
-        queued_runs=len(state.pending - state.completed - state.active),
+        active_runs=len(active - completed),
+        queued_runs=len(pending - completed - active),
         completed_runs=len(state.completed),
         decision_nodes=len(state.nodes),
         duplicate_pending_records=state.pending_records - len(state.pending),

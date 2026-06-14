@@ -10,7 +10,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-from soak_state import SoakState, merge_state, parse_state, route_key, write_state
+from soak_state import (
+    SoakState,
+    append_unique,
+    merge_state,
+    parse_state,
+    remove_all,
+    unique,
+    write_state,
+)
 
 
 class CoordinatorLock:
@@ -38,11 +46,21 @@ class CoordinatorLock:
 
 def worker_state(global_state: SoakState, route: str) -> SoakState:
     return SoakState(
-        pending={route},
-        completed=set(global_state.completed),
+        pending=[route],
+        completed=list(global_state.completed),
         nodes=dict(global_state.nodes),
         pending_records=1,
     )
+
+
+def lease_routes(state: SoakState, count: int) -> list[str]:
+    state.pending = unique([*state.active, *state.pending])
+    state.active.clear()
+    remove_all(state.pending, state.completed)
+    leased = state.pending[:count]
+    del state.pending[: len(leased)]
+    state.active.extend(leased)
+    return leased
 
 
 def merge_worker(
@@ -50,7 +68,7 @@ def merge_worker(
 ) -> None:
     state_path = worker_directory / "state.txt"
     if not state_path.exists():
-        global_state.pending.add(leased_route)
+        append_unique(global_state.pending, leased_route)
         return
     merge_state(global_state, parse_state(state_path))
 
@@ -110,7 +128,7 @@ def main() -> int:
     arguments.state.mkdir(parents=True, exist_ok=True)
     state_path = arguments.state / "state.txt"
     if not state_path.exists():
-        write_state(state_path, SoakState(pending={""}, pending_records=1))
+        write_state(state_path, SoakState(pending=[""], pending_records=1))
 
     lock_path = arguments.state / "parallel.lock"
     workers_root = arguments.state / "workers"
@@ -120,22 +138,15 @@ def main() -> int:
         with CoordinatorLock(lock_path):
             while completed < arguments.runs:
                 state = parse_state(state_path)
-                state.pending.update(state.active)
-                state.active.clear()
-                state.pending.difference_update(state.completed)
-                available = sorted(state.pending, key=route_key)
                 batch_size = min(
                     arguments.workers,
                     arguments.runs - completed,
-                    len(available),
+                    len(state.remaining),
                 )
                 if batch_size == 0:
                     break
 
-                leased = available[:batch_size]
-                for route in leased:
-                    state.pending.remove(route)
-                    state.active.add(route)
+                leased = lease_routes(state, batch_size)
                 write_state(state_path, state)
 
                 processes: list[
@@ -193,13 +204,13 @@ def main() -> int:
 
                 state = parse_state(state_path)
                 for index, route, worker_directory, process in processes:
-                    state.active.discard(route)
+                    remove_all(state.active, [route])
                     merge_worker(state, worker_directory, route)
                     append_worker_log(
                         arguments.state / "runs.log", worker_directory
                     )
                     completed += 1
-                state.pending.difference_update(state.completed)
+                remove_all(state.pending, state.completed)
                 state.pending_records = len(state.pending)
                 write_state(state_path, state)
                 print(
