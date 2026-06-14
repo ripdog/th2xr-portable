@@ -5594,11 +5594,14 @@ private:
                         "Auto mode skips previously read text",
                         &config_.auto_skip_read);
                     ImGui::SliderInt(
-                        "Delay between lines", &config_.auto_line_ms,
+                        "Auto delay between lines", &config_.auto_line_ms,
                         250, 10000, "%d ms");
                     ImGui::SliderInt(
-                        "Delay at page end", &config_.auto_page_ms,
+                        "Auto delay at page end", &config_.auto_page_ms,
                         500, 15000, "%d ms");
+                    option_changed |= ImGui::SliderInt(
+                        "Text speed", &config_.text_speed_ms,
+                        0, 100, "%d ms/character");
                     ImGui::Separator();
                     option_changed |= ImGui::Checkbox(
                         "Auto-skip includes unread text",
@@ -5667,9 +5670,6 @@ private:
                     config_.font_size =
                         std::clamp(config_.font_size, 12, 48);
                     ImGui::EndDisabled();
-                    option_changed |= ImGui::SliderInt(
-                        "Text speed", &config_.text_speed_ms,
-                        0, 100, "%d ms/character");
                     option_changed |= ImGui::Checkbox(
                         "Mouse wheel opens backlog",
                         &config_.wheel_opens_backlog);
