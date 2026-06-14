@@ -1,0 +1,13 @@
+{
+  "name": "th2xr-portable",
+  "version": "1.0.0",
+  "dependencies": [
+    "pkgconf",
+    "sdl3",
+    "sdl3-ttf",
+    "libsndfile",
+    "fontconfig",
+    "ffmpeg",
+    "glslang"
+  ]
+}
