@@ -1,10 +1,8 @@
-name: build
+name: release
 
 on:
   push:
-    branches: [master]
-  pull_request:
-    branches: [master]
+    tags: ['v*']
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -12,8 +10,6 @@ env:
 jobs:
   linux:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
     steps:
       - uses: actions/checkout@v4
 
@@ -45,13 +41,10 @@ jobs:
           sudo cmake --install SDL_ttf/build
 
       - name: Configure
-        run: cmake -S . -B build -DBUILD_TESTING=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build -- -j$(nproc)
-
-      - name: Test
-        run: ctest --test-dir build --output-on-failure
 
       - name: Package AppImage
         run: |
@@ -66,8 +59,7 @@ jobs:
           Categories=Game;VisualNovel;
           EOF
 
-          # minimal placeholder icon
-          convert -size 256x256 xc:transparent AppDir/usr/share/icons/hicolor/256x256/apps/toheart2.png 2>/dev/null || touch AppDir/usr/share/icons/hicolor/256x256/apps/toheart2.png
+          touch AppDir/usr/share/icons/hicolor/256x256/apps/toheart2.png
           ln -s usr/share/icons/hicolor/256x256/apps/toheart2.png AppDir/toheart2.png 2>/dev/null || true
 
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
@@ -76,15 +68,13 @@ jobs:
             --appdir AppDir --output appimage
           mv ToHeart2_XRATED-*.AppImage toheart2-linux-x86_64.AppImage
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: toheart2-linux-x86_64.AppImage
-          path: toheart2-linux-x86_64.AppImage
+      - name: Upload AppImage
+        run: gh release upload ${{ github.ref_name }} toheart2-linux-x86_64.AppImage
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   macos:
     runs-on: macos-latest
-    strategy:
-      fail-fast: false
     steps:
       - uses: actions/checkout@v4
 
@@ -93,19 +83,15 @@ jobs:
           brew install cmake sdl3 sdl3_ttf libsndfile fontconfig ffmpeg glslang
 
       - name: Configure
-        run: cmake -S . -B build -DBUILD_TESTING=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build -- -j$(sysctl -n hw.logicalcpu)
-
-      - name: Test
-        run: ctest --test-dir build --output-on-failure -E 'script-runtime-loose-lookup'
 
       - name: Package .app bundle
         run: |
           APP="toheart2.app"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-
           cp build/toheart2 "$APP/Contents/MacOS/"
 
           cat > "$APP/Contents/Info.plist" << 'PLIST'
@@ -129,7 +115,6 @@ jobs:
           </plist>
           PLIST
 
-          # Bundle Homebrew dependencies into the .app
           mkdir -p "$APP/Contents/Frameworks"
           for lib in SDL3 SDL3_ttf sndfile fontconfig avformat avcodec avutil swscale swresample; do
             src=$(brew --prefix)/lib/lib${lib}.dylib 2>/dev/null || continue
@@ -142,15 +127,13 @@ jobs:
 
           hdiutil create -volname "ToHeart2" -srcfolder "$APP" -ov -format UDZO toheart2-macos.dmg
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: toheart2-macos.dmg
-          path: toheart2-macos.dmg
+      - name: Upload DMG
+        run: gh release upload ${{ github.ref_name }} toheart2-macos.dmg
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   windows:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
     defaults:
       run:
         shell: msys2 {0}
@@ -172,24 +155,16 @@ jobs:
             mingw-w64-ucrt-x86_64-glslang
 
       - name: Configure
-        run: cmake -S . -B build -DBUILD_TESTING=ON -G 'Ninja'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -G 'Ninja'
 
       - name: Build
         run: cmake --build build
-
-      - name: Test
-        run: ctest --test-dir build --output-on-failure -E 'script-runtime-loose-lookup'
 
       - name: Package zip
         run: |
           mkdir dist
           cp build/toheart2.exe dist/
-          # copy required DLLs
           ldd build/toheart2.exe 2>/dev/null | grep '/ucrt64/bin/' | awk '{print $3}' | while read dll; do
-            cp "$dll" dist/ 2>/dev/null || true
-          done
-          # also grab common transitive deps
-          find /ucrt64/bin/ -name '*.dll' | while read dll; do
             cp "$dll" dist/ 2>/dev/null || true
           done
 
@@ -197,7 +172,7 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path dist/* -DestinationPath toheart2-windows-x64.zip
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: toheart2-windows-x64.zip
-          path: toheart2-windows-x64.zip
+      - name: Upload zip
+        run: gh release upload ${{ github.ref_name }} toheart2-windows-x64.zip
+        env:
+          GH_TOKEN: ${{ github.token }}
