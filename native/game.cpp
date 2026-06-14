@@ -264,6 +264,31 @@ std::string interpret_newlines(std::string text)
     return text;
 }
 
+bool clip_texture_source(
+    SDL_Texture* texture, SDL_FRect& source, SDL_FRect& destination)
+{
+    float texture_width = 0.0f;
+    float texture_height = 0.0f;
+    if (!SDL_GetTextureSize(texture, &texture_width, &texture_height)
+        || source.w <= 0.0f || source.h <= 0.0f) {
+        return false;
+    }
+    const SDL_FRect original = source;
+    const float left = std::clamp(source.x, 0.0f, texture_width);
+    const float top = std::clamp(source.y, 0.0f, texture_height);
+    const float right = std::clamp(source.x + source.w, 0.0f, texture_width);
+    const float bottom = std::clamp(source.y + source.h, 0.0f, texture_height);
+    if (right <= left || bottom <= top) {
+        return false;
+    }
+    destination.x += (left - original.x) / original.w * destination.w;
+    destination.y += (top - original.y) / original.h * destination.h;
+    destination.w *= (right - left) / original.w;
+    destination.h *= (bottom - top) / original.h;
+    source = {left, top, right - left, bottom - top};
+    return true;
+}
+
 class Game {
 public:
     explicit Game(
@@ -7725,7 +7750,7 @@ private:
         }
         if (background_) {
             const auto view = current_background_view();
-            const SDL_FRect source{
+            SDL_FRect source{
                 view.x, view.y, view.width, view.height};
             SDL_FRect destination{0.0f, 0.0f, 800.0f, 600.0f};
             double angle = 0.0;
@@ -7738,9 +7763,12 @@ private:
                 };
                 angle = shake.angle;
             }
-            SDL_RenderTextureRotated(
-                renderer_, background_.get(), &source, &destination,
-                angle, nullptr, SDL_FLIP_NONE);
+            if (clip_texture_source(
+                    background_.get(), source, destination)) {
+                SDL_RenderTextureRotated(
+                    renderer_, background_.get(), &source, &destination,
+                    angle, nullptr, SDL_FLIP_NONE);
+            }
         } else if (bg_scene_ == 0) {
             SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
             const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
