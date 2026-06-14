@@ -1362,6 +1362,7 @@ private:
     int backlog_depth_ = 0;
     int backlog_voice_hover_ = -1;
     bool backlog_handle_dragging_ = false;
+    bool backlog_handle_hover_ = false;
     int sidebar_hover_ = -1;
     float sidebar_alpha_ = 0.0f;
     bool sidebar_mouse_near_ = false;
@@ -7744,7 +7745,11 @@ private:
                 : 1.0f - static_cast<float>(backlog_depth_)
                     / static_cast<float>(backlog_.size());
             const float handle_y = 10.0f + ratio * (255.0f - 31.0f);
-            const SDL_FRect hdl_src{22.0f, 0.0f, 22.0f, 30.0f};
+            const float handle_state = backlog_handle_dragging_ ? 3.0f
+                : backlog_handle_hover_ ? 2.0f
+                : backlog_.size() > 1 ? 1.0f : 0.0f;
+            const SDL_FRect hdl_src{
+                handle_state * 22.0f, 0.0f, 22.0f, 30.0f};
             const SDL_FRect hdl_dst{776.0f, handle_y, 22.0f, 30.0f};
             SDL_RenderTexture(renderer_, ui_sidebar_btns_.get(),
                               &hdl_src, &hdl_dst);
@@ -7785,6 +7790,7 @@ private:
     void update_sidebar_hover(float x, float y)
     {
         sidebar_mouse_near_ = x >= 776.0f;
+        backlog_handle_hover_ = false;
         const int previous_hover = sidebar_hover_;
         sidebar_hover_ = -1;
         if (config_.sidebar_mode == 3) {
@@ -7792,6 +7798,14 @@ private:
         }
         if (x < 776.0f || x >= 798.0f) {
             return;
+        }
+        if (!backlog_.empty()) {
+            const float ratio = backlog_.empty() ? 1.0f
+                : 1.0f - static_cast<float>(backlog_depth_)
+                    / static_cast<float>(backlog_.size());
+            const float handle_y = 10.0f + ratio * (255.0f - 31.0f);
+            backlog_handle_hover_ =
+                y >= handle_y && y < handle_y + 30.0f;
         }
         static constexpr std::array button_y{
             271, 312, 353, 376, 399, 422, 445, 468,
