@@ -25,7 +25,7 @@ public:
     void draw(
         SDL_Renderer* renderer, float x, float y, std::string_view text,
         std::uint8_t red = 255, std::uint8_t green = 255,
-        std::uint8_t blue = 255) const;
+        std::uint8_t blue = 255, std::uint8_t alpha = 255) const;
 
 private:
     struct Modern;
@@ -41,7 +41,8 @@ private:
     const std::uint8_t* glyph(unsigned char character) const;
     void draw_bitmap(
         SDL_Renderer* renderer, float x, float y, std::string_view text,
-        std::uint8_t red, std::uint8_t green, std::uint8_t blue) const;
+        std::uint8_t red, std::uint8_t green, std::uint8_t blue,
+        std::uint8_t alpha) const;
 };
 
 }  // namespace th2

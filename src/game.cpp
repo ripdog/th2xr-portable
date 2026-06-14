@@ -1255,6 +1255,8 @@ private:
     std::chrono::steady_clock::time_point skip_next_time_{};
     std::optional<std::chrono::steady_clock::time_point> auto_next_time_;
     std::string current_line_key_;
+    std::chrono::steady_clock::time_point text_reveal_started_{};
+    bool text_reveal_complete_ = true;
     std::uint64_t next_transition_debug_id_ = 1;
     bool direct_scenario_ = false;
 
@@ -2246,7 +2248,8 @@ private:
             return;
         }
         if ((!auto_mode_ && !demo_mode_)
-            || !waiting_for_input_ || voice_playing()) {
+            || !waiting_for_input_ || !text_reveal_complete_
+            || voice_playing()) {
             auto_next_time_.reset();
             return;
         }
@@ -2305,6 +2308,44 @@ private:
     float message_text_y() const
     {
         return config_.authentic_font ? 36.0f : 72.0f;
+    }
+
+    static std::size_t utf8_prefix_bytes(
+        std::string_view text, std::size_t characters)
+    {
+        std::size_t position = 0;
+        while (position < text.size() && characters > 0) {
+            const auto byte = static_cast<unsigned char>(text[position]);
+            position += byte < 0x80 ? 1
+                : byte < 0xe0 ? 2
+                : byte < 0xf0 ? 3
+                : 4;
+            --characters;
+        }
+        return std::min(position, text.size());
+    }
+
+    static std::size_t utf8_character_count(std::string_view text)
+    {
+        return std::count_if(
+            text.begin(), text.end(), [](unsigned char byte) {
+                return (byte & 0xc0) != 0x80;
+            });
+    }
+
+    void start_text_reveal()
+    {
+        text_reveal_started_ = std::chrono::steady_clock::now();
+        text_reveal_complete_ = config_.text_speed_ms == 0;
+    }
+
+    bool finish_text_reveal()
+    {
+        if (text_reveal_complete_) {
+            return false;
+        }
+        text_reveal_complete_ = true;
+        return true;
     }
 
     void skip(bool force_unread = false)
@@ -2389,7 +2430,12 @@ private:
         }
         if (waiting_for_input_) {
             mark_current_text_read();
+            if (finish_text_reveal()) {
+                auto_next_time_.reset();
+                return;
+            }
             if (message_.reveal_next() && message_.has_hidden_segments()) {
+                start_text_reveal();
                 auto_next_time_.reset();
                 return;
             }
@@ -4078,6 +4124,7 @@ private:
                 + std::to_string(runtime_.vm_pc());
             message_ends_block_ = number(event, 1) == 2;
             waiting_for_input_ = true;
+            start_text_reveal();
             auto_next_time_.reset();
         } else if (name == "AddMessage2") {
             message_.append(th2::substitute_player_name(
@@ -4088,6 +4135,7 @@ private:
                 + std::to_string(runtime_.vm_pc());
             message_ends_block_ = number(event, 1) == 2;
             waiting_for_input_ = true;
+            start_text_reveal();
             auto_next_time_.reset();
         } else if (name == "T") {
             message_visible_ = number(event, 0) != 0;
@@ -4363,7 +4411,12 @@ private:
         if (waiting_for_input_) {
             mark_current_text_read();
         }
+        if (waiting_for_input_ && finish_text_reveal()) {
+            auto_next_time_.reset();
+            return;
+        }
         if (waiting_for_input_ && message_.reveal_next()) {
+            start_text_reveal();
             auto_next_time_.reset();
             return;
         }
@@ -5538,6 +5591,9 @@ private:
                     config_.font_size =
                         std::clamp(config_.font_size, 12, 48);
                     ImGui::EndDisabled();
+                    option_changed |= ImGui::SliderInt(
+                        "Text speed", &config_.text_speed_ms,
+                        0, 100, "%d ms/character");
                     option_changed |= ImGui::Checkbox(
                         "Mouse wheel opens backlog",
                         &config_.wheel_opens_backlog);
@@ -8079,7 +8135,26 @@ private:
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 150);
             SDL_RenderFillRect(renderer_, nullptr);
-            const auto lines = display_lines(message_.visible());
+            const auto visible = message_.visible();
+            const auto character_count = utf8_character_count(visible);
+            float reveal_position = static_cast<float>(character_count);
+            if (!text_reveal_complete_ && config_.text_speed_ms > 0) {
+                const auto elapsed =
+                    std::chrono::steady_clock::now() - text_reveal_started_;
+                reveal_position =
+                    std::chrono::duration<float, std::milli>(elapsed).count()
+                    / config_.text_speed_ms;
+                if (reveal_position >= character_count) {
+                    text_reveal_complete_ = true;
+                    reveal_position = static_cast<float>(character_count);
+                }
+            }
+            const auto faded_characters = static_cast<std::size_t>(
+                std::clamp(reveal_position, 0.0f,
+                           static_cast<float>(character_count)));
+            const auto faded_bytes =
+                utf8_prefix_bytes(visible, faded_characters);
+            const auto lines = display_lines(visible.substr(0, faded_bytes));
             const float x = message_text_x();
             float y = message_text_y();
             for (const auto& line : lines) {
@@ -8089,6 +8164,28 @@ private:
                 if (y > 535.0f) {
                     break;
                 }
+            }
+            if (!text_reveal_complete_ && faded_bytes < visible.size()) {
+                const auto next_bytes = utf8_prefix_bytes(
+                    visible.substr(faded_bytes), 1);
+                const auto prefix = visible.substr(0, faded_bytes);
+                const auto prefix_lines = display_lines(prefix);
+                const auto& last = prefix_lines.empty()
+                    ? std::string{} : prefix_lines.back();
+                const float glyph_x = x + font_.text_width(last);
+                const float glyph_y = message_text_y()
+                    + 31.0f * static_cast<float>(
+                        prefix_lines.empty() ? 0 : prefix_lines.size() - 1);
+                const auto alpha = static_cast<std::uint8_t>(
+                    std::clamp(reveal_position - faded_characters, 0.0f, 1.0f)
+                    * 255.0f);
+                font_.draw(
+                    renderer_, glyph_x + 2.0f, glyph_y + 2.0f,
+                    visible.substr(faded_bytes, next_bytes), 0, 0, 0, alpha);
+                font_.draw(
+                    renderer_, glyph_x, glyph_y,
+                    visible.substr(faded_bytes, next_bytes),
+                    255, 255, 255, alpha);
             }
         }
         if (ui_mode_ != UiMode::backlog

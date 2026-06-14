@@ -385,7 +385,7 @@ namespace {
 void draw_glyph(
     SDL_Renderer* renderer, float x, float y, int glyph_width,
     const std::uint8_t* bitmap, std::uint8_t red, std::uint8_t green,
-    std::uint8_t blue)
+    std::uint8_t blue, std::uint8_t alpha)
 {
     for (int row = 0; row < 24; ++row) {
         for (int column = 0; column < glyph_width; ++column) {
@@ -397,7 +397,7 @@ void draw_glyph(
             }
             SDL_SetRenderDrawColor(
                 renderer, red, green, blue,
-                static_cast<std::uint8_t>(coverage * 17));
+                static_cast<std::uint8_t>(coverage * 17 * alpha / 255));
             SDL_RenderPoint(renderer, x + column, y + row);
         }
     }
@@ -407,7 +407,8 @@ void draw_glyph(
 
 void GameFont::draw_bitmap(
     SDL_Renderer* renderer, float x, float y, std::string_view text,
-    std::uint8_t red, std::uint8_t green, std::uint8_t blue) const
+    std::uint8_t red, std::uint8_t green, std::uint8_t blue,
+    std::uint8_t alpha) const
 {
     const float start_x = x;
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
@@ -426,7 +427,8 @@ void GameFont::draw_bitmap(
             if (!bitmap) {
                 continue;
             }
-            draw_glyph(renderer, x, y, width, bitmap, red, green, blue);
+            draw_glyph(
+                renderer, x, y, width, bitmap, red, green, blue, alpha);
             x += width;
         }
         return;
@@ -451,7 +453,8 @@ void GameFont::draw_bitmap(
             if (index >= 0) {
                 const auto* bitmap =
                     data_.data() + index * full_glyph_bytes;
-                draw_glyph(renderer, x, y, size, bitmap, red, green, blue);
+                draw_glyph(
+                    renderer, x, y, size, bitmap, red, green, blue, alpha);
                 x += size;
             } else if (code == 0x8140) {
                 x += size;
@@ -462,7 +465,8 @@ void GameFont::draw_bitmap(
             if (index >= 0) {
                 const auto* bitmap =
                     data_.data() + ascii_offset + index * half_glyph_bytes;
-                draw_glyph(renderer, x, y, width, bitmap, red, green, blue);
+                draw_glyph(
+                    renderer, x, y, width, bitmap, red, green, blue, alpha);
                 x += width;
             }
             ++i;
@@ -474,10 +478,11 @@ void GameFont::draw_bitmap(
 
 void GameFont::draw(
     SDL_Renderer* renderer, float x, float y, std::string_view text,
-    std::uint8_t red, std::uint8_t green, std::uint8_t blue) const
+    std::uint8_t red, std::uint8_t green, std::uint8_t blue,
+    std::uint8_t alpha) const
 {
     if (authentic_ || text.empty()) {
-        draw_bitmap(renderer, x, y, text, red, green, blue);
+        draw_bitmap(renderer, x, y, text, red, green, blue, alpha);
         return;
     }
     if (text.find('\n') != std::string_view::npos) {
@@ -485,7 +490,7 @@ void GameFont::draw(
             const auto newline = text.find('\n');
             draw(
                 renderer, x, y, text.substr(0, newline),
-                red, green, blue);
+                red, green, blue, alpha);
             if (newline == std::string_view::npos) {
                 break;
             }
@@ -526,14 +531,16 @@ void GameFont::draw(
         float texture_height = 0.0f;
         SDL_GetTextureSize(
             found->second.get(), &texture_width, &texture_height);
+        SDL_SetTextureAlphaMod(found->second.get(), alpha);
         const SDL_FRect destination{
             x, y,
             texture_width / framebuffer_scale_,
             texture_height / framebuffer_scale_};
         SDL_RenderTexture(
             renderer, found->second.get(), nullptr, &destination);
+        SDL_SetTextureAlphaMod(found->second.get(), 255);
     } catch (const std::exception&) {
-        draw_bitmap(renderer, x, y, text, red, green, blue);
+        draw_bitmap(renderer, x, y, text, red, green, blue, alpha);
     }
 }
 
