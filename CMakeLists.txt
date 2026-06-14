@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(toheart2_linux LANGUAGES C CXX)
+project(toheart2_portable LANGUAGES C CXX)
 
 include(CTest)
 
@@ -20,13 +20,14 @@ add_library(th2_archive
     src/archive.cpp
 )
 target_include_directories(th2_archive PUBLIC src)
-target_compile_options(th2_archive PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(th2_archive PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>>)
 
 add_library(th2_scenario
     src/scenario.cpp
 )
 target_include_directories(th2_scenario PUBLIC src)
-target_compile_options(th2_scenario PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(th2_scenario PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
 
 add_library(th2_bytecode
     src/bytecode.cpp
@@ -36,34 +37,34 @@ add_library(th2_bytecode
     src/vm.cpp
 )
 target_include_directories(th2_bytecode PUBLIC src)
-target_compile_options(th2_bytecode PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(th2_bytecode PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
 
 add_library(th2_runtime
     src/script_runtime.cpp
 )
 target_include_directories(th2_runtime PUBLIC src)
-target_compile_options(th2_runtime PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(th2_runtime PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
 target_link_libraries(th2_runtime PUBLIC th2_archive th2_scenario th2_bytecode)
 
 add_library(th2_audio
     src/audio.cpp
 )
 target_include_directories(th2_audio PUBLIC src)
-target_compile_options(th2_audio PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(th2_audio PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
 target_link_libraries(th2_audio PUBLIC SDL3::SDL3 PkgConfig::SNDFILE)
 
 add_library(th2_character
     src/character.cpp
 )
 target_include_directories(th2_character PUBLIC src)
-target_compile_options(th2_character PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(th2_character PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
 
 add_library(th2_config
     src/config.cpp
     src/player_name.cpp
 )
 target_include_directories(th2_config PUBLIC src)
-target_compile_options(th2_config PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(th2_config PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
 
 add_library(imgui
     third_party/imgui/imgui.cpp
