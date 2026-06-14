@@ -26,6 +26,7 @@ struct GameConfig {
     bool auto_skip_read = false;
     bool skip_unread = false;
     bool wheel_opens_backlog = true;
+    int sidebar_mode = 0;
     bool fullscreen = false;
     bool anime4k = true;
     bool authentic_font = false;

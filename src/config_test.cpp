@@ -12,6 +12,7 @@ int main()
     source.auto_skip_read = true;
     source.anime4k = false;
     source.authentic_font = true;
+    source.sidebar_mode = 2;
     source.font_family = "Test Sans";
     source.font_size = 31;
     source.character_voice_volume[3] = 17;
@@ -31,6 +32,7 @@ int main()
         || !loaded.auto_skip_read
         || loaded.anime4k
         || !loaded.authentic_font
+        || loaded.sidebar_mode != 2
         || loaded.font_family != "Test Sans"
         || loaded.font_size != 31
         || loaded.character_voice_volume[3] != 17

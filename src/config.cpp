@@ -65,6 +65,9 @@ GameConfig load_config(const std::filesystem::path& path)
             config.skip_unread = parse_bool(value);
         } else if (key == "wheel_opens_backlog") {
             config.wheel_opens_backlog = parse_bool(value);
+        } else if (key == "sidebar_mode") {
+            config.sidebar_mode =
+                parse_int(value, config.sidebar_mode, 0, 3);
         } else if (key == "fullscreen") {
             config.fullscreen = parse_bool(value);
         } else if (key == "anime4k") {
@@ -155,6 +158,7 @@ void save_config(const std::filesystem::path& path, const GameConfig& config)
            << "auto_skip_read=" << config.auto_skip_read << '\n'
            << "skip_unread=" << config.skip_unread << '\n'
            << "wheel_opens_backlog=" << config.wheel_opens_backlog << '\n'
+           << "sidebar_mode=" << config.sidebar_mode << '\n'
            << "fullscreen=" << config.fullscreen << '\n'
            << "anime4k=" << config.anime4k << '\n'
            << "authentic_font=" << config.authentic_font << '\n'

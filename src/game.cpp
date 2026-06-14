@@ -1353,6 +1353,8 @@ private:
     int backlog_depth_ = 0;
     int backlog_voice_hover_ = -1;
     int sidebar_hover_ = -1;
+    float sidebar_alpha_ = 0.0f;
+    bool sidebar_mouse_near_ = false;
     bool message_visible_ = true;
     int save_page_ = 0;
     int save_hover_ = -1;
@@ -5654,6 +5656,27 @@ private:
                     option_changed |= ImGui::Checkbox(
                         "Mouse wheel opens backlog",
                         &config_.wheel_opens_backlog);
+                    static constexpr std::array sidebar_modes{
+                        "Fade when away", "Always visible",
+                        "Disappear when away", "Hidden",
+                    };
+                    if (ImGui::BeginCombo(
+                            "Sidebar",
+                            sidebar_modes[config_.sidebar_mode])) {
+                        for (int i = 0;
+                             i < static_cast<int>(sidebar_modes.size()); ++i) {
+                            const bool selected = config_.sidebar_mode == i;
+                            if (ImGui::Selectable(
+                                    sidebar_modes[i], selected)) {
+                                config_.sidebar_mode = i;
+                                option_changed = true;
+                            }
+                            if (selected) {
+                                ImGui::SetItemDefaultFocus();
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
                     ImGui::SeparatorText("Debug");
                     option_changed |= ImGui::Checkbox(
                         "Show script position",
@@ -7630,6 +7653,31 @@ private:
     {
         if (!ui_sidebar_track_ || !ui_sidebar_btns_) return;
 
+        switch (config_.sidebar_mode) {
+        case 0:
+            sidebar_alpha_ = std::clamp(
+                sidebar_alpha_ + (sidebar_mouse_near_ ? 24.0f : -24.0f),
+                64.0f, 255.0f);
+            break;
+        case 1:
+            sidebar_alpha_ = 255.0f;
+            break;
+        case 2:
+            sidebar_alpha_ = std::clamp(
+                sidebar_alpha_ + (sidebar_mouse_near_ ? 32.0f : -32.0f),
+                0.0f, 255.0f);
+            break;
+        default:
+            sidebar_alpha_ = 0.0f;
+            break;
+        }
+        if (sidebar_alpha_ <= 0.0f) {
+            return;
+        }
+        const auto alpha = static_cast<std::uint8_t>(sidebar_alpha_);
+        SDL_SetTextureAlphaMod(ui_sidebar_track_.get(), alpha);
+        SDL_SetTextureAlphaMod(ui_sidebar_btns_.get(), alpha);
+
         // sys0000.tga is the complete 30x600 sidebar backing.
         const SDL_FRect sidebar_dst{770.0f, 0.0f, 30.0f, 600.0f};
         SDL_RenderTexture(renderer_, ui_sidebar_track_.get(), nullptr,
@@ -7676,12 +7724,18 @@ private:
             SDL_RenderTexture(renderer_, ui_sidebar_btns_.get(),
                               &src, &dst);
         }
+        SDL_SetTextureAlphaMod(ui_sidebar_track_.get(), 255);
+        SDL_SetTextureAlphaMod(ui_sidebar_btns_.get(), 255);
     }
 
     void update_sidebar_hover(float x, float y)
     {
+        sidebar_mouse_near_ = x >= 776.0f;
         const int previous_hover = sidebar_hover_;
         sidebar_hover_ = -1;
+        if (config_.sidebar_mode == 3) {
+            return;
+        }
         if (x < 776.0f || x >= 798.0f) {
             return;
         }
@@ -7707,6 +7761,9 @@ private:
 
     bool handle_sidebar_click(float x, float y)
     {
+        if (config_.sidebar_mode == 3) {
+            return false;
+        }
         if (x < 776.0f || x >= 798.0f) {
             return false;
         }
