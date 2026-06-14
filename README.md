@@ -30,29 +30,54 @@ original game data on any platform supported by SDL3.
 
 ### Installing dependencies
 
-On Debian/Ubuntu:
+**Ubuntu 24.04+** — SDL3 is not yet packaged, so it is built from source:
 ```bash
-sudo apt install cmake g++ libsdl3-dev libsdl3-ttf-dev libsndfile-dev \
-  libfontconfig-dev libavformat-dev libavcodec-dev libavutil-dev \
-  libswscale-dev libswresample-dev glslang-tools
+# System packages
+sudo apt install cmake g++ libsndfile-dev libfontconfig-dev \
+  libavformat-dev libavcodec-dev libavutil-dev \
+  libswscale-dev libswresample-dev glslang-tools \
+  libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+  libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+  libxkbcommon-dev libdrm-dev libgbm-dev \
+  libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev
+
+# Build SDL3
+git clone https://github.com/libsdl-org/SDL.git --depth 1 --branch release-3.4.10
+cmake -S SDL -B SDL/build -DCMAKE_BUILD_TYPE=Release
+cmake --build SDL/build -- -j$(nproc)
+sudo cmake --install SDL/build
+
+# Build SDL3_ttf
+git clone https://github.com/libsdl-org/SDL_ttf.git --depth 1 --branch release-3.2.2
+cmake -S SDL_ttf -B SDL_ttf/build -DCMAKE_BUILD_TYPE=Release
+cmake --build SDL_ttf/build -- -j$(nproc)
+sudo cmake --install SDL_ttf/build
 ```
 
-On Fedora:
-```bash
-sudo dnf install cmake gcc-c++ SDL3-devel SDL3_ttf-devel libsndfile-devel \
-  fontconfig-devel ffmpeg-devel glslang
-```
-
-On macOS:
+**macOS**:
 ```bash
 brew install cmake sdl3 sdl3_ttf libsndfile fontconfig ffmpeg glslang
+```
+
+**Windows** — use vcpkg:
+```powershell
+git clone https://github.com/microsoft/vcpkg.git
+.\vcpkg\bootstrap-vcpkg.bat
+.\vcpkg\vcpkg install --triplet x64-windows `
+  pkgconf sdl3 sdl3-ttf libsndfile fontconfig ffmpeg glslang
 ```
 
 ## Building
 
 ```bash
+# Linux / macOS
 cmake -S . -B build -DBUILD_TESTING=ON
 cmake --build build -- -j$(nproc)
+
+# Windows (MSVC, with vcpkg)
+cmake -S . -B build -DBUILD_TESTING=ON `
+  -DCMAKE_TOOLCHAIN_FILE="C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake"
+cmake --build build --config Release
 ```
 
 ## Running tests
@@ -63,10 +88,32 @@ ctest --test-dir build
 
 ## Running the engine
 
-Point the engine at your ToHeart2 XRATED `game-data` directory:
+Place your ToHeart2 XRATED game data in a `game-data/` directory next to the
+binary—the engine looks there by default:
 
+```
+th2xr-portable/
+├── build/
+│   └── toheart2          (or toheart2.exe)
+└── game-data/
+    ├── bgm.PAK
+    ├── GRP.PAK
+    ├── SDT.PAK
+    ├── SE.PAK
+    ├── voice.pak
+    └── ...
+```
+
+Then simply run:
 ```bash
-./build/toheart2 --data /path/to/toheart2/game-data
+./build/toheart2
+```
+
+You can also point to an alternate data directory or launch directly into a
+scenario:
+```bash
+./build/toheart2 /path/to/data
+./build/toheart2 /path/to/data --scenario 010301000.sdt
 ```
 
 ## License
