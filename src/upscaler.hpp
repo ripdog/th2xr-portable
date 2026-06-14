@@ -28,6 +28,10 @@ public:
     // with linear filtering between the art and native overlay layers.
     virtual SDL_Texture* authentic_text_target() const = 0;
 
+    // Monitor-resolution target for the sidebar, composited above every
+    // other game layer so its configured fade is background-independent.
+    virtual SDL_Texture* sidebar_target() = 0;
+
     // Composite the art and overlay layers to the window backbuffer.
     virtual void present() = 0;
 

@@ -23,6 +23,7 @@ public:
     SDL_Texture* art_target() const override;
     SDL_Texture* overlay_target() override;
     SDL_Texture* authentic_text_target() const override;
+    SDL_Texture* sidebar_target() override;
     void present() override;
     bool is_anime4k() const override { return true; }
 

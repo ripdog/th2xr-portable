@@ -41,6 +41,7 @@ struct Anime4K::Impl {
     std::unique_ptr<SDL_Texture, TextureDeleter> art;
     std::unique_ptr<SDL_Texture, TextureDeleter> authentic_text;
     std::unique_ptr<SDL_Texture, TextureDeleter> overlay;
+    std::unique_ptr<SDL_Texture, TextureDeleter> sidebar;
     int overlay_width = 0;
     int overlay_height = 0;
     std::vector<SDL_GPUShader*> shaders;
@@ -123,7 +124,8 @@ struct Anime4K::Impl {
         const auto rect = letterbox_rect(output_width, output_height);
         const int width = static_cast<int>(rect.w);
         const int height = static_cast<int>(rect.h);
-        if (overlay && width == overlay_width && height == overlay_height) {
+        if (overlay && sidebar
+            && width == overlay_width && height == overlay_height) {
             return;
         }
         overlay.reset(SDL_CreateTexture(
@@ -134,6 +136,14 @@ struct Anime4K::Impl {
         }
         SDL_SetTextureBlendMode(overlay.get(), SDL_BLENDMODE_BLEND);
         SDL_SetTextureScaleMode(overlay.get(), SDL_SCALEMODE_LINEAR);
+        sidebar.reset(SDL_CreateTexture(
+            renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET,
+            width, height));
+        if (!sidebar) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        SDL_SetTextureBlendMode(sidebar.get(), SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(sidebar.get(), SDL_SCALEMODE_LINEAR);
         overlay_width = width;
         overlay_height = height;
     }
@@ -158,6 +168,7 @@ struct Anime4K::Impl {
         SDL_RenderTexture(
             renderer, authentic_text.get(), nullptr, &destination);
         SDL_RenderTexture(renderer, overlay.get(), nullptr, &destination);
+        SDL_RenderTexture(renderer, sidebar.get(), nullptr, &destination);
     }
 };
 
@@ -192,6 +203,12 @@ SDL_Texture* Anime4K::overlay_target()
 SDL_Texture* Anime4K::authentic_text_target() const
 {
     return impl_->authentic_text.get();
+}
+
+SDL_Texture* Anime4K::sidebar_target()
+{
+    impl_->ensure_overlay();
+    return impl_->sidebar.get();
 }
 
 void Anime4K::present()

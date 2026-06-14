@@ -61,6 +61,12 @@ public:
         return authentic_text_.get();
     }
 
+    SDL_Texture* sidebar_target() override
+    {
+        ensure_overlay();
+        return sidebar_.get();
+    }
+
     void present() override
     {
         ensure_overlay();
@@ -81,6 +87,7 @@ public:
         SDL_RenderTexture(
             renderer_, authentic_text_.get(), nullptr, &destination);
         SDL_RenderTexture(renderer_, overlay_.get(), nullptr, &destination);
+        SDL_RenderTexture(renderer_, sidebar_.get(), nullptr, &destination);
     }
 
 private:
@@ -95,7 +102,8 @@ private:
         const auto destination = letterbox_rect(output_width, output_height);
         const int width = static_cast<int>(destination.w);
         const int height = static_cast<int>(destination.h);
-        if (overlay_ && width == overlay_width_ && height == overlay_height_) {
+        if (overlay_ && sidebar_
+            && width == overlay_width_ && height == overlay_height_) {
             return;
         }
         overlay_.reset(SDL_CreateTexture(
@@ -106,6 +114,14 @@ private:
         }
         SDL_SetTextureBlendMode(overlay_.get(), SDL_BLENDMODE_BLEND);
         SDL_SetTextureScaleMode(overlay_.get(), SDL_SCALEMODE_LINEAR);
+        sidebar_.reset(SDL_CreateTexture(
+            renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET,
+            width, height));
+        if (!sidebar_) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        SDL_SetTextureBlendMode(sidebar_.get(), SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(sidebar_.get(), SDL_SCALEMODE_LINEAR);
         overlay_width_ = width;
         overlay_height_ = height;
     }
@@ -114,6 +130,7 @@ private:
     Texture art_;
     Texture authentic_text_;
     Texture overlay_;
+    Texture sidebar_;
     int overlay_width_ = 0;
     int overlay_height_ = 0;
 };

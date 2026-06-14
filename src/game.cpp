@@ -8076,6 +8076,25 @@ private:
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     }
 
+    void select_sidebar()
+    {
+        auto* sidebar = upscaler_->sidebar_target();
+        SDL_SetRenderTarget(renderer_, sidebar);
+        float width = 0.0f;
+        float height = 0.0f;
+        SDL_GetTextureSize(sidebar, &width, &height);
+        SDL_SetRenderScale(renderer_, width / 800.0f, height / 600.0f);
+    }
+
+    void clear_sidebar()
+    {
+        select_sidebar();
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_NONE);
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
+        SDL_RenderClear(renderer_);
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    }
+
     void clear_authentic_text()
     {
         SDL_SetRenderTarget(renderer_, upscaler_->authentic_text_target());
@@ -8437,6 +8456,7 @@ private:
                 shake.angle, nullptr, SDL_FLIP_NONE);
         }
         clear_authentic_text();
+        clear_sidebar();
         begin_overlay();
         if (clock_state_ || calendar_state_) {
             draw_clock_calendar();
@@ -8587,9 +8607,11 @@ private:
         } else if (ui_mode_ == UiMode::save || ui_mode_ == UiMode::load) {
             draw_save_load();
         }
+        select_sidebar();
         if (ui_mode_ == UiMode::game || ui_mode_ == UiMode::backlog) {
             draw_sidebar();
         }
+        select_overlay();
         if (screen_flash_) {
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(
