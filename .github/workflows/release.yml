@@ -77,8 +77,9 @@ jobs:
           Categories=Game;AdventureGame;
           EOF
 
-          touch AppDir/usr/share/icons/hicolor/256x256/apps/toheart2.png
-          ln -s usr/share/icons/hicolor/256x256/apps/toheart2.png AppDir/toheart2.png 2>/dev/null || true
+          # use repo icon
+          cp toheart2.png AppDir/usr/share/icons/hicolor/256x256/apps/toheart2.png
+          ln -s usr/share/icons/hicolor/256x256/apps/toheart2.png AppDir/toheart2.png
 
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x linuxdeploy-x86_64.AppImage
