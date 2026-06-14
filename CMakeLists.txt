@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(SDL3 CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_package(Iconv REQUIRED)
 find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
 pkg_check_modules(SDL3_TTF REQUIRED IMPORTED_TARGET sdl3-ttf)
@@ -37,8 +38,9 @@ add_library(th2_bytecode
     src/vm.cpp
 )
 target_include_directories(th2_bytecode PUBLIC src)
-target_compile_options(th2_bytecode PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
-
+target_compile_options(th2_bytecode PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
+target_link_libraries(th2_bytecode PUBLIC Iconv::Iconv)
 add_library(th2_runtime
     src/script_runtime.cpp
 )
