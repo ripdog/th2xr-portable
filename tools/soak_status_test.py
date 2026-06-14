@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from soak_status import parse_state
+from soak_status import summarize_state
 
 
 class SoakStatusTest(unittest.TestCase):
@@ -28,7 +28,7 @@ class SoakStatusTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            summary = parse_state(state)
+            summary = summarize_state(state)
 
             self.assertEqual(summary.known_runs_remaining, 2)
             self.assertEqual(summary.active_runs, 1)
@@ -42,7 +42,7 @@ class SoakStatusTest(unittest.TestCase):
             state = Path(directory) / "state.txt"
             state.write_text("VERSION 2\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "unsupported"):
-                parse_state(state)
+                summarize_state(state)
 
 
 if __name__ == "__main__":

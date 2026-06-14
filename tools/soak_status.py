@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import shlex
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from soak_state import parse_state
 
 
 @dataclass(frozen=True)
@@ -21,87 +22,15 @@ class SoakSummary:
     duplicate_pending_records: int
 
 
-def parse_state(path: Path) -> SoakSummary:
-    active: set[str] = set()
-    pending: set[str] = set()
-    completed: set[str] = set()
-    node_paths: set[str] = set()
-    pending_records = 0
-    version_seen = False
-
-    try:
-        source = path.read_text(encoding="utf-8")
-    except OSError as error:
-        raise ValueError(f"cannot read {path}: {error}") from error
-
-    lexer = shlex.shlex(source, posix=True)
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    try:
-        tokens = list(lexer)
-    except ValueError as error:
-        raise ValueError(f"{path}: {error}") from error
-
-    position = 0
-
-    def take(record: str) -> str:
-        nonlocal position
-        if position >= len(tokens):
-            raise ValueError(f"{path}: truncated {record} record")
-        value = tokens[position]
-        position += 1
-        return value
-
-    while position < len(tokens):
-        record = take("state")
-        if record == "VERSION":
-            version = take(record)
-            if version_seen or version != "1":
-                raise ValueError(
-                    f"{path}: unsupported or duplicate version"
-                )
-            version_seen = True
-        elif record in {"ACTIVE", "PENDING", "COMPLETED"}:
-            route = take(record)
-            if record == "ACTIVE":
-                active.add(route)
-            elif record == "PENDING":
-                pending_records += 1
-                pending.add(route)
-            else:
-                completed.add(route)
-        elif record == "NODE":
-            node_paths.add(take(record))
-            take(record)  # decision kind
-            take(record)  # checkpoint
-            raw_count = take(record)
-            try:
-                option_count = int(raw_count)
-            except ValueError as error:
-                raise ValueError(
-                    f"{path}: invalid NODE option count {raw_count!r}"
-                ) from error
-            if option_count < 0:
-                raise ValueError(f"{path}: negative NODE option count")
-            for _ in range(option_count):
-                take(record)  # label
-                take(record)  # target
-        else:
-            raise ValueError(f"{path}: unknown record type {record!r}")
-
-    if not version_seen:
-        raise ValueError(f"{path}: missing VERSION record")
-    if len(active) > 1:
-        raise ValueError(f"{path}: contains more than one active route")
-
-    remaining = (active | pending) - completed
+def summarize_state(path: Path) -> SoakSummary:
+    state = parse_state(path)
     return SoakSummary(
-        known_runs_remaining=len(remaining),
-        active_runs=len(active - completed),
-        queued_runs=len(pending - completed - active),
-        completed_runs=len(completed),
-        decision_nodes=len(node_paths),
-        duplicate_pending_records=pending_records - len(pending),
+        known_runs_remaining=len(state.remaining),
+        active_runs=len(state.active - state.completed),
+        queued_runs=len(state.pending - state.completed - state.active),
+        completed_runs=len(state.completed),
+        decision_nodes=len(state.nodes),
+        duplicate_pending_records=state.pending_records - len(state.pending),
     )
 
 
@@ -124,7 +53,7 @@ def main() -> int:
     arguments = parser.parse_args()
 
     try:
-        summary = parse_state(arguments.state)
+        summary = summarize_state(arguments.state)
     except ValueError as error:
         print(error, file=sys.stderr)
         return 1

@@ -148,6 +148,19 @@ python3 tools/soak_status.py --json
 The count is the current exploration frontier. It can increase when a queued
 run reaches a choice or map branch that has not previously been discovered.
 
+Independent routes can be processed concurrently:
+
+```bash
+# Run up to 20 routes using four engine processes.
+python3 tools/soak_parallel.py --workers 4 --runs 20
+```
+
+Each worker receives an isolated state and configuration directory. The
+coordinator leases distinct paths, waits for the batch, then atomically merges
+new branches and results into `logs/soak/state.txt`. Only one coordinator or
+single-process soak should use a campaign directory at a time. Four workers is
+the conservative default because every process also owns SDL GPU resources.
+
 ## License
 
 This project is licensed under the GNU General Public License v2.0. See

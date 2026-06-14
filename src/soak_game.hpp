@@ -55,6 +55,11 @@ public:
         if (route_finished_) {
             explorer_->complete_run(
                 "returned to title", terminal_script_, terminal_offset_);
+            std::cout << "soak route complete: "
+                      << explorer_->completed_runs()
+                      << " completed this process, "
+                      << explorer_->pending_paths() << " pending\n"
+                      << std::flush;
             if (!explorer_->begin_run()) {
                 std::cout << "soak complete: " << explorer_->completed_runs()
                           << " routes this run, " << explorer_->pending_paths()
