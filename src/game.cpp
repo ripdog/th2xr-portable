@@ -7960,7 +7960,10 @@ private:
 
     void draw_click_indicator()
     {
-        if (!waiting_for_input_ || !message_visible_ || message_.empty()) return;
+        if (!waiting_for_input_ || !message_visible_ || message_.empty()
+            || !text_reveal_complete_) {
+            return;
+        }
 
         const bool end_of_block =
             !message_.has_hidden_segments() && message_ends_block_;
