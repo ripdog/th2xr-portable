@@ -1335,9 +1335,23 @@ private:
     std::optional<std::chrono::steady_clock::time_point> title_exit_started_;
     bool title_exit_game_ = false;
     int menu_highlight_ = 0;
-    struct BacklogEntry { std::string text; };
+    struct BacklogVoice {
+        std::size_t start = 0;
+        int scenario = 0;
+        int voice = 0;
+        int character = 0;
+        int volume = 255;
+        bool alternate = false;
+    };
+    struct BacklogEntry {
+        std::string text;
+        std::vector<BacklogVoice> voices;
+    };
     std::vector<BacklogEntry> backlog_;
+    std::vector<BacklogVoice> current_backlog_voices_;
+    std::optional<BacklogVoice> pending_backlog_voice_;
     int backlog_depth_ = 0;
+    int backlog_voice_hover_ = -1;
     int sidebar_hover_ = -1;
     bool message_visible_ = true;
     int save_page_ = 0;
@@ -3668,6 +3682,34 @@ private:
         voice_scenario_[channel] = scenario;
         voice_volume_[channel] = volume;
         voice_loop_[channel] = loop;
+        pending_backlog_voice_ = BacklogVoice{
+            0, scenario, voice, character, volume,
+            name != standard_name};
+    }
+
+    void replay_backlog_voice(const BacklogVoice& voice)
+    {
+        auto name = std::format(
+            "K{:09d}_{:03d}{:03d}{}.OGG",
+            voice.scenario, voice.voice, voice.character,
+            voice.alternate ? "A" : "");
+        if (!voice_archive_.find(name) && voice.alternate) {
+            name = std::format(
+                "K{:09d}_{:03d}{:03d}.OGG",
+                voice.scenario, voice.voice, voice.character);
+        }
+        if (!voice_archive_.find(name)) {
+            return;
+        }
+        voice_channels_[0].stop();
+        voice_channels_[0].play(
+            load_audio(voice_archive_, name), false,
+            voice_gain(voice.volume, voice.character));
+        voice_sound_[0] = voice.voice;
+        voice_character_[0] = voice.character;
+        voice_scenario_[0] = voice.scenario;
+        voice_volume_[0] = voice.volume;
+        voice_loop_[0] = false;
     }
 
     void update_audio()
@@ -4119,6 +4161,12 @@ private:
             message_.set(th2::substitute_player_name(
                 text(event, 0), config_.player_name,
                 runtime_.flag(213) != 0));
+            current_backlog_voices_.clear();
+            if (pending_backlog_voice_) {
+                pending_backlog_voice_->start = 0;
+                current_backlog_voices_.push_back(*pending_backlog_voice_);
+                pending_backlog_voice_.reset();
+            }
             message_visible_ = true;
             current_line_key_ = runtime_.script_name() + ':'
                 + std::to_string(runtime_.vm_pc());
@@ -4127,6 +4175,11 @@ private:
             start_text_reveal();
             auto_next_time_.reset();
         } else if (name == "AddMessage2") {
+            if (pending_backlog_voice_) {
+                pending_backlog_voice_->start = message_.visible().size();
+                current_backlog_voices_.push_back(*pending_backlog_voice_);
+                pending_backlog_voice_.reset();
+            }
             message_.append(th2::substitute_player_name(
                 text(event, 0), config_.player_name,
                 runtime_.flag(213) != 0));
@@ -5138,6 +5191,8 @@ private:
         }
 
         backlog_.clear();
+        current_backlog_voices_.clear();
+        pending_backlog_voice_.reset();
         backlog_depth_ = 0;
         const auto backlog_count = read_u32(in);
         backlog_.reserve(backlog_count);
@@ -5254,7 +5309,7 @@ private:
         if (message_.empty()) return;
         const auto& text = message_.visible();
         if (!backlog_.empty() && backlog_.back().text == text) return;
-        backlog_.push_back({text});
+        backlog_.push_back({text, current_backlog_voices_});
         if (backlog_.size() > 256) backlog_.erase(backlog_.begin());
     }
 
@@ -5324,6 +5379,8 @@ private:
         waiting_for_input_ = false;
         current_line_key_.clear();
         backlog_.clear();
+        current_backlog_voices_.clear();
+        pending_backlog_voice_.reset();
         backlog_depth_ = 0;
         choices_.clear();
         choosing_ = false;
@@ -5722,6 +5779,7 @@ private:
         if (choosing_) return;
         play_se(-1, 9012, false, 140);
         ui_mode_ = UiMode::backlog;
+        backlog_voice_hover_ = -1;
         backlog_depth_ = std::min(
             1, static_cast<int>(backlog_.size()));
     }
@@ -5729,6 +5787,7 @@ private:
     void close_backlog()
     {
         backlog_depth_ = 0;
+        backlog_voice_hover_ = -1;
         ui_mode_ = UiMode::game;
     }
 
@@ -7522,17 +7581,45 @@ private:
         SDL_RenderFillRect(renderer_, &game_area);
 
         std::string_view selected = message_.visible();
+        const BacklogEntry* entry = nullptr;
         if (backlog_depth_ > 0 && backlog_depth_ <= static_cast<int>(backlog_.size())) {
-            selected = backlog_[
-                backlog_.size() - static_cast<std::size_t>(backlog_depth_)].text;
+            entry = &backlog_[
+                backlog_.size() - static_cast<std::size_t>(backlog_depth_)];
+            selected = entry->text;
         }
 
         const float x = message_text_x();
         float y = message_text_y();
+        int line_index = 0;
         for (const auto& line : display_lines(selected)) {
+            bool voice_hovered = false;
+            if (entry && backlog_voice_hover_ >= 0
+                && backlog_voice_hover_
+                    < static_cast<int>(entry->voices.size())) {
+                const auto& voice = entry->voices[backlog_voice_hover_];
+                const auto end = backlog_voice_hover_ + 1
+                        < static_cast<int>(entry->voices.size())
+                    ? entry->voices[backlog_voice_hover_ + 1].start
+                    : entry->text.size();
+                const auto first_line = static_cast<int>(
+                    display_lines(
+                        std::string_view(entry->text).substr(0, voice.start))
+                        .size()) - 1;
+                const auto last_line = static_cast<int>(
+                    display_lines(
+                        std::string_view(entry->text).substr(0, end))
+                        .size()) - 1;
+                voice_hovered =
+                    line_index >= first_line && line_index <= last_line;
+            }
             font_.draw(renderer_, x + 2.0f, y + 2.0f, line, 0, 0, 0);
-            font_.draw(renderer_, x, y, line, 255, 144, 32);
+            font_.draw(
+                renderer_, x, y, line,
+                voice_hovered ? 255 : 255,
+                voice_hovered ? 255 : 144,
+                voice_hovered ? 255 : 32);
             y += 31.0f;
+            ++line_index;
             if (y > 535.0f) {
                 break;
             }
@@ -7718,6 +7805,21 @@ private:
             if (handle_sidebar_click(event.button.x, event.button.y)) {
                 return;
             }
+            if (event.button.button == SDL_BUTTON_LEFT
+                && backlog_voice_hover_ >= 0
+                && backlog_depth_ > 0
+                && backlog_depth_
+                    <= static_cast<int>(backlog_.size())) {
+                const auto& entry = backlog_[
+                    backlog_.size()
+                    - static_cast<std::size_t>(backlog_depth_)];
+                if (backlog_voice_hover_
+                    < static_cast<int>(entry.voices.size())) {
+                    replay_backlog_voice(
+                        entry.voices[backlog_voice_hover_]);
+                    return;
+                }
+            }
             close_backlog();
         } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
             if (event.wheel.y > 0) {
@@ -7727,6 +7829,35 @@ private:
             }
         } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
             update_sidebar_hover(event.motion.x, event.motion.y);
+            backlog_voice_hover_ = -1;
+            if (event.motion.x < 770.0f && backlog_depth_ > 0
+                && backlog_depth_
+                    <= static_cast<int>(backlog_.size())) {
+                const auto& entry = backlog_[
+                    backlog_.size()
+                    - static_cast<std::size_t>(backlog_depth_)];
+                const int line = static_cast<int>(
+                    (event.motion.y - message_text_y()) / 31.0f);
+                if (line >= 0) {
+                    for (int i = 0;
+                         i < static_cast<int>(entry.voices.size()); ++i) {
+                        const auto end = i + 1
+                                < static_cast<int>(entry.voices.size())
+                            ? entry.voices[i + 1].start
+                            : entry.text.size();
+                        const auto first_line = static_cast<int>(
+                            display_lines(std::string_view(entry.text).substr(
+                                0, entry.voices[i].start)).size()) - 1;
+                        const auto last_line = static_cast<int>(
+                            display_lines(std::string_view(entry.text).substr(
+                                0, end)).size()) - 1;
+                        if (line >= first_line && line <= last_line) {
+                            backlog_voice_hover_ = i;
+                            break;
+                        }
+                    }
+                }
+            }
         }
     }
 
