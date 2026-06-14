@@ -76,15 +76,49 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup vcpkg (with caching)
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgJsonGlob: 'vcpkg.json'
+      - name: Setup vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git C:/vcpkg
+          C:/vcpkg/bootstrap-vcpkg.bat
+
+      - name: Install vcpkg packages (no ffmpeg)
+        shell: bash
+        run: |
+          C:/vcpkg/vcpkg install --triplet x64-windows \
+            pkgconf sdl3 sdl3-ttf libsndfile fontconfig glslang
+
+      - name: Download pre-built FFmpeg
+        shell: bash
+        run: |
+          curl -fsSL -o ffmpeg.7z \
+            'https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-essentials.7z'
+          7z x ffmpeg.7z "-oC:/ffmpeg" -y
+
+      - name: Generate FFmpeg pkg-config files
+        shell: bash
+        run: |
+          FF_DIR=$(ls -d /c/ffmpeg/ffmpeg-* 2>/dev/null || ls -d C:/ffmpeg/ffmpeg-*)
+          mkdir -p "$FF_DIR/lib/pkgconfig"
+          for lib in avformat avcodec avutil swscale swresample; do
+            cat > "$FF_DIR/lib/pkgconfig/lib${lib}.pc" << EOF
+          prefix=$FF_DIR
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include
+
+          Name: lib${lib}
+          Description: FFmpeg ${lib} library
+          Version: 61.0.0
+          Libs: -L\${libdir} -l${lib}
+          Cflags: -I\${includedir}
+          EOF
+          done
+          echo "PKG_CONFIG_PATH=$FF_DIR/lib/pkgconfig" >> $GITHUB_ENV
 
       - name: Configure
         run: |
-          cmake -S . -B build -DBUILD_TESTING=ON \
-            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+          cmake -S . -B build -DBUILD_TESTING=ON `
+            -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
 
       - name: Build
         run: cmake --build build --config Release -- -j $env:NUMBER_OF_PROCESSORS
