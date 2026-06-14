@@ -19,3 +19,4 @@ ffmpeg-*.7z
 *.dmg
 *-windows-x64.zip
 /buildtest/
+/wineprefix
