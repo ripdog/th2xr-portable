@@ -22,19 +22,18 @@ jobs:
             libavformat-dev libavcodec-dev libavutil-dev \
             libswscale-dev libswresample-dev glslang-tools \
             libx11-dev libxext-dev libxrandr-dev libxfixes-dev \
-            libxscrnsaver-dev libxi-dev libxss-dev \
-            libwayland-dev wayland-protocols
+            libxi-dev libxss-dev
 
       - name: Build SDL3 from source
         run: |
-          git clone https://github.com/libsdl-org/SDL.git --depth 1 --branch release-3.2.10
+          git clone https://github.com/libsdl-org/SDL.git --depth 1 --branch release-3.4.10
           cmake -S SDL -B SDL/build -DCMAKE_BUILD_TYPE=Release
           cmake --build SDL/build -- -j$(nproc)
           sudo cmake --install SDL/build
 
       - name: Build SDL3_ttf from source
         run: |
-          git clone https://github.com/libsdl-org/SDL_ttf.git --depth 1 --branch release-3.2.2
+          git clone https://github.com/libsdl-org/SDL_ttf.git --depth 1 --branch release-3.4.0
           cmake -S SDL_ttf -B SDL_ttf/build -DCMAKE_BUILD_TYPE=Release
           cmake --build SDL_ttf/build -- -j$(nproc)
           sudo cmake --install SDL_ttf/build
