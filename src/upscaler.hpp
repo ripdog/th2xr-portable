@@ -24,6 +24,10 @@ public:
     // must remain crisp at the native display resolution.
     virtual SDL_Texture* overlay_target() = 0;
 
+    // Fixed-resolution target for authentic bitmap text. This is composited
+    // with linear filtering between the art and native overlay layers.
+    virtual SDL_Texture* authentic_text_target() const = 0;
+
     // Composite the art and overlay layers to the window backbuffer.
     virtual void present() = 0;
 

@@ -8053,6 +8053,22 @@ private:
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     }
 
+    void clear_authentic_text()
+    {
+        SDL_SetRenderTarget(renderer_, upscaler_->authentic_text_target());
+        SDL_SetRenderScale(renderer_, 1.0f, 1.0f);
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_NONE);
+        SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
+        SDL_RenderClear(renderer_);
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    }
+
+    void begin_authentic_text()
+    {
+        SDL_SetRenderTarget(renderer_, upscaler_->authentic_text_target());
+        SDL_SetRenderScale(renderer_, 1.0f, 1.0f);
+    }
+
     void draw_overlay(std::size_t slot)
     {
         if (!overlays_[slot] || !overlay_states_[slot].visible) {
@@ -8397,6 +8413,7 @@ private:
                 renderer_, shake_target_.get(), nullptr, &destination,
                 shake.angle, nullptr, SDL_FLIP_NONE);
         }
+        clear_authentic_text();
         begin_overlay();
         if (clock_state_ || calendar_state_) {
             draw_clock_calendar();
@@ -8416,6 +8433,9 @@ private:
             SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 150);
             SDL_RenderFillRect(renderer_, nullptr);
+            if (font_.authentic()) {
+                begin_authentic_text();
+            }
             const auto visible = message_.visible();
             const auto reveal_start =
                 std::min(text_reveal_start_, visible.size());
@@ -8512,6 +8532,9 @@ private:
                 if (y > 535.0f) {
                     break;
                 }
+            }
+            if (font_.authentic()) {
+                begin_overlay();
             }
         }
         if (ui_mode_ != UiMode::backlog

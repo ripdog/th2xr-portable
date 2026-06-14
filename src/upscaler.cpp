@@ -38,6 +38,14 @@ public:
             throw std::runtime_error(SDL_GetError());
         }
         SDL_SetTextureBlendMode(art_.get(), SDL_BLENDMODE_BLEND);
+        authentic_text_.reset(SDL_CreateTexture(
+            renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET,
+            800, 600));
+        if (!authentic_text_) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        SDL_SetTextureBlendMode(authentic_text_.get(), SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(authentic_text_.get(), SDL_SCALEMODE_LINEAR);
     }
 
     SDL_Texture* art_target() const override { return art_.get(); }
@@ -46,6 +54,11 @@ public:
     {
         ensure_overlay();
         return overlay_.get();
+    }
+
+    SDL_Texture* authentic_text_target() const override
+    {
+        return authentic_text_.get();
     }
 
     void present() override
@@ -65,6 +78,8 @@ public:
         SDL_RenderClear(renderer_);
         SDL_SetTextureScaleMode(art_.get(), SDL_SCALEMODE_LINEAR);
         SDL_RenderTexture(renderer_, art_.get(), nullptr, &destination);
+        SDL_RenderTexture(
+            renderer_, authentic_text_.get(), nullptr, &destination);
         SDL_RenderTexture(renderer_, overlay_.get(), nullptr, &destination);
     }
 
@@ -97,6 +112,7 @@ private:
 
     SDL_Renderer* renderer_;
     Texture art_;
+    Texture authentic_text_;
     Texture overlay_;
     int overlay_width_ = 0;
     int overlay_height_ = 0;

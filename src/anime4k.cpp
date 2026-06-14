@@ -39,6 +39,7 @@ struct Anime4K::Impl {
     SDL_Renderer* renderer;
     SDL_GPUDevice* device = nullptr;
     std::unique_ptr<SDL_Texture, TextureDeleter> art;
+    std::unique_ptr<SDL_Texture, TextureDeleter> authentic_text;
     std::unique_ptr<SDL_Texture, TextureDeleter> overlay;
     int overlay_width = 0;
     int overlay_height = 0;
@@ -97,6 +98,7 @@ struct Anime4K::Impl {
             return texture;
         };
         art = target(800, 600);
+        authentic_text = target(800, 600);
         make_state(load_shader(shader_dir / "apply.frag.spv", 1));
         ready = true;
     }
@@ -153,6 +155,8 @@ struct Anime4K::Impl {
         SDL_SetGPURenderState(renderer, states[0]);
         SDL_RenderTexture(renderer, art.get(), nullptr, &destination);
         SDL_SetGPURenderState(renderer, nullptr);
+        SDL_RenderTexture(
+            renderer, authentic_text.get(), nullptr, &destination);
         SDL_RenderTexture(renderer, overlay.get(), nullptr, &destination);
     }
 };
@@ -183,6 +187,11 @@ SDL_Texture* Anime4K::overlay_target()
 {
     impl_->ensure_overlay();
     return impl_->overlay.get();
+}
+
+SDL_Texture* Anime4K::authentic_text_target() const
+{
+    return impl_->authentic_text.get();
 }
 
 void Anime4K::present()
