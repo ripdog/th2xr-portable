@@ -76,6 +76,12 @@ add_library(th2_config
 target_include_directories(th2_config PUBLIC src)
 target_compile_options(th2_config PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
 
+add_library(th2_soak
+    src/soak.cpp
+)
+target_include_directories(th2_soak PUBLIC src)
+target_compile_options(th2_soak PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
+
 add_library(imgui
     third_party/imgui/imgui.cpp
     third_party/imgui/imgui_draw.cpp
@@ -174,6 +180,12 @@ if(BUILD_TESTING)
     target_link_libraries(th2-tone-curve-test PRIVATE SDL3::SDL3)
     add_test(NAME tone-curve COMMAND th2-tone-curve-test)
 
+    add_executable(th2-soak-test
+        src/soak_test.cpp
+    )
+    target_link_libraries(th2-soak-test PRIVATE th2_soak)
+    add_test(NAME soak-explorer COMMAND th2-soak-test)
+
 endif()
 
 add_executable(th2-sdl-smoke
@@ -225,7 +237,7 @@ add_executable(th2-anime4k-test
 add_dependencies(th2-anime4k-test anime4k-shaders)
 target_link_libraries(th2-anime4k-test PRIVATE SDL3::SDL3)
 target_link_libraries(toheart2 PRIVATE
-    SDL3::SDL3 PkgConfig::SDL3_TTF PkgConfig::FONTCONFIG th2_runtime)
+    SDL3::SDL3 PkgConfig::SDL3_TTF PkgConfig::FONTCONFIG th2_runtime th2_soak)
 target_link_libraries(toheart2 PRIVATE th2_audio th2_character th2_config imgui)
 target_link_libraries(toheart2 PRIVATE PkgConfig::FFMPEG)
 

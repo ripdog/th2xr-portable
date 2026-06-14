@@ -116,6 +116,27 @@ scenario:
 ./build/toheart2 /path/to/data --scenario 010301000.sdt
 ```
 
+### Automated route soak
+
+The soak explorer drives the normal game runtime through text, choices, maps,
+effects, movies, and endings. It persists newly discovered decision paths and
+resumes unfinished work after interruption:
+
+```bash
+# Explore one route and store progress in logs/soak/
+./build/toheart2 game-data --soak
+
+# Explore up to 20 queued routes in this process
+./build/toheart2 game-data --soak --soak-runs 20
+
+# Use a separate state/report directory
+./build/toheart2 game-data --soak-state /tmp/th2-soak --soak-runs 20
+```
+
+Soak configuration and completion flags are isolated from the normal player
+configuration. `state.txt` contains the persistent decision tree and
+`runs.log` records completed or failed paths.
+
 ## License
 
 This project is licensed under the GNU General Public License v2.0. See

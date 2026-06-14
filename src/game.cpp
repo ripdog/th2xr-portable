@@ -9,6 +9,8 @@
 #include "message.hpp"
 #include "player_name.hpp"
 #include "script_runtime.hpp"
+#include "soak.hpp"
+#include "soak_game.hpp"
 #include "video.hpp"
 
 #include <SDL3/SDL.h>
@@ -296,14 +298,22 @@ bool clip_texture_source(
 
 class Game {
 public:
+    template <typename>
+    friend class th2::SoakGameDriver;
+
     explicit Game(
         const std::filesystem::path& data,
-        const std::optional<std::filesystem::path>& scenario)
+        const std::optional<std::filesystem::path>& scenario,
+        const std::optional<std::filesystem::path>& soak_directory,
+        std::size_t soak_runs)
         : scripts_(data / "SDT.PAK"), graphics_(data / "GRP.PAK"),
           backgrounds_(data / "bak.pak"), fonts_(data / "FNT.PAK"),
           bgm_archive_(data / "bgm.PAK"), se_archive_(data / "SE.PAK"),
           voice_archive_(data / "voice.pak"), movie_archive_(data / "mov.pak"),
           runtime_(scripts_),
+          config_path_(soak_directory
+              ? *soak_directory / "config.ini"
+              : std::filesystem::path("toheart2-config.ini")),
           config_(th2::load_config(config_path_)),
           sdl_subsystem_(),
           font_(fonts_)
@@ -397,7 +407,14 @@ public:
             SDL_SetTextureBlendMode(title_masked_.get(), SDL_BLENDMODE_BLEND);
         }
         title_started_ = std::chrono::steady_clock::now();
-        if (scenario) {
+        if (soak_directory) {
+            soak_ = std::make_unique<th2::SoakGameDriver<Game>>(
+                *this,
+                *soak_directory, soak_runs);
+            if (!soak_->start()) {
+                running_ = false;
+            }
+        } else if (scenario) {
             reset_play_state();
             initialize_scenario_flags();
             direct_scenario_ = true;
@@ -419,6 +436,18 @@ public:
     }
 
     int run()
+    {
+        try {
+            return run_loop();
+        } catch (const std::exception& error) {
+            if (soak_) {
+                soak_->fail(error.what());
+            }
+            throw;
+        }
+    }
+
+    int run_loop()
     {
         constexpr auto frame_duration = std::chrono::nanoseconds(
             1'000'000'000 / 120);
@@ -662,11 +691,26 @@ public:
                 wake_time_.reset();
                 advance();
             }
+            if (soak_) {
+                soak_->step();
+            }
             update_audio();
             update_movie();
             update_map();
             update_playback_modes();
             update_title();
+            if (soak_) {
+                update_transition();
+                update_background_fade();
+                update_screen_flash();
+                update_shake();
+                update_background_scroll();
+                update_character_animations();
+                update_clock_calendar();
+                update_sakura();
+                next_frame = std::chrono::steady_clock::now();
+                continue;
+            }
             ensure_upscaler();
             int output_width = 800;
             int output_height = 600;
@@ -938,8 +982,9 @@ private:
     th2::Archive voice_archive_;
     th2::Archive movie_archive_;
     th2::ScriptRuntime runtime_;
-    const std::filesystem::path config_path_{"toheart2-config.ini"};
+    const std::filesystem::path config_path_;
     th2::GameConfig config_;
+    std::unique_ptr<th2::SoakGameDriver<Game>> soak_;
 
     // SDL subsystem lifetime.  window_/renderer_ holders are declared before
     // every other SDL-dependent member so that textures, audio streams, etc.
@@ -1110,6 +1155,11 @@ private:
         if (!movie_->finished()) {
             return;
         }
+        complete_movie();
+    }
+
+    void complete_movie()
+    {
         const int completed_mode = movie_mode_;
         movie_.reset();
         movie_bytes_.clear();
@@ -5346,6 +5396,9 @@ private:
 
     void return_to_title()
     {
+        if (soak_) {
+            soak_->finish_route(runtime_.script_name(), runtime_.vm_pc());
+        }
         config_open_ = false;
         confirm_return_title_ = false;
         auto_mode_ = false;
@@ -8063,6 +8116,8 @@ int main(int argc, char** argv)
     try {
         std::filesystem::path data = "game-data";
         std::optional<std::filesystem::path> scenario;
+        std::optional<std::filesystem::path> soak_directory;
+        std::size_t soak_runs = 1;
         bool data_set = false;
         for (int index = 1; index < argc; ++index) {
             const std::string_view argument = argv[index];
@@ -8071,15 +8126,39 @@ int main(int argc, char** argv)
                     throw std::runtime_error("--scenario requires an SDT path");
                 }
                 scenario = argv[index];
+            } else if (argument == "--soak") {
+                soak_directory = std::filesystem::path("logs") / "soak";
+            } else if (argument == "--soak-state") {
+                if (++index >= argc) {
+                    throw std::runtime_error(
+                        "--soak-state requires a directory");
+                }
+                soak_directory = argv[index];
+            } else if (argument == "--soak-runs") {
+                if (++index >= argc) {
+                    throw std::runtime_error(
+                        "--soak-runs requires a positive number");
+                }
+                soak_runs = std::stoull(argv[index]);
+                if (soak_runs == 0) {
+                    throw std::runtime_error(
+                        "--soak-runs requires a positive number");
+                }
             } else if (!data_set) {
                 data = argv[index];
                 data_set = true;
             } else {
                 throw std::runtime_error(
-                    "usage: toheart2 [GAME_DATA_DIRECTORY] [--scenario FILE.SDT]");
+                    "usage: toheart2 [GAME_DATA_DIRECTORY] "
+                    "[--scenario FILE.SDT] [--soak] "
+                    "[--soak-state DIRECTORY] [--soak-runs COUNT]");
             }
         }
-        return Game(data, scenario).run();
+        if (scenario && soak_directory) {
+            throw std::runtime_error(
+                "--scenario and --soak cannot be used together");
+        }
+        return Game(data, scenario, soak_directory, soak_runs).run();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
