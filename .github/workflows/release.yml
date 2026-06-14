@@ -8,7 +8,24 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.release.outputs.upload_url }}
+    steps:
+      - name: Create release
+        id: release
+        run: |
+          VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes "th2xr-portable v${VERSION}" \
+            --draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   linux:
+    needs: create-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -74,6 +91,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   macos:
+    needs: create-release
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,11 +108,12 @@ jobs:
 
       - name: Package .app bundle
         run: |
+          VERSION=$(cat VERSION)
           APP="toheart2.app"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
           cp build/toheart2 "$APP/Contents/MacOS/"
 
-          cat > "$APP/Contents/Info.plist" << 'PLIST'
+          cat > "$APP/Contents/Info.plist" << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -108,7 +127,9 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>1.0</string>
+              <string>${VERSION}</string>
+              <key>CFBundleVersion</key>
+              <string>${VERSION}</string>
               <key>LSMinimumSystemVersion</key>
               <string>13.0</string>
           </dict>
@@ -133,6 +154,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   windows:
+    needs: create-release
     runs-on: windows-latest
     defaults:
       run:

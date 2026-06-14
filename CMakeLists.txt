@@ -7,6 +7,9 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" TH2_VERSION)
+string(STRIP "${TH2_VERSION}" TH2_VERSION)
+
 find_package(SDL3 CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(Iconv REQUIRED)
@@ -212,7 +215,8 @@ endforeach()
 add_custom_target(anime4k-shaders DEPENDS ${ANIME4K_SHADER_OUTPUTS})
 add_dependencies(toheart2 anime4k-shaders)
 target_compile_definitions(toheart2 PRIVATE
-    TH2_ANIME4K_SHADER_DIR="${ANIME4K_SHADER_DIR}")
+    TH2_ANIME4K_SHADER_DIR="${ANIME4K_SHADER_DIR}"
+    TH2_VERSION="${TH2_VERSION}")
 
 add_executable(th2-anime4k-test
     src/anime4k.cpp
