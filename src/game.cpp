@@ -8496,9 +8496,8 @@ private:
                         const auto alpha = static_cast<std::uint8_t>(
                             glyph_alpha * 255.0f);
                         if (font_.authentic()) {
-                            font_.draw(
-                                renderer_, authentic_x + 2.0f, y + 2.0f,
-                                glyph, 0, 0, 0, alpha);
+                            font_.draw_authentic_shadow(
+                                renderer_, authentic_x, y, glyph, alpha);
                             font_.draw(
                                 renderer_, authentic_x, y, glyph,
                                 255, 255, 255, alpha);

@@ -27,12 +27,17 @@ public:
         SDL_Renderer* renderer, float x, float y, std::string_view text,
         std::uint8_t red = 255, std::uint8_t green = 255,
         std::uint8_t blue = 255, std::uint8_t alpha = 255) const;
+    void draw_authentic_shadow(
+        SDL_Renderer* renderer, float x, float y, std::string_view text,
+        std::uint8_t alpha = 255) const;
 
 private:
     struct Modern;
     static constexpr int size = 24;
     static constexpr int width = 12;
     std::vector<std::uint8_t> data_;
+    std::vector<std::uint8_t> shadow_data_;
+    int shadow_width_ = 0;
     std::unique_ptr<Modern> modern_;
     bool authentic_ = false;
     std::string family_;

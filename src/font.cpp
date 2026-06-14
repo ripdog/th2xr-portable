@@ -19,6 +19,10 @@ constexpr std::size_t full_glyph_count = 7023;
 constexpr std::size_t full_glyph_bytes = 24 * 24 / 2;
 constexpr std::size_t half_glyph_bytes = 24 * 12 / 2;
 constexpr std::size_t ascii_offset = full_glyph_count * full_glyph_bytes;
+constexpr std::size_t shadow_full_bytes = 14 * 28;
+constexpr std::size_t shadow_half_bytes = 8 * 28;
+constexpr std::size_t shadow_ascii_offset =
+    4 + full_glyph_count * shadow_full_bytes;
 
 int glyph_index(unsigned char character)
 {
@@ -253,6 +257,20 @@ GameFont::GameFont(const Archive& archive)
     if (data_.size() < ascii_offset + 158 * half_glyph_bytes) {
         throw std::runtime_error("font24.fd0 is truncated");
     }
+    const auto* shadow_entry = archive.find("font24.fk0");
+    if (!shadow_entry) {
+        throw std::runtime_error("font24.fk0 not found");
+    }
+    shadow_data_ = archive.read(*shadow_entry);
+    if (shadow_data_.size()
+        < shadow_ascii_offset + 157 * shadow_half_bytes) {
+        throw std::runtime_error("font24.fk0 is truncated");
+    }
+    shadow_width_ = static_cast<int>(
+        shadow_data_[0]
+        | shadow_data_[1] << 8
+        | shadow_data_[2] << 16
+        | shadow_data_[3] << 24);
     modern_ = std::make_unique<Modern>();
 }
 
@@ -404,6 +422,27 @@ void draw_glyph(
     }
 }
 
+void draw_shadow_mask(
+    SDL_Renderer* renderer, float x, float y, int width, int height,
+    const std::uint8_t* bitmap, std::uint8_t alpha)
+{
+    const int stride = (width + 1) / 2;
+    for (int row = 0; row < height; ++row) {
+        for (int column = 0; column < width; ++column) {
+            const auto packed = bitmap[row * stride + column / 2];
+            const auto coverage =
+                column % 2 == 0 ? packed & 0x0f : packed >> 4;
+            if (!coverage) {
+                continue;
+            }
+            SDL_SetRenderDrawColor(
+                renderer, 0, 0, 0,
+                static_cast<std::uint8_t>(coverage * 17 * alpha / 255));
+            SDL_RenderPoint(renderer, x + column, y + row);
+        }
+    }
+}
+
 }  // namespace
 
 void GameFont::draw_bitmap(
@@ -542,6 +581,61 @@ void GameFont::draw(
         SDL_SetTextureAlphaMod(found->second.get(), 255);
     } catch (const std::exception&) {
         draw_bitmap(renderer, x, y, text, red, green, blue, alpha);
+    }
+}
+
+void GameFont::draw_authentic_shadow(
+    SDL_Renderer* renderer, float x, float y, std::string_view text,
+    std::uint8_t alpha) const
+{
+    if (!authentic_ || shadow_width_ <= 0 || text.empty()) {
+        return;
+    }
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    const auto cp932 = utf8_to_cp932(text);
+    for (std::size_t i = 0; i < cp932.size();) {
+        const auto byte = static_cast<unsigned char>(cp932[i]);
+        if (is_cp932_full_lead(byte)) {
+            if (i + 1 >= cp932.size()) {
+                break;
+            }
+            const auto code = static_cast<std::uint16_t>(
+                (byte << 8)
+                | static_cast<unsigned char>(cp932[i + 1]));
+            const auto index = cp932_full_index(code);
+            if (index >= 0) {
+                draw_shadow_mask(
+                    renderer,
+                    x - shadow_width_ + 1.0f,
+                    y - shadow_width_ + 1.0f,
+                    size + shadow_width_ * 2,
+                    size + shadow_width_ * 2,
+                    shadow_data_.data() + 4
+                        + index * shadow_full_bytes,
+                    alpha);
+                x += size;
+            } else if (code == 0x8140) {
+                x += size;
+            }
+            i += 2;
+        } else if (is_cp932_half(byte)) {
+            const auto index = cp932_half_index(byte);
+            if (index >= 0 && index < 157) {
+                draw_shadow_mask(
+                    renderer,
+                    x - shadow_width_ + 1.0f,
+                    y - shadow_width_ + 1.0f,
+                    width + shadow_width_ * 2,
+                    size + shadow_width_ * 2,
+                    shadow_data_.data() + shadow_ascii_offset
+                        + index * shadow_half_bytes,
+                    alpha);
+            }
+            x += width;
+            ++i;
+        } else {
+            ++i;
+        }
     }
 }
 
