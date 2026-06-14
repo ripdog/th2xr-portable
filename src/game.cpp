@@ -655,6 +655,10 @@ public:
                         manual_advance();
                     }
                 } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
+                    if (backlog_handle_dragging_) {
+                        set_backlog_from_sidebar_y(event.motion.y);
+                        continue;
+                    }
                     update_sidebar_hover(event.motion.x, event.motion.y);
                     if (choosing_) {
                         const float mouse_y = event.motion.y;
@@ -670,6 +674,9 @@ public:
                             y += height;
                         }
                     }
+                } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP
+                           && event.button.button == SDL_BUTTON_LEFT) {
+                    backlog_handle_dragging_ = false;
                 }
             }
             const bool control_held =
@@ -1352,6 +1359,7 @@ private:
     std::optional<BacklogVoice> pending_backlog_voice_;
     int backlog_depth_ = 0;
     int backlog_voice_hover_ = -1;
+    bool backlog_handle_dragging_ = false;
     int sidebar_hover_ = -1;
     float sidebar_alpha_ = 0.0f;
     bool sidebar_mouse_near_ = false;
@@ -7768,12 +7776,8 @@ private:
             return false;
         }
         if (y >= 10.0f && y < 265.0f && !backlog_.empty()) {
-            const float ratio = std::clamp((y - 10.0f) / 255.0f, 0.0f, 1.0f);
-            backlog_depth_ = std::clamp(
-                static_cast<int>(std::lround(
-                    (1.0f - ratio) * static_cast<float>(backlog_.size()))),
-                0, static_cast<int>(backlog_.size()));
-            ui_mode_ = backlog_depth_ == 0 ? UiMode::game : UiMode::backlog;
+            backlog_handle_dragging_ = true;
+            set_backlog_from_sidebar_y(y);
             return true;
         }
 
@@ -7833,6 +7837,29 @@ private:
         return true;
     }
 
+    void set_backlog_from_sidebar_y(float y)
+    {
+        if (backlog_.empty()) {
+            backlog_depth_ = 0;
+            ui_mode_ = UiMode::game;
+            return;
+        }
+        constexpr float track_top = 10.0f;
+        constexpr float handle_height = 30.0f;
+        constexpr float track_height = 255.0f;
+        const float handle_y = std::clamp(
+            y - handle_height / 2.0f,
+            track_top, track_top + track_height - handle_height);
+        const float ratio =
+            (handle_y - track_top) / (track_height - handle_height);
+        backlog_depth_ = std::clamp(
+            static_cast<int>(std::lround(
+                (1.0f - ratio) * static_cast<float>(backlog_.size()))),
+            0, static_cast<int>(backlog_.size()));
+        backlog_voice_hover_ = -1;
+        ui_mode_ = backlog_depth_ == 0 ? UiMode::game : UiMode::backlog;
+    }
+
     void handle_backlog_input(const SDL_Event& event)
     {
         if (event.type == SDL_EVENT_KEY_DOWN) {
@@ -7878,6 +7905,10 @@ private:
                 }
             }
             close_backlog();
+        } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+            if (event.button.button == SDL_BUTTON_LEFT) {
+                backlog_handle_dragging_ = false;
+            }
         } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
             if (event.wheel.y > 0) {
                 backlog_older();
@@ -7885,6 +7916,10 @@ private:
                 backlog_newer();
             }
         } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
+            if (backlog_handle_dragging_) {
+                set_backlog_from_sidebar_y(event.motion.y);
+                return;
+            }
             update_sidebar_hover(event.motion.x, event.motion.y);
             backlog_voice_hover_ = -1;
             if (event.motion.x < 770.0f && backlog_depth_ > 0
