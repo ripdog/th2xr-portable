@@ -18,6 +18,7 @@ public:
     ~GameFont();
 
     int glyph_width(unsigned char character) const;
+    bool authentic() const { return authentic_; }
     void configure(bool authentic, std::string_view family,
                    int font_size, float framebuffer_scale);
     static const std::vector<std::string>& system_families();

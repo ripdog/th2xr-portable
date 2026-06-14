@@ -8447,6 +8447,7 @@ private:
                     line_start = source_cursor;
                 }
                 std::size_t glyph_offset = 0;
+                float authentic_x = x;
                 while (glyph_offset < line.size()) {
                     const auto glyph_bytes = utf8_prefix_bytes(
                         std::string_view(line).substr(glyph_offset), 1);
@@ -8465,6 +8466,21 @@ private:
                     }
                     if (glyph_alpha > 0.0f) {
                         const auto glyph_end = glyph_offset + glyph_bytes;
+                        const auto glyph = std::string_view(line).substr(
+                            glyph_offset, glyph_bytes);
+                        const auto alpha = static_cast<std::uint8_t>(
+                            glyph_alpha * 255.0f);
+                        if (font_.authentic()) {
+                            font_.draw(
+                                renderer_, authentic_x + 2.0f, y + 2.0f,
+                                glyph, 0, 0, 0, alpha);
+                            font_.draw(
+                                renderer_, authentic_x, y, glyph,
+                                255, 255, 255, alpha);
+                            authentic_x += font_.text_width(glyph);
+                            glyph_offset += glyph_bytes;
+                            continue;
+                        }
                         const auto prefix =
                             std::string_view(line).substr(0, glyph_offset);
                         const auto through_glyph =
@@ -8473,8 +8489,6 @@ private:
                             x + font_.text_width(prefix);
                         const float glyph_right =
                             x + font_.text_width(through_glyph);
-                        const auto alpha = static_cast<std::uint8_t>(
-                            glyph_alpha * 255.0f);
                         const SDL_Rect clip{
                             static_cast<int>(std::floor(glyph_left)),
                             static_cast<int>(std::floor(y)),

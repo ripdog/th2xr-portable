@@ -125,7 +125,8 @@ bool is_cp932_full_lead(unsigned char byte)
 
 bool is_cp932_half(unsigned char byte)
 {
-    return (byte >= 0x21 && byte <= 0x7e)
+    return byte == ' '
+        || (byte >= 0x21 && byte <= 0x7e)
         || (byte >= 0xa1 && byte <= 0xdf);
 }
 
