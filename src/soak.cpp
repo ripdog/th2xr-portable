@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <format>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -56,6 +57,19 @@ bool contains_path(
 std::string kind_name(SoakDecisionKind kind)
 {
     return kind == SoakDecisionKind::choice ? "choice" : "map";
+}
+
+std::string describe_options(const std::vector<SoakOption>& options)
+{
+    std::ostringstream output;
+    for (std::size_t i = 0; i < options.size(); ++i) {
+        if (i != 0) {
+            output << "; ";
+        }
+        output << i << '=' << std::quoted(options[i].label)
+               << " -> " << std::quoted(options[i].target);
+    }
+    return output.str();
 }
 
 SoakDecisionKind parse_kind(std::string_view name)
@@ -125,8 +139,12 @@ int SoakExplorer::select(
         });
     } else if (found->kind != kind || found->checkpoint != checkpoint
                || found->options != options) {
-        throw std::runtime_error(
-            "nondeterministic decision at path " + prefix);
+        throw std::runtime_error(std::format(
+            "nondeterministic decision at path {}: "
+            "recorded {} at {} [{}], observed {} at {} [{}]",
+            prefix, kind_name(found->kind), found->checkpoint,
+            describe_options(found->options), kind_name(kind), checkpoint,
+            describe_options(options)));
     }
 
     int selected = 0;

@@ -23,9 +23,9 @@ public:
         : game_(game),
           explorer_(std::make_unique<SoakExplorer>(directory, run_limit))
     {
-        for (std::size_t i = 0; i < game_flags_.size(); ++i) {
-            game_flags_[i] = game_.runtime_.game_flag(i);
-        }
+        // Each path belongs to one fresh-install campaign. Persistent unlocks
+        // earned by an earlier route must not alter later route topology.
+        game_flags_.fill(0);
     }
 
     bool start()

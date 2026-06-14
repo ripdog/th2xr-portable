@@ -107,5 +107,41 @@ int main()
         }
     }
     std::filesystem::remove_all(recovery_directory);
+
+    const auto mismatch_directory =
+        std::filesystem::temp_directory_path() / "th2-soak-mismatch-test";
+    std::filesystem::remove_all(mismatch_directory);
+    {
+        th2::SoakExplorer explorer(mismatch_directory, 1);
+        explorer.begin_run();
+        explorer.select(
+            th2::SoakDecisionKind::map, "map.sdt:10",
+            {{"first", "A"}});
+        explorer.fail_run("test interruption", "map.sdt", 10);
+    }
+    {
+        th2::SoakExplorer explorer(mismatch_directory, 1);
+        explorer.begin_run();
+        try {
+            explorer.select(
+                th2::SoakDecisionKind::map, "map.sdt:10",
+                {{"second", "B"}});
+            std::cerr << "decision mismatch was not detected\n";
+            return 1;
+        } catch (const std::runtime_error& error) {
+            const std::string message(error.what());
+            if (!expect(
+                    message.find("recorded map at map.sdt:10") !=
+                        std::string::npos
+                    && message.find("\"first\" -> \"A\"") !=
+                        std::string::npos
+                    && message.find("\"second\" -> \"B\"") !=
+                        std::string::npos,
+                    "decision mismatch omitted useful context")) {
+                return 1;
+            }
+        }
+    }
+    std::filesystem::remove_all(mismatch_directory);
     return 0;
 }
