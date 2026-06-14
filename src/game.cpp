@@ -8384,8 +8384,9 @@ private:
                 }
             }
             constexpr float fade_width = 16.0f;
-            const auto opaque_characters = static_cast<std::size_t>(
-                std::clamp(
+            const auto opaque_characters = text_reveal_complete_
+                ? reveal_character_count
+                : static_cast<std::size_t>(std::clamp(
                     std::floor(reveal_position - fade_width) + 1.0f,
                     0.0f, static_cast<float>(reveal_character_count)));
             const auto opaque_bytes = reveal_start
