@@ -8384,58 +8384,53 @@ private:
                 }
             }
             constexpr float fade_width = 16.0f;
-            const auto opaque_characters = text_reveal_complete_
-                ? reveal_character_count
-                : static_cast<std::size_t>(std::clamp(
-                    std::floor(reveal_position - fade_width) + 1.0f,
-                    0.0f, static_cast<float>(reveal_character_count)));
-            const auto opaque_bytes = reveal_start
-                + utf8_prefix_bytes(reveal_text, opaque_characters);
-            const auto lines = display_lines(visible.substr(0, opaque_bytes));
             const float x = message_text_x();
             float y = message_text_y();
+            std::size_t source_cursor = 0;
+            const auto lines = display_lines(visible);
             for (const auto& line : lines) {
-                font_.draw(renderer_, x + 2.0f, y + 2.0f, line, 0, 0, 0);
-                font_.draw(renderer_, x, y, line);
+                auto line_start = visible.find(line, source_cursor);
+                if (line_start == std::string_view::npos) {
+                    line_start = source_cursor;
+                }
+                std::size_t glyph_offset = 0;
+                while (glyph_offset < line.size()) {
+                    const auto glyph_bytes = utf8_prefix_bytes(
+                        std::string_view(line).substr(glyph_offset), 1);
+                    const auto source_offset = line_start + glyph_offset;
+                    float glyph_alpha = 1.0f;
+                    if (!text_reveal_complete_
+                        && source_offset >= reveal_start) {
+                        const auto glyph_index = utf8_character_count(
+                            visible.substr(
+                                reveal_start,
+                                source_offset - reveal_start));
+                        glyph_alpha = std::clamp(
+                            reveal_position
+                                - static_cast<float>(glyph_index),
+                            0.0f, fade_width) / fade_width;
+                    }
+                    if (glyph_alpha > 0.0f) {
+                        const auto prefix =
+                            std::string_view(line).substr(0, glyph_offset);
+                        const float glyph_x = x + font_.text_width(prefix);
+                        const auto alpha = static_cast<std::uint8_t>(
+                            glyph_alpha * 255.0f);
+                        const auto glyph = std::string_view(line).substr(
+                            glyph_offset, glyph_bytes);
+                        font_.draw(
+                            renderer_, glyph_x + 2.0f, y + 2.0f,
+                            glyph, 0, 0, 0, alpha);
+                        font_.draw(
+                            renderer_, glyph_x, y, glyph,
+                            255, 255, 255, alpha);
+                    }
+                    glyph_offset += glyph_bytes;
+                }
+                source_cursor = line_start + line.size();
                 y += 31.0f;
                 if (y > 535.0f) {
                     break;
-                }
-            }
-            if (!text_reveal_complete_) {
-                auto glyph_offset = opaque_bytes;
-                auto glyph_index = opaque_characters;
-                while (glyph_offset < visible.size()
-                       && glyph_index < reveal_character_count) {
-                    const auto next_bytes = utf8_prefix_bytes(
-                        visible.substr(glyph_offset), 1);
-                    const auto glyph_alpha = std::clamp(
-                        reveal_position - static_cast<float>(glyph_index),
-                        0.0f, fade_width) / fade_width;
-                    if (glyph_alpha <= 0.0f) {
-                        break;
-                    }
-                    const auto prefix = visible.substr(0, glyph_offset);
-                    const auto prefix_lines = display_lines(prefix);
-                    const auto& last = prefix_lines.empty()
-                        ? std::string{} : prefix_lines.back();
-                    const float glyph_x = x + font_.text_width(last);
-                    const float glyph_y = message_text_y()
-                        + 31.0f * static_cast<float>(
-                            prefix_lines.empty() ? 0
-                                                 : prefix_lines.size() - 1);
-                    const auto alpha = static_cast<std::uint8_t>(
-                        glyph_alpha * 255.0f);
-                    font_.draw(
-                        renderer_, glyph_x + 2.0f, glyph_y + 2.0f,
-                        visible.substr(glyph_offset, next_bytes),
-                        0, 0, 0, alpha);
-                    font_.draw(
-                        renderer_, glyph_x, glyph_y,
-                        visible.substr(glyph_offset, next_bytes),
-                        255, 255, 255, alpha);
-                    glyph_offset += next_bytes;
-                    ++glyph_index;
                 }
             }
         }
