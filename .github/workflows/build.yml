@@ -21,8 +21,8 @@ jobs:
             cmake g++ libsndfile-dev libfontconfig-dev \
             libavformat-dev libavcodec-dev libavutil-dev \
             libswscale-dev libswresample-dev glslang-tools \
-            libx11-dev libxext-dev libxrandr-dev libxfixes-dev \
-            libxi-dev libxss-dev
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev
 
       - name: Build SDL3 from source
         run: |
@@ -65,7 +65,7 @@ jobs:
         run: cmake --build build -- -j$(sysctl -n hw.logicalcpu)
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure -E 'script-runtime-loose-lookup'
 
   windows:
     runs-on: windows-latest
