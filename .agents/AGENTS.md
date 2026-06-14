@@ -30,7 +30,7 @@ guess. Do not assume. The original engines are right there in the repo.
 
 - `ToHeart2/` — ToHeart2 XRATED engine (primary port target)
 - `鎖/` — Kusari engine (similar architecture, sometimes helpful for comparison)
-- `native/` — Modern SDL3 C++20 reimplementation
+- `src/` — Modern SDL3 C++20 reimplementation
 
 ## Codebase conventions
 

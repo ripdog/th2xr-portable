@@ -1,4 +1,4 @@
-#include "../native/event_metadata.h"
+#include "../src/event_metadata.h"
 
 #include <array>
 #include <cstdint>
