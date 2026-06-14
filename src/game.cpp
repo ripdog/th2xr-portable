@@ -1345,6 +1345,7 @@ private:
     int menu_highlight_ = 0;
     struct BacklogVoice {
         std::size_t start = 0;
+        std::size_t end = 0;
         int scenario = 0;
         int voice = 0;
         int character = 0;
@@ -3696,7 +3697,7 @@ private:
         voice_volume_[channel] = volume;
         voice_loop_[channel] = loop;
         pending_backlog_voice_ = BacklogVoice{
-            0, scenario, voice, character, volume,
+            0, 0, scenario, voice, character, volume,
             name != standard_name};
     }
 
@@ -4177,6 +4178,7 @@ private:
             current_backlog_voices_.clear();
             if (pending_backlog_voice_) {
                 pending_backlog_voice_->start = 0;
+                pending_backlog_voice_->end = message_.visible().size();
                 current_backlog_voices_.push_back(*pending_backlog_voice_);
                 pending_backlog_voice_.reset();
             }
@@ -4188,15 +4190,16 @@ private:
             start_text_reveal(0);
             auto_next_time_.reset();
         } else if (name == "AddMessage2") {
-            if (pending_backlog_voice_) {
-                pending_backlog_voice_->start = message_.visible().size();
-                current_backlog_voices_.push_back(*pending_backlog_voice_);
-                pending_backlog_voice_.reset();
-            }
             const auto reveal_start = message_.visible().size();
             message_.append(th2::substitute_player_name(
                 text(event, 0), config_.player_name,
                 runtime_.flag(213) != 0));
+            if (pending_backlog_voice_) {
+                pending_backlog_voice_->start = reveal_start;
+                pending_backlog_voice_->end = message_.visible().size();
+                current_backlog_voices_.push_back(*pending_backlog_voice_);
+                pending_backlog_voice_.reset();
+            }
             message_visible_ = true;
             current_line_key_ = runtime_.script_name() + ':'
                 + std::to_string(runtime_.vm_pc());
@@ -7626,40 +7629,78 @@ private:
 
         const float x = message_text_x();
         float y = message_text_y();
-        int line_index = 0;
         for (const auto& line : display_lines(selected)) {
-            bool voice_hovered = false;
-            if (entry && backlog_voice_hover_ >= 0
-                && backlog_voice_hover_
-                    < static_cast<int>(entry->voices.size())) {
-                const auto& voice = entry->voices[backlog_voice_hover_];
-                const auto end = backlog_voice_hover_ + 1
-                        < static_cast<int>(entry->voices.size())
-                    ? entry->voices[backlog_voice_hover_ + 1].start
-                    : entry->text.size();
-                const auto first_line = static_cast<int>(
-                    display_lines(
-                        std::string_view(entry->text).substr(0, voice.start))
-                        .size()) - 1;
-                const auto last_line = static_cast<int>(
-                    display_lines(
-                        std::string_view(entry->text).substr(0, end))
-                        .size()) - 1;
-                voice_hovered =
-                    line_index >= first_line && line_index <= last_line;
-            }
             font_.draw(renderer_, x + 2.0f, y + 2.0f, line, 0, 0, 0);
-            font_.draw(
-                renderer_, x, y, line,
-                voice_hovered ? 255 : 255,
-                voice_hovered ? 255 : 144,
-                voice_hovered ? 255 : 32);
+            font_.draw(renderer_, x, y, line, 255, 144, 32);
             y += 31.0f;
-            ++line_index;
             if (y > 535.0f) {
                 break;
             }
         }
+        if (entry && backlog_voice_hover_ >= 0
+            && backlog_voice_hover_
+                < static_cast<int>(entry->voices.size())) {
+            const auto lines = display_lines(entry->text);
+            for (const auto& rect :
+                 backlog_voice_rects(*entry, backlog_voice_hover_)) {
+                const auto line = static_cast<std::size_t>(
+                    (rect.y - message_text_y()) / 31.0f);
+                if (line >= lines.size()) {
+                    continue;
+                }
+                const SDL_Rect clip{
+                    static_cast<int>(std::floor(rect.x)),
+                    static_cast<int>(std::floor(rect.y)),
+                    static_cast<int>(std::ceil(rect.w)),
+                    static_cast<int>(std::ceil(rect.h))};
+                SDL_SetRenderClipRect(renderer_, &clip);
+                font_.draw(
+                    renderer_, x + 2.0f, rect.y + 2.0f,
+                    lines[line], 0, 0, 0);
+                font_.draw(
+                    renderer_, x, rect.y, lines[line], 255, 255, 255);
+                SDL_SetRenderClipRect(renderer_, nullptr);
+            }
+        }
+    }
+
+    std::vector<SDL_FRect> backlog_voice_rects(
+        const BacklogEntry& entry, int voice_index) const
+    {
+        std::vector<SDL_FRect> result;
+        if (voice_index < 0
+            || voice_index >= static_cast<int>(entry.voices.size())) {
+            return result;
+        }
+        const auto& voice = entry.voices[voice_index];
+        const auto start = std::min(voice.start, entry.text.size());
+        const auto end = std::clamp(voice.end, start, entry.text.size());
+        std::size_t source_cursor = 0;
+        float y = message_text_y();
+        for (const auto& line : display_lines(entry.text)) {
+            auto line_start =
+                std::string_view(entry.text).find(line, source_cursor);
+            if (line_start == std::string_view::npos) {
+                line_start = source_cursor;
+            }
+            const auto line_end = line_start + line.size();
+            const auto overlap_start = std::max(start, line_start);
+            const auto overlap_end = std::min(end, line_end);
+            if (overlap_start < overlap_end) {
+                const auto prefix = std::string_view(line).substr(
+                    0, overlap_start - line_start);
+                const auto voiced = std::string_view(line).substr(
+                    0, overlap_end - line_start);
+                const float left =
+                    message_text_x() + font_.text_width(prefix);
+                const float right =
+                    message_text_x() + font_.text_width(voiced);
+                result.push_back({left, y, right - left, 31.0f});
+            }
+            source_cursor = line_end;
+            y += 31.0f;
+        }
+        return result;
     }
 
     void draw_sidebar()
@@ -7933,25 +7974,20 @@ private:
                 const auto& entry = backlog_[
                     backlog_.size()
                     - static_cast<std::size_t>(backlog_depth_)];
-                const int line = static_cast<int>(
-                    (event.motion.y - message_text_y()) / 31.0f);
-                if (line >= 0) {
-                    for (int i = 0;
-                         i < static_cast<int>(entry.voices.size()); ++i) {
-                        const auto end = i + 1
-                                < static_cast<int>(entry.voices.size())
-                            ? entry.voices[i + 1].start
-                            : entry.text.size();
-                        const auto first_line = static_cast<int>(
-                            display_lines(std::string_view(entry.text).substr(
-                                0, entry.voices[i].start)).size()) - 1;
-                        const auto last_line = static_cast<int>(
-                            display_lines(std::string_view(entry.text).substr(
-                                0, end)).size()) - 1;
-                        if (line >= first_line && line <= last_line) {
+                for (int i = 0;
+                     i < static_cast<int>(entry.voices.size()); ++i) {
+                    for (const auto& rect :
+                         backlog_voice_rects(entry, i)) {
+                        if (event.motion.x >= rect.x
+                            && event.motion.x < rect.x + rect.w
+                            && event.motion.y >= rect.y
+                            && event.motion.y < rect.y + rect.h) {
                             backlog_voice_hover_ = i;
                             break;
                         }
+                    }
+                    if (backlog_voice_hover_ >= 0) {
+                        break;
                     }
                 }
             }
