@@ -1,6 +1,6 @@
 #include "event_metadata.h"
 
-#include "../ToHeart2/ScriptEngine/mes/Escr.h"
+#include "../legacy/ToHeart2/ScriptEngine/mes/Escr.h"
 
 size_t th2_event_count(void)
 {
