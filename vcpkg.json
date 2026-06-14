@@ -7,7 +7,6 @@
     "sdl3-ttf",
     "libsndfile",
     "fontconfig",
-    "ffmpeg",
     "glslang"
   ]
 }

@@ -78,14 +78,14 @@ jobs:
 
       - name: Setup vcpkg
         run: |
+          Remove-Item -Recurse -Force C:\vcpkg -ErrorAction SilentlyContinue
           git clone https://github.com/microsoft/vcpkg.git C:/vcpkg
           C:/vcpkg/bootstrap-vcpkg.bat
 
       - name: Install vcpkg packages (no ffmpeg)
         shell: bash
         run: |
-          C:/vcpkg/vcpkg install --triplet x64-windows \
-            pkgconf sdl3 sdl3-ttf libsndfile fontconfig glslang
+          C:/vcpkg/vcpkg install --triplet x64-windows
 
       - name: Download pre-built FFmpeg
         shell: bash
