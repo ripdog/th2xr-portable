@@ -8039,7 +8039,7 @@ private:
         SDL_RenderTexture(renderer_, tex.get(), &src, &dst);
     }
 
-    void begin_overlay()
+    void select_overlay()
     {
         auto* overlay = upscaler_->overlay_target();
         SDL_SetRenderTarget(renderer_, overlay);
@@ -8047,6 +8047,11 @@ private:
         float height = 0.0f;
         SDL_GetTextureSize(overlay, &width, &height);
         SDL_SetRenderScale(renderer_, width / 800.0f, height / 600.0f);
+    }
+
+    void begin_overlay()
+    {
+        select_overlay();
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_NONE);
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
         SDL_RenderClear(renderer_);
@@ -8534,7 +8539,7 @@ private:
                 }
             }
             if (font_.authentic()) {
-                begin_overlay();
+                select_overlay();
             }
         }
         if (ui_mode_ != UiMode::backlog
