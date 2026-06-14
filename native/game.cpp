@@ -393,6 +393,7 @@ public:
         if (scenario) {
             reset_play_state();
             initialize_scenario_flags();
+            direct_scenario_ = true;
             runtime_.load_file(*scenario);
             ui_mode_ = UiMode::game;
             advance();
@@ -1191,6 +1192,7 @@ private:
     std::optional<std::chrono::steady_clock::time_point> auto_next_time_;
     std::string current_line_key_;
     std::uint64_t next_transition_debug_id_ = 1;
+    bool direct_scenario_ = false;
 
     th2::AudioChannel& waited_audio_channel()
     {
@@ -1719,13 +1721,26 @@ private:
             &holiday_source, &holiday_destination);
     }
 
+    Texture load_sakura_texture(std::string_view name)
+    {
+        const auto* entry = graphics_.find(name);
+        if (!entry) {
+            throw std::runtime_error(
+                "image not found: " + std::string(name));
+        }
+        Surface surface(th2::load_image(
+            graphics_.read(*entry), entry->name));
+        SDL_SetSurfaceColorKey(
+            surface.get(), true,
+            SDL_MapSurfaceRGB(surface.get(), 0, 0, 0));
+        return texture_from_surface(surface.get());
+    }
+
     void start_sakura(int amount, bool no_reset)
     {
         if (!sakura_large_) {
-            sakura_large_ =
-                load_texture(renderer_, graphics_, "sakura.bmp");
-            sakura_small_ =
-                load_texture(renderer_, graphics_, "sakura2.bmp");
+            sakura_large_ = load_sakura_texture("sakura.bmp");
+            sakura_small_ = load_sakura_texture("sakura2.bmp");
         }
         if (!sakura_) {
             sakura_ = SakuraState{};
@@ -4276,7 +4291,7 @@ private:
             }
             sync_game_flags();
             if (step.reason == th2::VmYield::ended) {
-                if (replay_mode_) {
+                if (replay_mode_ || direct_scenario_) {
                     return_to_title();
                     break;
                 }
@@ -4782,10 +4797,8 @@ private:
                 petal.axis_y = read_i32(in) / 1000.0f;
                 petal.counter = read_u32(in);
             }
-            sakura_large_ =
-                load_texture(renderer_, graphics_, "sakura.bmp");
-            sakura_small_ =
-                load_texture(renderer_, graphics_, "sakura2.bmp");
+            sakura_large_ = load_sakura_texture("sakura.bmp");
+            sakura_small_ = load_sakura_texture("sakura2.bmp");
             sakura_ = std::move(state);
         } else {
             sakura_.reset();
@@ -5198,6 +5211,7 @@ private:
     {
         reset_play_state();
         initialize_scenario_flags();
+        direct_scenario_ = false;
         load_script("EV_0301MORNING.SDT");
         ui_mode_ = UiMode::game;
         advance();
@@ -6825,6 +6839,7 @@ private:
     {
         reset_play_state();
         initialize_scenario_flags();
+        direct_scenario_ = false;
         replay_mode_ = true;
         load_script(std::format(
             "8000{:05d}.SDT", replay_scripts.at(slot)));
