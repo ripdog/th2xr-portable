@@ -1263,6 +1263,7 @@ private:
     std::optional<std::chrono::steady_clock::time_point> auto_next_time_;
     std::string current_line_key_;
     std::chrono::steady_clock::time_point text_reveal_started_{};
+    std::size_t text_reveal_start_ = 0;
     bool text_reveal_complete_ = true;
     std::uint64_t next_transition_debug_id_ = 1;
     bool direct_scenario_ = false;
@@ -2357,8 +2358,9 @@ private:
             });
     }
 
-    void start_text_reveal()
+    void start_text_reveal(std::size_t start)
     {
+        text_reveal_start_ = start;
         text_reveal_started_ = std::chrono::steady_clock::now();
         text_reveal_complete_ = config_.text_speed_ms == 0;
     }
@@ -2458,8 +2460,9 @@ private:
                 auto_next_time_.reset();
                 return;
             }
+            const auto reveal_start = message_.visible().size();
             if (message_.reveal_next() && message_.has_hidden_segments()) {
-                start_text_reveal();
+                start_text_reveal(reveal_start);
                 auto_next_time_.reset();
                 return;
             }
@@ -4182,7 +4185,7 @@ private:
                 + std::to_string(runtime_.vm_pc());
             message_ends_block_ = number(event, 1) == 2;
             waiting_for_input_ = true;
-            start_text_reveal();
+            start_text_reveal(0);
             auto_next_time_.reset();
         } else if (name == "AddMessage2") {
             if (pending_backlog_voice_) {
@@ -4190,6 +4193,7 @@ private:
                 current_backlog_voices_.push_back(*pending_backlog_voice_);
                 pending_backlog_voice_.reset();
             }
+            const auto reveal_start = message_.visible().size();
             message_.append(th2::substitute_player_name(
                 text(event, 0), config_.player_name,
                 runtime_.flag(213) != 0));
@@ -4198,7 +4202,7 @@ private:
                 + std::to_string(runtime_.vm_pc());
             message_ends_block_ = number(event, 1) == 2;
             waiting_for_input_ = true;
-            start_text_reveal();
+            start_text_reveal(reveal_start);
             auto_next_time_.reset();
         } else if (name == "T") {
             message_visible_ = number(event, 0) != 0;
@@ -4478,8 +4482,9 @@ private:
             auto_next_time_.reset();
             return;
         }
+        const auto reveal_start = message_.visible().size();
         if (waiting_for_input_ && message_.reveal_next()) {
-            start_text_reveal();
+            start_text_reveal(reveal_start);
             auto_next_time_.reset();
             return;
         }
@@ -8359,24 +8364,30 @@ private:
             SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 150);
             SDL_RenderFillRect(renderer_, nullptr);
             const auto visible = message_.visible();
-            const auto character_count = utf8_character_count(visible);
-            float reveal_position = static_cast<float>(character_count);
+            const auto reveal_start =
+                std::min(text_reveal_start_, visible.size());
+            const auto reveal_text = visible.substr(reveal_start);
+            const auto reveal_character_count =
+                utf8_character_count(reveal_text);
+            float reveal_position =
+                static_cast<float>(reveal_character_count);
             if (!text_reveal_complete_ && config_.text_speed_ms > 0) {
                 const auto elapsed =
                     std::chrono::steady_clock::now() - text_reveal_started_;
                 reveal_position =
                     std::chrono::duration<float, std::milli>(elapsed).count()
                     / config_.text_speed_ms;
-                if (reveal_position >= character_count) {
+                if (reveal_position >= reveal_character_count) {
                     text_reveal_complete_ = true;
-                    reveal_position = static_cast<float>(character_count);
+                    reveal_position =
+                        static_cast<float>(reveal_character_count);
                 }
             }
             const auto faded_characters = static_cast<std::size_t>(
                 std::clamp(reveal_position, 0.0f,
-                           static_cast<float>(character_count)));
-            const auto faded_bytes =
-                utf8_prefix_bytes(visible, faded_characters);
+                           static_cast<float>(reveal_character_count)));
+            const auto faded_bytes = reveal_start
+                + utf8_prefix_bytes(reveal_text, faded_characters);
             const auto lines = display_lines(visible.substr(0, faded_bytes));
             const float x = message_text_x();
             float y = message_text_y();
