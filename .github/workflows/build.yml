@@ -20,7 +20,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake g++ libsndfile-dev libfontconfig-dev \
             libavformat-dev libavcodec-dev libavutil-dev \
-            libswscale-dev libswresample-dev glslang-tools
+            libswscale-dev libswresample-dev glslang-tools \
+            libx11-dev libxext-dev libxrandr-dev libxfixes-dev \
+            libxscrnsaver-dev libxi-dev libxss-dev \
+            libwayland-dev wayland-protocols
 
       - name: Build SDL3 from source
         run: |

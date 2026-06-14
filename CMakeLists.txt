@@ -258,7 +258,7 @@ if(BUILD_TESTING)
         src/save_test.cpp
     )
     target_include_directories(th2-save-test PRIVATE src)
-    target_link_libraries(th2-save-test PRIVATE th2_runtime th2_character)
+    target_link_libraries(th2-save-test PRIVATE th2_runtime th2_character SDL3::SDL3)
     add_test(NAME save-roundtrip COMMAND th2-save-test)
 
     add_executable(th2-config-test

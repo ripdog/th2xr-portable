@@ -4488,8 +4488,9 @@ private:
         }
         if (result.timestamp == 0) {
             const auto written = std::filesystem::last_write_time(save_path(slot));
+            const auto sys_time = std::chrono::file_clock::to_sys(written);
             result.timestamp = std::chrono::system_clock::to_time_t(
-                std::chrono::file_clock::to_sys(written));
+                std::chrono::time_point_cast<std::chrono::system_clock::duration>(sys_time));
         }
         return result;
     }
