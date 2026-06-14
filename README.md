@@ -137,6 +137,17 @@ Soak configuration and completion flags are isolated from the normal player
 configuration. `state.txt` contains the persistent decision tree and
 `runs.log` records completed or failed paths.
 
+The currently known remaining run count can be inspected without loading the
+game:
+
+```bash
+python3 tools/soak_status.py
+python3 tools/soak_status.py --json
+```
+
+The count is the current exploration frontier. It can increase when a queued
+run reaches a choice or map branch that has not previously been discovered.
+
 ## License
 
 This project is licensed under the GNU General Public License v2.0. See
