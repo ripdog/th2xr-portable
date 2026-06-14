@@ -8435,12 +8435,12 @@ private:
         }
         if (ui_mode_ != UiMode::backlog
             && message_visible_ && !message_.empty()) {
-            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 150);
-            SDL_RenderFillRect(renderer_, nullptr);
             if (font_.authentic()) {
                 begin_authentic_text();
             }
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer_, 0, 0, 16, 150);
+            SDL_RenderFillRect(renderer_, nullptr);
             const auto visible = message_.visible();
             const auto reveal_start =
                 std::min(text_reveal_start_, visible.size());
