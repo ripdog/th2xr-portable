@@ -7615,6 +7615,11 @@ private:
 
     void draw_backlog()
     {
+        const bool authentic = font_.authentic();
+        if (authentic) {
+            begin_authentic_text();
+        }
+
         SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 128);
         const SDL_FRect game_area{0.0f, 0.0f, 800.0f, 600.0f};
@@ -7631,7 +7636,11 @@ private:
         const float x = message_text_x();
         float y = message_text_y();
         for (const auto& line : display_lines(selected)) {
-            font_.draw(renderer_, x + 2.0f, y + 2.0f, line, 0, 0, 0);
+            if (authentic) {
+                font_.draw_authentic_shadow(renderer_, x, y, line);
+            } else {
+                font_.draw(renderer_, x + 2.0f, y + 2.0f, line, 0, 0, 0);
+            }
             font_.draw(renderer_, x, y, line, 255, 144, 32);
             y += 31.0f;
             if (y > 535.0f) {
@@ -7655,13 +7664,22 @@ private:
                     static_cast<int>(std::ceil(rect.w)),
                     static_cast<int>(std::ceil(rect.h))};
                 SDL_SetRenderClipRect(renderer_, &clip);
-                font_.draw(
-                    renderer_, x + 2.0f, rect.y + 2.0f,
-                    lines[line], 0, 0, 0);
+                if (authentic) {
+                    font_.draw_authentic_shadow(
+                        renderer_, x, rect.y, lines[line]);
+                } else {
+                    font_.draw(
+                        renderer_, x + 2.0f, rect.y + 2.0f,
+                        lines[line], 0, 0, 0);
+                }
                 font_.draw(
                     renderer_, x, rect.y, lines[line], 255, 255, 255);
                 SDL_SetRenderClipRect(renderer_, nullptr);
             }
+        }
+
+        if (authentic) {
+            select_overlay();
         }
     }
 
