@@ -11,3 +11,4 @@ save_*.bmp
 save_*.meta
 /save/
 ffmpeg-*.7z
+*.AppImage
