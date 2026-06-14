@@ -315,6 +315,7 @@ public:
               ? *soak_directory / "config.ini"
               : std::filesystem::path("toheart2-config.ini")),
           config_(th2::load_config(config_path_)),
+          suppress_audio_output_(soak_directory.has_value()),
           sdl_subsystem_(),
           font_(fonts_)
     {
@@ -985,6 +986,7 @@ private:
     th2::ScriptRuntime runtime_;
     const std::filesystem::path config_path_;
     th2::GameConfig config_;
+    const bool suppress_audio_output_;
     std::unique_ptr<th2::SoakGameDriver<Game>> soak_;
     std::size_t soak_renderer_ticks_ = 0;
 
@@ -1040,7 +1042,7 @@ private:
 
     float bgm_gain(int volume) const
     {
-        if (config_.bgm_muted) {
+        if (suppress_audio_output_ || config_.bgm_muted) {
             return 0.0f;
         }
         return std::clamp(volume, 0, 255) / 255.0f
@@ -1049,7 +1051,7 @@ private:
 
     float se_gain(int volume) const
     {
-        if (config_.se_muted) {
+        if (suppress_audio_output_ || config_.se_muted) {
             return 0.0f;
         }
         return std::clamp(volume, 0, 255) / 255.0f
@@ -1086,7 +1088,8 @@ private:
     float voice_gain(int volume, int character) const
     {
         const auto index = voice_character_index(character);
-        if (config_.voice_muted || config_.character_voice_muted[index]) {
+        if (suppress_audio_output_ || config_.voice_muted
+            || config_.character_voice_muted[index]) {
             return 0.0f;
         }
         return std::clamp(volume, 0, 256) / 256.0f
