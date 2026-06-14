@@ -72,6 +72,7 @@ jobs:
           [Desktop Entry]
           Name=ToHeart2 XRATED
           Exec=toheart2
+          Icon=toheart2
           Type=Application
           Categories=Game;VisualNovel;
           EOF
