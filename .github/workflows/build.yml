@@ -87,6 +87,18 @@ jobs:
         run: |
           C:/vcpkg/vcpkg install --triplet x64-windows
 
+      - name: Find glslangValidator (diagnostic)
+        shell: bash
+        run: |
+          echo "=== Searching workspace ==="
+          find . -name 'glslangValidator*' 2>/dev/null || true
+          echo "=== Searching C:/vcpkg ==="
+          find /c/vcpkg -name 'glslangValidator*' 2>/dev/null || true
+          echo "=== Listing C:/vcpkg/installed tools ==="
+          ls -R /c/vcpkg/installed/*/tools/glslang/ 2>/dev/null || true
+          echo "=== PATH ==="
+          echo "$PATH"
+
       - name: Download pre-built FFmpeg
         shell: bash
         run: |
