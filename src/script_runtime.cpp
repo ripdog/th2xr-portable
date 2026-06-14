@@ -11,6 +11,10 @@
 #include <optional>
 #include <stdexcept>
 
+#ifdef _WIN32
+#define localtime_r(timep, result) localtime_s(result, timep)
+#endif
+
 namespace th2 {
 namespace {
 
