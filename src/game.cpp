@@ -2329,12 +2329,12 @@ private:
 
     float message_text_x() const
     {
-        return config_.authentic_font ? 26.0f : 52.0f;
+        return 26.0f;
     }
 
     float message_text_y() const
     {
-        return config_.authentic_font ? 36.0f : 72.0f;
+        return 36.0f;
     }
 
     static std::size_t utf8_prefix_bytes(
