@@ -7,6 +7,7 @@
     "sdl3-ttf",
     "libsndfile",
     "fontconfig",
+    "libiconv",
     "glslang"
   ]
 }
