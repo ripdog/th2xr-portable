@@ -7901,13 +7901,11 @@ private:
                 break;
             case 6:
                 play_se(-1, 9104, false, 255);
-                open_config();
+                message_visible_ = !message_visible_;
                 break;
             case 7:
-                if (replay_mode_) break;
                 play_se(-1, 9104, false, 255);
-                save_snapshot_ = capture_frame_pixels();
-                save(0);
+                open_config();
                 break;
             }
             return true;
@@ -8608,7 +8606,7 @@ private:
             draw_save_load();
         }
         select_sidebar();
-        if (ui_mode_ == UiMode::game || ui_mode_ == UiMode::backlog) {
+        if ((ui_mode_ == UiMode::game || ui_mode_ == UiMode::backlog) && message_visible_) {
             draw_sidebar();
         }
         select_overlay();
