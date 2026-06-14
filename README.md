@@ -7,15 +7,15 @@ Runs on Linux, macOS, and Windows using SDL3.
 ## How the project came about
 
 Thanks to the GPL version of ToHeart2 ADPlus being released by Aquaplus,
-the game source code was published. th2xr-portable is essentially a ground-up
-rewrite of that original source, meticulously done to behave identically
-to the original binary, while porting from DX8 to SDL3 and C++20.
+the game source code was published. th2xr-portable is a ground-up rewrite
+of that original source, meticulously done to behave identically to the
+original binary, while porting from DX8 to SDL3 and C++20.
 
 Because the original source depended on a lot of unportable Win32/DX8 code,
-we started from scratch by doing a clean-room reverse engineering of the
-game's data formats and scripting engine, using the published source as a
-reference. The result is a modern, cross-platform engine that can run the
-original game data on any platform supported by SDL3.
+we started from scratch with a fresh C++20 codebase, using the published
+source as a reference for data formats and engine behavior. The result is a
+modern, cross-platform engine that can run the original game data on any
+platform supported by SDL3.
 
 ## Prerequisites
 
