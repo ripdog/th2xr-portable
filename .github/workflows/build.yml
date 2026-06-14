@@ -64,7 +64,7 @@ jobs:
           Exec=toheart2
           Icon=toheart2
           Type=Application
-          Categories=Game;VisualNovel;
+          Categories=Game;AdventureGame;
           EOF
 
           # minimal placeholder icon
