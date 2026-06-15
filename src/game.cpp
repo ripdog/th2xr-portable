@@ -5969,6 +5969,7 @@ private:
         }
         save_return_mode_ =
             ui_mode_ == UiMode::title ? UiMode::title : UiMode::game;
+        begin_transition(1, 12, 128, false);
         ui_mode_ = mode;
         save_confirm_slot_ = -1;
         save_hover_ = -1;
