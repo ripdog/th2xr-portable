@@ -28,7 +28,7 @@ jobs:
     needs: create-release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install apt dependencies
         run: |
@@ -43,7 +43,7 @@ jobs:
             libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
             libasound2-dev libpulse-dev libfuse2
 
-      - uses: libsdl-org/setup-sdl@v1
+      - uses: libsdl-org/setup-sdl@main
         id: sdl
         with:
           install-linux-dependencies: true
@@ -92,7 +92,7 @@ jobs:
     needs: create-release
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install dependencies
         run: |
@@ -160,7 +160,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: msys2/setup-msys2@v2
         with:

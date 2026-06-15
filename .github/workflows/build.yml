@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install apt dependencies
         run: |
@@ -30,7 +30,7 @@ jobs:
             libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
             libasound2-dev libpulse-dev libfuse2
 
-      - uses: libsdl-org/setup-sdl@v1
+      - uses: libsdl-org/setup-sdl@main
         id: sdl
         with:
           install-linux-dependencies: true
@@ -73,7 +73,7 @@ jobs:
             --appdir AppDir --output appimage
           mv ToHeart2_XRATED-*.AppImage toheart2-linux-x86_64.AppImage
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: toheart2-linux-x86_64.AppImage
           path: toheart2-linux-x86_64.AppImage
@@ -83,7 +83,7 @@ jobs:
     strategy:
       fail-fast: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install dependencies
         run: |
@@ -144,7 +144,7 @@ jobs:
 
           hdiutil create -volname "ToHeart2" -srcfolder "$APP" -ov -format UDZO toheart2-macos.dmg
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: toheart2-macos.dmg
           path: toheart2-macos.dmg
@@ -157,7 +157,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: msys2/setup-msys2@v2
         with:
@@ -201,7 +201,7 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path dist/* -DestinationPath toheart2-windows-x64.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: toheart2-windows-x64.zip
           path: toheart2-windows-x64.zip
