@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace th2 {
@@ -30,6 +31,11 @@ private:
     std::string imgui_font_path_;
     float display_scale_ = 1.0f;
     float last_font_scale_ = 0.0f;
+#ifdef __ANDROID__
+    // ImGui's AddFontFromMemoryTTF needs the TTF data to stay alive until
+    // the atlas is built; we free it when the atlas is rebuilt or destroyed.
+    std::unique_ptr<void, decltype(&SDL_free)> imgui_font_data_{nullptr, SDL_free};
+#endif
 };
 
 }  // namespace th2

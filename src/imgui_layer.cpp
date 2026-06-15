@@ -211,15 +211,20 @@ void ImGuiLayer::rebuild_font_atlas(float display_scale)
 {
     auto& io = ImGui::GetIO();
     io.Fonts->Clear();
+#ifdef __ANDROID__
+    imgui_font_data_.reset();
+#endif
     if (!imgui_font_path_.empty()) {
         // Scale the reference 13px default size to the monitor DPI.
 #ifdef __ANDROID__
         std::size_t size = 0;
         void* data = SDL_LoadFile(imgui_font_path_.c_str(), &size);
         if (data) {
+            imgui_font_data_.reset(data);
+            ImFontConfig cfg;
+            cfg.FontDataOwnedByAtlas = false;
             io.Fonts->AddFontFromMemoryTTF(
-                data, static_cast<int>(size), 13.0f * display_scale);
-            SDL_free(data);
+                data, static_cast<int>(size), 13.0f * display_scale, &cfg);
         }
 #else
         io.Fonts->AddFontFromFileTTF(
@@ -243,18 +248,12 @@ void ImGuiLayer::new_frame(SDL_Window* window, float display_scale)
     io.DisplaySize = ImVec2(
         static_cast<float>(window_width),
         static_cast<float>(window_height));
-#ifdef __ANDROID__
-    // On Android, SDL reports the window size and touch/mouse coordinates in
-    // the same pixel units, but present_frame() renders ImGui with
-    // SDL_SetRenderScale(display_scale). Keep the framebuffer scale at 1.0 so
-    // ImGui's internal coordinates map 1:1 to mouse input; we compensate for
-    // the renderer scale in process_event().
-    io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
-#else
-    // Original desktop behaviour: the framebuffer scale matches the OS display
-    // scale and mouse input is already in the matching window-coordinate unit.
+    // present_frame() renders ImGui with SDL_SetRenderScale(display_scale).
+    // On Android the window size and touch/mouse coordinates are both in
+    // pixels, so we divide mouse input in process_event() to keep the logical
+    // coordinate system consistent. The framebuffer scale is still used by
+    // ImGui for font atlas sizing and backend scaling.
     io.DisplayFramebufferScale = ImVec2(display_scale_, display_scale_);
-#endif
 
     // Rebuild the font atlas when the scale changes so text stays crisp
     // at the monitor's native resolution.

@@ -182,6 +182,9 @@ struct GameFont::Modern {
     float scale = 0.0f;
     std::unordered_map<
         std::string, std::unique_ptr<SDL_Texture, TextureDeleter>> textures;
+#ifdef __ANDROID__
+    std::unique_ptr<void, decltype(&SDL_free)> font_data_{nullptr, &SDL_free};
+#endif
 
     ~Modern()
     {
@@ -215,6 +218,9 @@ struct GameFont::Modern {
             TTF_CloseFont(font);
             font = nullptr;
         }
+#ifdef __ANDROID__
+        font_data_.reset();
+#endif
         textures.clear();
 
         std::string path(requested_family);
@@ -247,10 +253,42 @@ struct GameFont::Modern {
 #endif
         }
 
+#ifdef __ANDROID__
+        std::size_t font_data_size = 0;
+        void* font_data = SDL_LoadFile(path.c_str(), &font_data_size);
+        if (!font_data) {
+            throw std::runtime_error(
+                std::string("SDL_LoadFile failed for ") + path + ": "
+                + SDL_GetError());
+        }
+        SDL_IOStream* font_io = SDL_IOFromConstMem(font_data, font_data_size);
+        if (!font_io) {
+            SDL_free(font_data);
+            throw std::runtime_error(
+                std::string("SDL_IOFromConstMem failed for ") + path + ": "
+                + SDL_GetError());
+        }
+        // TTF_OpenFontIO takes ownership of the IO stream and (with closeio=true)
+        // will free the const memory reference; we still need to free font_data
+        // because SDL_IOFromConstMem does not copy it. Keep the data alive by
+        // storing it in the Modern object.
+        font_data_ = std::unique_ptr<void, decltype(&SDL_free)>(
+            font_data, &SDL_free);
+        font = TTF_OpenFontIO(font_io, true, requested_size * requested_scale);
+        if (!font) {
+            font_data_.reset();
+            throw std::runtime_error(
+                std::string("TTF_OpenFontIO failed for ") + path + ": "
+                + SDL_GetError());
+        }
+#else
         font = TTF_OpenFont(path.c_str(), requested_size * requested_scale);
         if (!font) {
-            throw std::runtime_error(SDL_GetError());
+            throw std::runtime_error(
+                std::string("TTF_OpenFont failed for ") + path + ": "
+                + SDL_GetError());
         }
+#endif
         TTF_SetFontHinting(font, TTF_HINTING_LIGHT_SUBPIXEL);
         family = requested_family;
         logical_size = requested_size;
@@ -365,7 +403,8 @@ float GameFont::text_width(std::string_view text) const
             throw std::runtime_error(SDL_GetError());
         }
         return static_cast<float>(pixel_width) / framebuffer_scale_;
-    } catch (const std::exception&) {
+    } catch (const std::exception& error) {
+        SDL_Log("Modern font text_width fallback: %s", error.what());
         float result = 0.0f;
         for (const auto byte : text) {
             if (byte == '\n') {
@@ -594,7 +633,8 @@ void GameFont::draw(
         SDL_RenderTexture(
             renderer, found->second.get(), nullptr, &destination);
         SDL_SetTextureAlphaMod(found->second.get(), 255);
-    } catch (const std::exception&) {
+    } catch (const std::exception& error) {
+        SDL_Log("Modern font draw fallback: %s", error.what());
         draw_bitmap(renderer, x, y, text, red, green, blue, alpha);
     }
 }

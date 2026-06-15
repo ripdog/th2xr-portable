@@ -16,7 +16,24 @@ endif()
 
 find_package(SDL3 CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
-find_package(Iconv REQUIRED)
+if(ANDROID)
+    # Use a locally-built GNU libiconv: Bionic's iconv does not support
+    # CP932/SHIFT_JIS, which the game needs for Japanese text.
+    set(LIBICONV_ROOT "${CMAKE_SOURCE_DIR}/third_party/libiconv-android")
+    set(LIBICONV_LIBRARY "${LIBICONV_ROOT}/lib/libiconv.a")
+    set(LIBICONV_INCLUDE_DIR "${LIBICONV_ROOT}/include")
+    if(NOT EXISTS "${LIBICONV_LIBRARY}")
+        message(FATAL_ERROR
+            "GNU libiconv not found at ${LIBICONV_LIBRARY}. "
+            "Run third_party/build-libiconv-android.sh first.")
+    endif()
+    add_library(Iconv::Iconv STATIC IMPORTED GLOBAL)
+    set_target_properties(Iconv::Iconv PROPERTIES
+        IMPORTED_LOCATION "${LIBICONV_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${LIBICONV_INCLUDE_DIR}")
+else()
+    find_package(Iconv REQUIRED)
+endif()
 if(WIN32)
     find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED
         HINTS "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/tools/glslang")
@@ -288,7 +305,7 @@ if(ANDROID)
     target_compile_definitions(toheart2 PRIVATE
         TH2_ANIME4K_SHADER_DIR="${ANIME4K_SHADER_DIR}"
         TH2_VERSION="${TH2_VERSION}"
-        TH2_ANDROID_FONT_PATH="assets://fonts/LiberationSerif-Regular.ttf")
+        TH2_ANDROID_FONT_PATH="fonts/LiberationSerif-Regular.ttf")
 else()
     target_compile_definitions(toheart2 PRIVATE
         TH2_ANIME4K_SHADER_DIR="${ANIME4K_SHADER_DIR}"
