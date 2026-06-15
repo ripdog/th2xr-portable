@@ -816,7 +816,9 @@ public:
     }
 
 private:
-    static constexpr std::uint32_t save_version_ = 24;
+    static constexpr std::uint32_t save_version_ = 25;
+    static constexpr std::uint32_t first_backlog_voice_save_version_ = 25;
+    static constexpr std::uint32_t oldest_supported_save_version_ = 24;
 
     enum class AudioWaitKind {
         bgm,
@@ -4996,6 +4998,16 @@ private:
             write_u32(out, static_cast<std::uint32_t>(entry.text.size()));
             out.write(entry.text.data(),
                       static_cast<std::streamsize>(entry.text.size()));
+            write_u32(out, static_cast<std::uint32_t>(entry.voices.size()));
+            for (const auto& voice : entry.voices) {
+                write_u32(out, static_cast<std::uint32_t>(voice.start));
+                write_u32(out, static_cast<std::uint32_t>(voice.end));
+                write_i32(out, voice.scenario);
+                write_i32(out, voice.voice);
+                write_i32(out, voice.character);
+                write_i32(out, voice.volume);
+                write_i32(out, voice.alternate ? 1 : 0);
+            }
         }
         write_i32(out, backlog_depth_);
         write_i32(out, ui_mode_ == UiMode::backlog ? 1 : 0);
@@ -5030,7 +5042,8 @@ private:
     bool load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != save_version_) {
+        if (version < oldest_supported_save_version_
+            || version > save_version_) {
             return false;
         }
 
@@ -5282,7 +5295,23 @@ private:
                 in.read(history_text.data(),
                         static_cast<std::streamsize>(size));
             }
-            backlog_.push_back({std::move(history_text)});
+            std::vector<BacklogVoice> voices;
+            if (version >= first_backlog_voice_save_version_) {
+                const auto voice_count = read_u32(in);
+                voices.reserve(voice_count);
+                for (std::uint32_t v = 0; v < voice_count; ++v) {
+                    voices.push_back(BacklogVoice{
+                        read_u32(in),
+                        read_u32(in),
+                        read_i32(in),
+                        read_i32(in),
+                        read_i32(in),
+                        read_i32(in),
+                        read_i32(in) != 0,
+                    });
+                }
+            }
+            backlog_.push_back({std::move(history_text), std::move(voices)});
         }
         backlog_depth_ = std::clamp(
             read_i32(in), 0, static_cast<int>(backlog_.size()));

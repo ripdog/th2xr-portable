@@ -234,8 +234,26 @@ int test_flag_serialization()
 int test_backlog_serialization()
 {
     std::stringstream stream;
-    const std::vector<std::string> history{
-        "oldest block", "middle\nblock", "newest block",
+    struct Voice {
+        std::uint32_t start = 0;
+        std::uint32_t end = 0;
+        std::int32_t scenario = 0;
+        std::int32_t voice = 0;
+        std::int32_t character = 0;
+        std::int32_t volume = 0;
+        bool alternate = false;
+    };
+    struct Entry {
+        std::string text;
+        std::vector<Voice> voices;
+    };
+    const std::vector<Entry> history{
+        {"oldest block", {}},
+        {"middle\nblock", {{0, 6, 30100, 12, 3, 255, false}}},
+        {"newest block", {
+             {0, 6, 30100, 13, 4, 255, true},
+             {7, 12, 30100, 14, 5, 192, false},
+         }},
     };
     const auto write_u32 = [](std::ostream& out, std::uint32_t value) {
         for (int shift = 0; shift < 32; shift += 8) {
@@ -250,23 +268,71 @@ int test_backlog_serialization()
         }
         return value;
     };
+    const auto write_i32 = [&](std::ostream& out, std::int32_t value) {
+        write_u32(out, static_cast<std::uint32_t>(value));
+    };
+    const auto read_i32 = [&](std::istream& in) {
+        return static_cast<std::int32_t>(read_u32(in));
+    };
 
     write_u32(stream, history.size());
     for (const auto& entry : history) {
-        write_u32(stream, entry.size());
-        stream.write(entry.data(), static_cast<std::streamsize>(entry.size()));
+        write_u32(stream, entry.text.size());
+        stream.write(
+            entry.text.data(),
+            static_cast<std::streamsize>(entry.text.size()));
+        write_u32(stream, entry.voices.size());
+        for (const auto& voice : entry.voices) {
+            write_u32(stream, voice.start);
+            write_u32(stream, voice.end);
+            write_i32(stream, voice.scenario);
+            write_i32(stream, voice.voice);
+            write_i32(stream, voice.character);
+            write_i32(stream, voice.volume);
+            write_i32(stream, voice.alternate ? 1 : 0);
+        }
     }
     write_u32(stream, 2);
 
     const auto count = read_u32(stream);
-    std::vector<std::string> restored;
+    std::vector<Entry> restored;
     for (std::uint32_t i = 0; i < count; ++i) {
-        std::string entry(read_u32(stream), '\0');
-        stream.read(entry.data(), static_cast<std::streamsize>(entry.size()));
+        Entry entry;
+        entry.text.resize(read_u32(stream));
+        stream.read(
+            entry.text.data(), static_cast<std::streamsize>(entry.text.size()));
+        const auto voice_count = read_u32(stream);
+        for (std::uint32_t v = 0; v < voice_count; ++v) {
+            entry.voices.push_back(Voice{
+                read_u32(stream),
+                read_u32(stream),
+                read_i32(stream),
+                read_i32(stream),
+                read_i32(stream),
+                read_i32(stream),
+                read_i32(stream) != 0,
+            });
+        }
         restored.push_back(std::move(entry));
     }
     const auto depth = read_u32(stream);
-    if (restored != history || depth != 2) return 1048;
+    if (restored.size() != history.size() || depth != 2) return 1048;
+    for (std::size_t i = 0; i < history.size(); ++i) {
+        if (restored[i].text != history[i].text
+            || restored[i].voices.size() != history[i].voices.size()) {
+            return 1050;
+        }
+        for (std::size_t v = 0; v < history[i].voices.size(); ++v) {
+            const auto& a = restored[i].voices[v];
+            const auto& b = history[i].voices[v];
+            if (a.start != b.start || a.end != b.end
+                || a.scenario != b.scenario || a.voice != b.voice
+                || a.character != b.character || a.volume != b.volume
+                || a.alternate != b.alternate) {
+                return 1051;
+            }
+        }
+    }
 
     const auto position = [](int history_size, int history_depth) {
         return history_size == 0 ? 1.0f
