@@ -7216,14 +7216,14 @@ private:
                     renderer_, ui_save_rows_hover_.get(), &src, &dst);
             }
             if (save_thumbnails_[i]) {
-                const SDL_FRect thumb{x + 16.0f, y + 6.0f, 80.0f, 60.0f};
+                const SDL_FRect thumb{x + 15.0f, y + 5.0f, 80.0f, 60.0f};
                 SDL_RenderTexture(
                     renderer_, save_thumbnails_[i].get(), nullptr, &thumb);
             }
 
             const int slot = save_page_ * 10 + i;
             const auto slot_text = std::format("{:03d}", slot + 1);
-            font_.draw(renderer_, x + 102.0f, y + 8.0f, slot_text, 0, 0, 0);
+            font_.draw(renderer_, x + 102.0f, y + 6.0f, slot_text, 0, 0, 0);
             font_.draw(
                 renderer_, x + 100.0f, y + 6.0f, slot_text, 245, 220, 190);
             if (!visible_saves_[i].exists) {
