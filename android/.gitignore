@@ -1,0 +1,16 @@
+# Gradle
+.gradle/
+build/
+.kotlin/
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.navigation/
+captures/
+*.hprof
+
+# NDK / CMake build artifacts
+.cxx/
+.externalNativeBuild/

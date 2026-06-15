@@ -14,6 +14,9 @@
 #include "video.hpp"
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_log.h>
+#include <SDL3/SDL_main.h>
+#include <SDL3/SDL_system.h>
 #include <SDL3/SDL_video.h>
 #include <imgui.h>
 
@@ -85,6 +88,17 @@ struct RendererDeleter {
 
 using WindowPtr = std::unique_ptr<SDL_Window, WindowDeleter>;
 using RendererPtr = std::unique_ptr<SDL_Renderer, RendererDeleter>;
+
+// Directory for writable files (config, saves, logs). On Android the current
+// working directory is not writable, so use the app-internal storage path.
+std::filesystem::path writable_directory()
+{
+#ifdef __ANDROID__
+    return std::filesystem::path(SDL_GetAndroidInternalStoragePath());
+#else
+    return std::filesystem::path(".");
+#endif
+}
 
 // Convert window-coordinate mouse events to the fixed 800x600 logical
 // coordinate system used by the core game, applying 4:3 letterboxing.
@@ -313,7 +327,7 @@ public:
           runtime_(scripts_),
           config_path_(soak_directory
               ? *soak_directory / "config.ini"
-              : std::filesystem::path("toheart2-config.ini")),
+              : writable_directory() / "toheart2-config.ini"),
           config_(th2::load_config(config_path_)),
           suppress_audio_output_(soak_directory.has_value()),
           sdl_subsystem_(),
@@ -347,6 +361,7 @@ public:
         if (!window_ || !renderer_) {
             throw std::runtime_error(SDL_GetError());
         }
+        SDL_Log("SDL window and renderer created");
         if (config_.fullscreen) {
             SDL_SetWindowFullscreen(window_, true);
         }
@@ -357,6 +372,7 @@ public:
             &anime4k_available_);
         last_anime4k_wanted_ = config_.anime4k;
         imgui_ = std::make_unique<th2::ImGuiLayer>(window_, renderer_);
+        SDL_Log("ImGui layer initialized");
         auto try_load = [&](std::string_view name) -> Texture {
             const auto* entry = graphics_.find(name);
             if (!entry) return {};
@@ -423,8 +439,10 @@ public:
             ui_mode_ = UiMode::game;
             advance();
         } else {
+            SDL_Log("Starting opening movie");
             start_movie(3, 0, false);
         }
+        SDL_Log("Game constructor finished");
     }
 
     ~Game()
@@ -450,6 +468,13 @@ public:
 
     int run_loop()
     {
+        SDL_Log("Entering main loop");
+        int dbg_w = 0, dbg_h = 0, dbg_pw = 0, dbg_ph = 0;
+        SDL_GetWindowSize(window_, &dbg_w, &dbg_h);
+        SDL_GetWindowSizeInPixels(window_, &dbg_pw, &dbg_ph);
+        SDL_Log(
+            "Window size: %dx%d (points), %dx%d (pixels), display scale %.2f",
+            dbg_w, dbg_h, dbg_pw, dbg_ph, SDL_GetWindowDisplayScale(window_));
         constexpr auto frame_duration = std::chrono::nanoseconds(
             1'000'000'000 / 120);
         auto next_frame = std::chrono::steady_clock::now();
@@ -730,8 +755,7 @@ public:
             const float framebuffer_scale = std::min(scale_x, scale_y);
             const float display_scale = SDL_GetWindowDisplayScale(window_);
             imgui_->new_frame(
-                window_width, window_height,
-                display_scale > 0.0f ? display_scale : 1.0f);
+                window_, display_scale > 0.0f ? display_scale : 1.0f);
             font_.configure(
                 config_.authentic_font, config_.font_family,
                 config_.font_size, framebuffer_scale);
@@ -754,6 +778,7 @@ public:
                 next_frame = now;
             }
         }
+        SDL_Log("Main loop exited cleanly");
         return 0;
     }
 
@@ -4363,12 +4388,12 @@ private:
     std::filesystem::path dump_engine_error(
         const th2::ScriptStep& step, std::string_view error)
     {
-        std::filesystem::create_directories("logs");
+        const auto logs_dir = writable_directory() / "logs";
+        std::filesystem::create_directories(logs_dir);
         const auto now = std::chrono::system_clock::now();
         const auto stamp = std::chrono::duration_cast<std::chrono::milliseconds>(
             now.time_since_epoch()).count();
-        const auto path = std::filesystem::path("logs")
-            / std::format("engine-error-{}.log", stamp);
+        const auto path = logs_dir / std::format("engine-error-{}.log", stamp);
         std::ofstream output(path);
         output << "error=" << error << '\n'
                << "script=" << step.script_name << '\n'
@@ -4421,12 +4446,12 @@ private:
 
     std::filesystem::path dump_runtime_error(std::string_view error)
     {
-        std::filesystem::create_directories("logs");
+        const auto logs_dir = writable_directory() / "logs";
+        std::filesystem::create_directories(logs_dir);
         const auto now = std::chrono::system_clock::now();
         const auto stamp = std::chrono::duration_cast<
             std::chrono::milliseconds>(now.time_since_epoch()).count();
-        const auto path = std::filesystem::path("logs")
-            / std::format("engine-error-{}.log", stamp);
+        const auto path = logs_dir / std::format("engine-error-{}.log", stamp);
         std::ofstream output(path);
         const auto pc = runtime_.vm_pc();
         const auto bytecode = runtime_.vm_bytecode();
@@ -4625,7 +4650,8 @@ private:
             || clock_state_ || calendar_state_ || movie_) {
             return;
         }
-        std::filesystem::create_directories("save");
+        const auto save_dir = writable_directory() / "save";
+        std::filesystem::create_directories(save_dir);
         const auto path = save_path(slot);
         std::ofstream file(path, std::ios::binary);
         if (!file) {
@@ -4648,19 +4674,19 @@ private:
 
     std::filesystem::path save_path(int slot) const
     {
-        return std::filesystem::path("save")
+        return writable_directory() / "save"
             / std::format("save_{:02d}.sav", slot);
     }
 
     std::filesystem::path thumbnail_path(int slot) const
     {
-        return std::filesystem::path("save")
+        return writable_directory() / "save"
             / std::format("save_{:02d}.bmp", slot);
     }
 
     std::filesystem::path metadata_path(int slot) const
     {
-        return std::filesystem::path("save")
+        return writable_directory() / "save"
             / std::format("save_{:02d}.meta", slot);
     }
 
@@ -8630,7 +8656,13 @@ private:
 int main(int argc, char** argv)
 {
     try {
+#ifdef __ANDROID__
+        std::filesystem::path data =
+            std::filesystem::path(SDL_GetAndroidInternalStoragePath()) /
+            "game-data";
+#else
         std::filesystem::path data = "game-data";
+#endif
         std::optional<std::filesystem::path> scenario;
         std::optional<std::filesystem::path> soak_directory;
         std::size_t soak_runs = 1;
@@ -8643,7 +8675,7 @@ int main(int argc, char** argv)
                 }
                 scenario = argv[index];
             } else if (argument == "--soak") {
-                soak_directory = std::filesystem::path("logs") / "soak";
+                soak_directory = writable_directory() / "logs" / "soak";
             } else if (argument == "--soak-state") {
                 if (++index >= argc) {
                     throw std::runtime_error(
@@ -8674,9 +8706,28 @@ int main(int argc, char** argv)
             throw std::runtime_error(
                 "--scenario and --soak cannot be used together");
         }
+
+        SDL_Log("Game data path: %s", data.string().c_str());
+        if (!std::filesystem::is_directory(data)) {
+            SDL_LogError(
+                SDL_LOG_CATEGORY_APPLICATION,
+                "Game data directory does not exist: %s",
+                data.string().c_str());
+            return 1;
+        }
+        if (!std::filesystem::exists(data / "TOHEART2.EXE")) {
+            SDL_LogError(
+                SDL_LOG_CATEGORY_APPLICATION,
+                "TOHEART2.EXE not found in game data directory: %s",
+                data.string().c_str());
+            return 1;
+        }
+        SDL_Log("Game files found, starting engine");
+
         return Game(data, scenario, soak_directory, soak_runs).run();
     } catch (const std::exception& error) {
-        std::cerr << error.what() << '\n';
+        SDL_LogError(
+            SDL_LOG_CATEGORY_APPLICATION, "Fatal error: %s", error.what());
         return 1;
     }
 }

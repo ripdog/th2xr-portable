@@ -10,6 +10,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" TH2_VERSION)
 string(STRIP "${TH2_VERSION}" TH2_VERSION)
 
+if(ANDROID)
+    set(ENV{PKG_CONFIG_PATH} "${CMAKE_SOURCE_DIR}/third_party/ffmpeg-android/lib/pkgconfig")
+endif()
+
 find_package(SDL3 CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(Iconv REQUIRED)
@@ -19,11 +23,29 @@ if(WIN32)
 else()
     find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 endif()
-pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
-pkg_check_modules(SDL3_TTF REQUIRED IMPORTED_TARGET sdl3-ttf)
-pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+
+if(ANDROID)
+    include(FetchContent)
+    FetchContent_Declare(libsndfile
+        GIT_REPOSITORY https://github.com/libsndfile/libsndfile.git
+        GIT_TAG 1.2.2
+        GIT_SHALLOW TRUE
+    )
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(ENABLE_EXTERNAL_LIBS ON CACHE BOOL "" FORCE)
+    set(ENABLE_MPEG OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(libsndfile)
+    find_package(SDL3_ttf CONFIG REQUIRED)
+else()
+    pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
+    pkg_check_modules(SDL3_TTF REQUIRED IMPORTED_TARGET sdl3-ttf)
+    pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+endif()
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
     libavformat libavcodec libavutil libswscale libswresample)
+if(ANDROID)
+    link_directories(${FFMPEG_LIBRARY_DIRS})
+endif()
 
 add_library(th2_archive
     src/archive.cpp
@@ -61,7 +83,11 @@ add_library(th2_audio
 )
 target_include_directories(th2_audio PUBLIC src)
 target_compile_options(th2_audio PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
-target_link_libraries(th2_audio PUBLIC SDL3::SDL3 PkgConfig::SNDFILE)
+if(ANDROID)
+    target_link_libraries(th2_audio PUBLIC SDL3::SDL3 sndfile)
+else()
+    target_link_libraries(th2_audio PUBLIC SDL3::SDL3 PkgConfig::SNDFILE)
+endif()
 
 add_library(th2_character
     src/character.cpp
@@ -200,16 +226,30 @@ add_executable(th2-image-info
 )
 target_link_libraries(th2-image-info PRIVATE SDL3::SDL3 th2_archive)
 
-add_executable(toheart2
-    src/anime4k.cpp
-    src/font.cpp
-    src/game.cpp
-    src/image.cpp
-    src/imgui_layer.cpp
-    src/message.cpp
-    src/upscaler.cpp
-    src/video.cpp
-)
+if(ANDROID)
+    add_library(toheart2 SHARED
+        src/anime4k.cpp
+        src/font.cpp
+        src/game.cpp
+        src/image.cpp
+        src/imgui_layer.cpp
+        src/message.cpp
+        src/upscaler.cpp
+        src/video.cpp
+    )
+    set_target_properties(toheart2 PROPERTIES OUTPUT_NAME "main")
+else()
+    add_executable(toheart2
+        src/anime4k.cpp
+        src/font.cpp
+        src/game.cpp
+        src/image.cpp
+        src/imgui_layer.cpp
+        src/message.cpp
+        src/upscaler.cpp
+        src/video.cpp
+    )
+endif()
 set(ANIME4K_SHADER_DIR "shaders/anime4k")
 set(ANIME4K_SHADERS apply)
 foreach(SHADER IN LISTS ANIME4K_SHADERS)
@@ -223,12 +263,37 @@ foreach(SHADER IN LISTS ANIME4K_SHADERS)
         VERBATIM)
     list(APPEND ANIME4K_SHADER_OUTPUTS
         "${ANIME4K_SHADER_DIR}/${SHADER}.frag.spv")
+    if(ANDROID)
+        set(ANDROID_SHADER_ASSET
+            "${CMAKE_CURRENT_SOURCE_DIR}/android/app/src/main/assets/${ANIME4K_SHADER_DIR}/${SHADER}.frag.spv")
+        add_custom_command(
+            OUTPUT "${ANDROID_SHADER_ASSET}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/android/app/src/main/assets/${ANIME4K_SHADER_DIR}"
+            COMMAND "${CMAKE_COMMAND}" -E copy
+                "${CMAKE_CURRENT_BINARY_DIR}/${ANIME4K_SHADER_DIR}/${SHADER}.frag.spv"
+                "${ANDROID_SHADER_ASSET}"
+            DEPENDS "${ANIME4K_SHADER_DIR}/${SHADER}.frag.spv"
+            VERBATIM)
+        list(APPEND ANDROID_SHADER_ASSET_OUTPUTS "${ANDROID_SHADER_ASSET}")
+    endif()
 endforeach()
 add_custom_target(anime4k-shaders DEPENDS ${ANIME4K_SHADER_OUTPUTS})
 add_dependencies(toheart2 anime4k-shaders)
-target_compile_definitions(toheart2 PRIVATE
-    TH2_ANIME4K_SHADER_DIR="${ANIME4K_SHADER_DIR}"
-    TH2_VERSION="${TH2_VERSION}")
+if(ANDROID)
+    add_custom_target(anime4k-shaders-android DEPENDS ${ANDROID_SHADER_ASSET_OUTPUTS})
+    add_dependencies(toheart2 anime4k-shaders-android)
+endif()
+if(ANDROID)
+    target_compile_definitions(toheart2 PRIVATE
+        TH2_ANIME4K_SHADER_DIR="${ANIME4K_SHADER_DIR}"
+        TH2_VERSION="${TH2_VERSION}"
+        TH2_ANDROID_FONT_PATH="assets://fonts/LiberationSerif-Regular.ttf")
+else()
+    target_compile_definitions(toheart2 PRIVATE
+        TH2_ANIME4K_SHADER_DIR="${ANIME4K_SHADER_DIR}"
+        TH2_VERSION="${TH2_VERSION}")
+endif()
 
 add_executable(th2-anime4k-test
     src/anime4k.cpp
@@ -236,8 +301,13 @@ add_executable(th2-anime4k-test
 )
 add_dependencies(th2-anime4k-test anime4k-shaders)
 target_link_libraries(th2-anime4k-test PRIVATE SDL3::SDL3)
-target_link_libraries(toheart2 PRIVATE
-    SDL3::SDL3 PkgConfig::SDL3_TTF PkgConfig::FONTCONFIG th2_runtime th2_soak)
+if(ANDROID)
+    target_link_libraries(toheart2 PRIVATE
+        SDL3::SDL3 SDL3_ttf::SDL3_ttf th2_runtime th2_soak)
+else()
+    target_link_libraries(toheart2 PRIVATE
+        SDL3::SDL3 PkgConfig::SDL3_TTF PkgConfig::FONTCONFIG th2_runtime th2_soak)
+endif()
 target_link_libraries(toheart2 PRIVATE th2_audio th2_character th2_config imgui)
 target_link_libraries(toheart2 PRIVATE PkgConfig::FFMPEG)
 

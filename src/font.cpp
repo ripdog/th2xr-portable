@@ -1,7 +1,9 @@
 #include "font.hpp"
 
 #include <SDL3_ttf/SDL_ttf.h>
+#ifndef __ANDROID__
 #include <fontconfig/fontconfig.h>
+#endif
 #include <iconv.h>
 
 #include <algorithm>
@@ -39,7 +41,10 @@ std::string utf8_to_cp932(std::string_view text)
 {
     iconv_t converter = iconv_open("CP932", "UTF-8");
     if (converter == reinterpret_cast<iconv_t>(-1)) {
-        throw std::runtime_error("CP932 converter is unavailable");
+        converter = iconv_open("SHIFT_JIS", "UTF-8");
+    }
+    if (converter == reinterpret_cast<iconv_t>(-1)) {
+        throw std::runtime_error("CP932/SHIFT_JIS converter is unavailable");
     }
     std::string output(text.size() * 2 + 2, '\0');
     char* input = const_cast<char*>(text.data());
@@ -193,9 +198,11 @@ struct GameFont::Modern {
             if (!TTF_Init()) {
                 throw std::runtime_error(SDL_GetError());
             }
+#ifndef __ANDROID__
             if (!FcInit()) {
                 throw std::runtime_error("fontconfig initialization failed");
             }
+#endif
             return true;
         }();
         (void)initialized;
@@ -212,6 +219,9 @@ struct GameFont::Modern {
 
         std::string path(requested_family);
         if (!std::filesystem::is_regular_file(path)) {
+#ifdef __ANDROID__
+            path = TH2_ANDROID_FONT_PATH;
+#else
             FcPattern* pattern = FcNameParse(
                 reinterpret_cast<const FcChar8*>(path.c_str()));
             if (!pattern) {
@@ -234,6 +244,7 @@ struct GameFont::Modern {
             }
             path = reinterpret_cast<const char*>(matched_path);
             FcPatternDestroy(match);
+#endif
         }
 
         font = TTF_OpenFont(path.c_str(), requested_size * requested_scale);
@@ -372,6 +383,9 @@ const std::vector<std::string>& GameFont::system_families()
 {
     static const std::vector<std::string> families = [] {
         std::vector<std::string> result;
+#ifdef __ANDROID__
+        result.emplace_back("Liberation Serif");
+#else
         if (!FcInit()) {
             return result;
         }
@@ -394,6 +408,7 @@ const std::vector<std::string>& GameFont::system_families()
         FcPatternDestroy(pattern);
         std::ranges::sort(result);
         result.erase(std::unique(result.begin(), result.end()), result.end());
+#endif
         return result;
     }();
     return families;

@@ -143,13 +143,20 @@ std::unique_ptr<Upscaler> create_upscaler(
     bool use_anime4k,
     bool* anime4k_available)
 {
-    auto anime4k = std::make_unique<Anime4K>(renderer, shader_dir);
-    const bool available = anime4k->available();
-    if (anime4k_available) {
-        *anime4k_available = available;
-    }
-    if (use_anime4k && available) {
-        return anime4k;
+    try {
+        auto anime4k = std::make_unique<Anime4K>(renderer, shader_dir);
+        const bool available = anime4k->available();
+        if (anime4k_available) {
+            *anime4k_available = available;
+        }
+        if (use_anime4k && available) {
+            return anime4k;
+        }
+    } catch (const std::exception& error) {
+        if (anime4k_available) {
+            *anime4k_available = false;
+        }
+        SDL_Log("Anime4K unavailable, falling back to linear upscaling: %s", error.what());
     }
     return std::make_unique<LinearUpscaler>(renderer);
 }

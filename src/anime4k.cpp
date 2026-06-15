@@ -1,6 +1,6 @@
 #include "anime4k.hpp"
 
-#include <fstream>
+#include <cstring>
 #include <stdexcept>
 #include <vector>
 
@@ -26,11 +26,15 @@ SDL_FRect letterbox_rect(int output_width, int output_height)
 
 std::vector<std::uint8_t> read_file(const std::filesystem::path& path)
 {
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
+    std::size_t size = 0;
+    void* data = SDL_LoadFile(path.string().c_str(), &size);
+    if (!data) {
         throw std::runtime_error("cannot open shader: " + path.string());
     }
-    return {std::istreambuf_iterator<char>(input), {}};
+    std::vector<std::uint8_t> result(size);
+    std::memcpy(result.data(), data, size);
+    SDL_free(data);
+    return result;
 }
 
 }  // namespace

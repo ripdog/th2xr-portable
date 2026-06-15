@@ -2,7 +2,9 @@
 
 #include <imgui.h>
 
+#ifndef __ANDROID__
 #include <fontconfig/fontconfig.h>
+#endif
 
 #include <algorithm>
 #include <cstdint>
@@ -14,6 +16,9 @@ namespace {
 
 std::string find_imgui_font_path()
 {
+#ifdef __ANDROID__
+    return TH2_ANDROID_FONT_PATH;
+#else
     if (!FcInit()) {
         return {};
     }
@@ -36,6 +41,7 @@ std::string find_imgui_font_path()
     }
     FcPatternDestroy(pattern);
     return path;
+#endif
 }
 
 ImTextureID texture_id(SDL_Texture* texture)
@@ -152,12 +158,26 @@ ImGuiLayer::~ImGuiLayer()
 void ImGuiLayer::process_event(const SDL_Event& event)
 {
     auto& io = ImGui::GetIO();
-    // SDL mouse event coordinates are in window points, which matches the
-    // ImGui logical coordinate system set in new_frame().
+#ifdef __ANDROID__
+    // SDL mouse/touch coordinates are in window pixels, but present_frame()
+    // renders ImGui with SDL_SetRenderScale(display_scale_). Divide by that
+    // scale so ImGui's internal coordinates match the rendered UI.
+    const float inv_scale = 1.0f / display_scale_;
+    const auto mouse_x = [&](float x) { return x * inv_scale; };
+    const auto mouse_y = [&](float y) { return y * inv_scale; };
+#else
+    // Desktop: SDL mouse coordinates already match the ImGui logical
+    // coordinate system set in new_frame().
+    const auto mouse_x = [](float x) { return x; };
+    const auto mouse_y = [](float y) { return y; };
+#endif
     if (event.type == SDL_EVENT_MOUSE_MOTION) {
-        io.AddMousePosEvent(event.motion.x, event.motion.y);
+        io.AddMousePosEvent(
+            mouse_x(event.motion.x), mouse_y(event.motion.y));
     } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
                || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        io.AddMousePosEvent(
+            mouse_x(event.button.x), mouse_y(event.button.y));
         int button = -1;
         if (event.button.button == SDL_BUTTON_LEFT) button = 0;
         if (event.button.button == SDL_BUTTON_RIGHT) button = 1;
@@ -167,7 +187,8 @@ void ImGuiLayer::process_event(const SDL_Event& event)
                 button, event.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
         }
     } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
-        io.AddMousePosEvent(event.wheel.mouse_x, event.wheel.mouse_y);
+        io.AddMousePosEvent(
+            mouse_x(event.wheel.mouse_x), mouse_y(event.wheel.mouse_y));
         io.AddMouseWheelEvent(event.wheel.x, event.wheel.y);
     } else if (event.type == SDL_EVENT_TEXT_INPUT) {
         io.AddInputCharactersUTF8(event.text.text);
@@ -192,25 +213,48 @@ void ImGuiLayer::rebuild_font_atlas(float display_scale)
     io.Fonts->Clear();
     if (!imgui_font_path_.empty()) {
         // Scale the reference 13px default size to the monitor DPI.
+#ifdef __ANDROID__
+        std::size_t size = 0;
+        void* data = SDL_LoadFile(imgui_font_path_.c_str(), &size);
+        if (data) {
+            io.Fonts->AddFontFromMemoryTTF(
+                data, static_cast<int>(size), 13.0f * display_scale);
+            SDL_free(data);
+        }
+#else
         io.Fonts->AddFontFromFileTTF(
             imgui_font_path_.c_str(), 13.0f * display_scale);
+#endif
     }
     if (io.Fonts->Fonts.empty()) {
         io.Fonts->AddFontDefault();
     }
     last_font_scale_ = display_scale;
 }
-void ImGuiLayer::new_frame(
-    int window_width, int window_height, float display_scale)
+void ImGuiLayer::new_frame(SDL_Window* window, float display_scale)
 {
     auto& io = ImGui::GetIO();
     display_scale_ = display_scale > 0.0f ? display_scale : 1.0f;
-    // ImGui's logical canvas covers the full window in points; the display
-    // scale keeps the UI elements at a comfortable OS-DPI size when rendered.
+
+    int window_width = 0;
+    int window_height = 0;
+    SDL_GetWindowSize(window, &window_width, &window_height);
+
     io.DisplaySize = ImVec2(
         static_cast<float>(window_width),
         static_cast<float>(window_height));
+#ifdef __ANDROID__
+    // On Android, SDL reports the window size and touch/mouse coordinates in
+    // the same pixel units, but present_frame() renders ImGui with
+    // SDL_SetRenderScale(display_scale). Keep the framebuffer scale at 1.0 so
+    // ImGui's internal coordinates map 1:1 to mouse input; we compensate for
+    // the renderer scale in process_event().
+    io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+#else
+    // Original desktop behaviour: the framebuffer scale matches the OS display
+    // scale and mouse input is already in the matching window-coordinate unit.
     io.DisplayFramebufferScale = ImVec2(display_scale_, display_scale_);
+#endif
 
     // Rebuild the font atlas when the scale changes so text stays crisp
     // at the monitor's native resolution.
