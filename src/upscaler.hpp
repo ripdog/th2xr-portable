@@ -35,6 +35,9 @@ public:
     // Composite the art and overlay layers to the window backbuffer.
     virtual void present() = 0;
 
+    // Recreate all owned render targets (e.g. after a GPU device reset).
+    virtual void reset() = 0;
+
     // Returns true if this upscaler is the Anime4K implementation.
     virtual bool is_anime4k() const { return false; }
 };

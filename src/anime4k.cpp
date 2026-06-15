@@ -41,6 +41,7 @@ std::vector<std::uint8_t> read_file(const std::filesystem::path& path)
 
 struct Anime4K::Impl {
     SDL_Renderer* renderer;
+    std::filesystem::path shader_dir;
     SDL_GPUDevice* device = nullptr;
     std::unique_ptr<SDL_Texture, TextureDeleter> art;
     std::unique_ptr<SDL_Texture, TextureDeleter> authentic_text;
@@ -83,29 +84,36 @@ struct Anime4K::Impl {
         return state;
     }
 
-    Impl(SDL_Renderer* renderer_, const std::filesystem::path& shader_dir)
-        : renderer(renderer_)
+    auto target(int width, int height)
+    {
+        auto texture = std::unique_ptr<SDL_Texture, TextureDeleter>(
+            SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
+                              SDL_TEXTUREACCESS_TARGET, width, height));
+        if (!texture) {
+            throw std::runtime_error(SDL_GetError());
+        }
+        SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_LINEAR);
+        return texture;
+    }
+
+    void init()
     {
         device = SDL_GetGPURendererDevice(renderer);
         if (!device
             || !(SDL_GetGPUShaderFormats(device) & SDL_GPU_SHADERFORMAT_SPIRV)) {
             return;
         }
-        auto target = [&](int width, int height) {
-            auto texture = std::unique_ptr<SDL_Texture, TextureDeleter>(
-                SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888,
-                                  SDL_TEXTUREACCESS_TARGET, width, height));
-            if (!texture) {
-                throw std::runtime_error(SDL_GetError());
-            }
-            SDL_SetTextureBlendMode(texture.get(), SDL_BLENDMODE_BLEND);
-            SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_LINEAR);
-            return texture;
-        };
         art = target(800, 600);
         authentic_text = target(800, 600);
         make_state(load_shader(shader_dir / "apply.frag.spv", 1));
         ready = true;
+    }
+
+    Impl(SDL_Renderer* renderer_, const std::filesystem::path& shader_dir_)
+        : renderer(renderer_), shader_dir(shader_dir_)
+    {
+        init();
     }
 
     ~Impl()
@@ -116,6 +124,24 @@ struct Anime4K::Impl {
         for (auto* shader : shaders) {
             SDL_ReleaseGPUShader(device, shader);
         }
+    }
+
+    void reset()
+    {
+        for (auto* state : states) {
+            SDL_DestroyGPURenderState(state);
+        }
+        states.clear();
+        for (auto* shader : shaders) {
+            SDL_ReleaseGPUShader(device, shader);
+        }
+        shaders.clear();
+        overlay.reset();
+        sidebar.reset();
+        overlay_width = 0;
+        overlay_height = 0;
+        ready = false;
+        init();
     }
 
     void ensure_overlay()
@@ -218,6 +244,11 @@ SDL_Texture* Anime4K::sidebar_target()
 void Anime4K::present()
 {
     impl_->present();
+}
+
+void Anime4K::reset()
+{
+    impl_->reset();
 }
 
 }  // namespace th2

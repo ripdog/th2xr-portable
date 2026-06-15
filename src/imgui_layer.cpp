@@ -17,7 +17,7 @@ namespace {
 std::string find_imgui_font_path()
 {
 #ifdef __ANDROID__
-    return TH2_ANDROID_FONT_PATH;
+    return TH2_ANDROID_IMGUI_FONT_PATH;
 #else
     if (!FcInit()) {
         return {};

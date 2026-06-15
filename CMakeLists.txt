@@ -290,7 +290,8 @@ if(ANDROID)
     target_compile_definitions(toheart2 PRIVATE
         TH2_ANIME4K_SHADER_DIR="${ANIME4K_SHADER_DIR}"
         TH2_VERSION="${TH2_VERSION}"
-        TH2_ANDROID_FONT_PATH="fonts/LiberationSerif-Regular.ttf")
+        TH2_ANDROID_FONT_PATH="fonts/LiberationSerif-Regular.ttf"
+        TH2_ANDROID_IMGUI_FONT_PATH="fonts/NotoSans-Regular.ttf")
 else()
     target_compile_definitions(toheart2 PRIVATE
         TH2_ANIME4K_SHADER_DIR="${ANIME4K_SHADER_DIR}"

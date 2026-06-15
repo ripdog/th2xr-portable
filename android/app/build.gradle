@@ -73,6 +73,7 @@ dependencies {
     implementation files('libs/SDL3_ttf-3.2.2.aar')
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.1.0'
     implementation 'androidx.documentfile:documentfile:1.0.1'
+    implementation 'androidx.core:core-ktx:1.12.0'
 }
 
 def ffmpegLibsRoot = file("${rootDir}/../third_party/ffmpeg-android/lib")

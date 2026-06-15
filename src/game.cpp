@@ -362,9 +362,11 @@ public:
             throw std::runtime_error(SDL_GetError());
         }
         SDL_Log("SDL window and renderer created");
+#ifndef __ANDROID__
         if (config_.fullscreen) {
             SDL_SetWindowFullscreen(window_, true);
         }
+#endif
         const auto shader_dir =
             std::filesystem::path(SDL_GetBasePath()) / TH2_ANIME4K_SHADER_DIR;
         upscaler_ = th2::create_upscaler(
@@ -486,6 +488,31 @@ public:
             while (SDL_PollEvent(&event)) {
                 if (event.type == SDL_EVENT_QUIT) {
                     running_ = false;
+                    continue;
+                }
+                if (event.type == SDL_EVENT_WILL_ENTER_BACKGROUND) {
+                    app_active_ = false;
+                    SDL_Log("App entered background");
+                    continue;
+                }
+                if (event.type == SDL_EVENT_DID_ENTER_FOREGROUND) {
+                    app_active_ = true;
+                    SDL_Log("App entered foreground");
+                    reset_render_state();
+                    continue;
+                }
+                if (event.type == SDL_EVENT_RENDER_TARGETS_RESET) {
+                    SDL_Log("Render targets reset");
+                    reset_render_state();
+                    continue;
+                }
+                if (event.type == SDL_EVENT_RENDER_DEVICE_RESET) {
+                    SDL_Log("Render device reset");
+                    reset_render_state();
+                    continue;
+                }
+                if (event.type == SDL_EVENT_RENDER_DEVICE_LOST) {
+                    SDL_Log("Render device lost");
                     continue;
                 }
                 imgui_->process_event(event);
@@ -703,6 +730,12 @@ public:
                            && event.button.button == SDL_BUTTON_LEFT) {
                     backlog_handle_dragging_ = false;
                 }
+            }
+            if (!app_active_) {
+                // Pause the loop while the app is in the background so we
+                // don't keep rendering to a surface that may be destroyed.
+                SDL_Delay(50);
+                continue;
             }
             const bool control_held =
                 (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
@@ -1275,6 +1308,7 @@ private:
     int weather_ = 0;
     std::string background_tone_curve_;
     bool running_ = true;
+    bool app_active_ = true;
     bool waiting_for_input_ = false;
     std::optional<std::chrono::steady_clock::time_point> wake_time_;
     std::optional<AudioWait> audio_wait_;
@@ -5657,10 +5691,12 @@ private:
                     ImGui::EndTabItem();
                 }
                 if (ImGui::BeginTabItem("Display & Input")) {
+#ifndef __ANDROID__
                     if (ImGui::Checkbox("Fullscreen", &config_.fullscreen)) {
                         SDL_SetWindowFullscreen(window_, config_.fullscreen);
                         option_changed = true;
                     }
+#endif
                     ImGui::BeginDisabled(!anime4k_available_);
                     option_changed |= ImGui::Checkbox(
                         "Anime4K art upscaling", &config_.anime4k);
@@ -8203,6 +8239,21 @@ private:
         SDL_RenderPresent(renderer_);
     }
 
+    void reset_render_state()
+    {
+        SDL_Log("Resetting render state after resume/reset");
+        if (upscaler_) {
+            upscaler_->reset();
+        }
+        shake_target_.reset();
+        title_masked_.reset();
+        if (imgui_) {
+            const float display_scale = std::max(
+                1.0f, SDL_GetWindowDisplayScale(window_));
+            imgui_->rebuild_font_atlas(display_scale);
+        }
+    }
+
     void ensure_shake_target()
     {
         if (shake_target_) {
@@ -8706,6 +8757,13 @@ int main(int argc, char** argv)
             throw std::runtime_error(
                 "--scenario and --soak cannot be used together");
         }
+
+#ifdef __ANDROID__
+        // Pause SDL event processing while the app is backgrounded.  The
+        // main loop still checks app_active_, but this keeps SDL from
+        // presenting frames to a surface that may be destroyed on sleep.
+        SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "1");
+#endif
 
         SDL_Log("Game data path: %s", data.string().c_str());
         if (!std::filesystem::is_directory(data)) {

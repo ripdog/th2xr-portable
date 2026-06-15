@@ -24,7 +24,6 @@ platform supported by SDL3.
 - SDL3
 - SDL3_ttf
 - FFmpeg (libavformat, libavcodec, libavutil, libswscale, libswresample)
-- libsndfile
 - fontconfig
 - glslangValidator (for shader compilation)
 
@@ -33,7 +32,7 @@ platform supported by SDL3.
 **Ubuntu 24.04+** — SDL3 is not yet packaged, so it is built from source:
 ```bash
 # System packages
-sudo apt install cmake g++ libsndfile-dev libfontconfig-dev \
+sudo apt install cmake g++ libfontconfig-dev \
   libavformat-dev libavcodec-dev libavutil-dev \
   libswscale-dev libswresample-dev glslang-tools \
   libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
@@ -56,7 +55,7 @@ sudo cmake --install SDL_ttf/build
 
 **macOS**:
 ```bash
-brew install cmake sdl3 sdl3_ttf libsndfile fontconfig ffmpeg glslang
+brew install cmake sdl3 sdl3_ttf fontconfig ffmpeg glslang
 ```
 
 **Windows** — use vcpkg:
@@ -64,7 +63,7 @@ brew install cmake sdl3 sdl3_ttf libsndfile fontconfig ffmpeg glslang
 git clone https://github.com/microsoft/vcpkg.git
 .\vcpkg\bootstrap-vcpkg.bat
 .\vcpkg\vcpkg install --triplet x64-windows `
-  pkgconf sdl3 sdl3-ttf libsndfile fontconfig ffmpeg glslang
+  pkgconf sdl3 sdl3-ttf fontconfig ffmpeg glslang
 ```
 
 ## Building

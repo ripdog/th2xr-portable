@@ -28,8 +28,22 @@ SDL_FRect letterbox_rect(int output_width, int output_height)
 
 class LinearUpscaler : public Upscaler {
 public:
-    explicit LinearUpscaler(SDL_Renderer* renderer)
+    explicit     LinearUpscaler(SDL_Renderer* renderer)
         : renderer_(renderer)
+    {
+        create_targets();
+    }
+
+    void reset() override
+    {
+        overlay_.reset();
+        sidebar_.reset();
+        overlay_width_ = 0;
+        overlay_height_ = 0;
+        create_targets();
+    }
+
+    void create_targets()
     {
         art_.reset(SDL_CreateTexture(
             renderer_, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET,

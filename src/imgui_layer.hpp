@@ -21,9 +21,9 @@ public:
     void render();
     bool wants_input() const;
     bool wants_mouse() const;
+    void rebuild_font_atlas(float display_scale);
 
 private:
-    void rebuild_font_atlas(float display_scale);
 
     SDL_Window* window_;
     SDL_Renderer* renderer_;
