@@ -237,7 +237,8 @@ int scenario_number(std::string_view name)
     return result;
 }
 
-std::vector<std::string> display_lines(std::string_view source)
+std::vector<std::string> display_lines(
+    std::string_view source, std::size_t wrap_columns)
 {
     std::vector<std::string> lines;
     std::string line;
@@ -257,9 +258,9 @@ std::vector<std::string> display_lines(std::string_view source)
         // A leading separator after \k is visible immediately. The original
         // renderer does not wrap until the next printable glyph establishes
         // that the line is over width.
-        if (line.size() >= 60 && line.back() != ' ') {
+        if (line.size() >= wrap_columns && line.back() != ' ') {
             const auto space = line.find_last_of(' ');
-            if (space != std::string::npos && space > 35) {
+            if (space != std::string::npos && space > wrap_columns / 2) {
                 lines.push_back(line.substr(0, space));
                 line.erase(0, space + 1);
             } else {
@@ -2366,7 +2367,7 @@ private:
         if (!message_.empty()) {
             return message_text_y()
                 + static_cast<float>(display_lines(message_.visible()).size())
-                    * 31.0f
+                    * text_line_height()
                 + 1.0f;
         }
         return 468.0f;
@@ -2375,7 +2376,7 @@ private:
     float choice_height(const Choice& choice) const
     {
         return std::max<std::size_t>(
-            1, display_lines(choice.text).size()) * 31.0f;
+            1, display_lines(choice.text).size()) * text_line_height();
     }
 
     std::vector<std::string> choice_lines(
@@ -2386,6 +2387,28 @@ private:
             lines.front() = std::format("{}. {}", index + 1, lines.front());
         }
         return lines;
+    }
+
+    std::size_t text_wrap_columns() const
+    {
+        if (font_.authentic()) {
+            return 60;
+        }
+        return static_cast<std::size_t>(std::clamp(
+            60 * 24 / std::max(config_.font_size, 1), 30, 80));
+    }
+
+    float text_line_height() const
+    {
+        if (font_.authentic()) {
+            return 31.0f;
+        }
+        return static_cast<float>(std::max(31, config_.font_size + 7));
+    }
+
+    std::vector<std::string> display_lines(std::string_view source) const
+    {
+        return ::display_lines(source, text_wrap_columns());
     }
 
     float message_text_x() const
@@ -7734,7 +7757,7 @@ private:
                 font_.draw(renderer_, x + 2.0f, y + 2.0f, line, 0, 0, 0);
             }
             font_.draw(renderer_, x, y, line, 255, 144, 32);
-            y += 31.0f;
+            y += text_line_height();
             if (y > 535.0f) {
                 break;
             }
@@ -7746,7 +7769,7 @@ private:
             for (const auto& rect :
                  backlog_voice_rects(*entry, backlog_voice_hover_)) {
                 const auto line = static_cast<std::size_t>(
-                    (rect.y - message_text_y()) / 31.0f);
+                    (rect.y - message_text_y()) / text_line_height());
                 if (line >= lines.size()) {
                     continue;
                 }
@@ -7806,10 +7829,11 @@ private:
                     message_text_x() + font_.text_width(prefix);
                 const float right =
                     message_text_x() + font_.text_width(voiced);
-                result.push_back({left, y, right - left, 31.0f});
+                result.push_back(
+                    {left, y, right - left, text_line_height()});
             }
             source_cursor = line_end;
-            y += 31.0f;
+            y += text_line_height();
         }
         return result;
     }
@@ -8136,7 +8160,7 @@ private:
         const float x = message_text_x() + width + 4.0f;
         const float y = message_text_y()
             + (std::min(lines.size(), static_cast<std::size_t>(15)) - 1)
-            * 31.0f - 2.0f;
+            * text_line_height() - 2.0f;
 
         // Time-based 30fps animation matching original GlobalCount/2%30 (1s cycle)
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -8675,7 +8699,7 @@ private:
                     glyph_offset += glyph_bytes;
                 }
                 source_cursor = line_start + line.size();
-                y += 31.0f;
+                y += text_line_height();
                 if (y > 535.0f) {
                     break;
                 }
@@ -8697,7 +8721,7 @@ private:
                         highlighted ? 255 : 128,
                         highlighted ? 255 : 128,
                         highlighted ? 255 : 128);
-                    y += 31.0f;
+                    y += text_line_height();
                 }
             }
         }
