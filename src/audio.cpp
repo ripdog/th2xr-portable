@@ -1,102 +1,243 @@
 #include "audio.hpp"
 
-#include <sndfile.h>
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/channel_layout.h>
+#include <libavutil/samplefmt.h>
+#include <libswresample/swresample.h>
+}
 
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace th2 {
 namespace {
 
-struct MemoryInput {
-    std::span<const std::uint8_t> bytes;
-    sf_count_t position = 0;
-};
-
-sf_count_t file_length(void* user_data)
+std::runtime_error ffmpeg_error(std::string_view action, int code)
 {
-    return static_cast<sf_count_t>(
-        static_cast<MemoryInput*>(user_data)->bytes.size());
+    char buffer[AV_ERROR_MAX_STRING_SIZE]{};
+    av_strerror(code, buffer, sizeof(buffer));
+    return std::runtime_error(std::string(action) + ": " + buffer);
 }
 
-sf_count_t seek(sf_count_t offset, int whence, void* user_data)
+struct MemoryInput {
+    std::span<const std::uint8_t> bytes;
+    std::size_t position = 0;
+};
+
+int read_packet(void* opaque, std::uint8_t* destination, int size)
 {
-    auto& input = *static_cast<MemoryInput*>(user_data);
-    sf_count_t base = 0;
-    if (whence == SEEK_CUR) {
-        base = input.position;
-    } else if (whence == SEEK_END) {
-        base = static_cast<sf_count_t>(input.bytes.size());
-    } else if (whence != SEEK_SET) {
-        return -1;
+    auto& input = *static_cast<MemoryInput*>(opaque);
+    const auto available = input.bytes.size() - input.position;
+    const auto copied = std::min<std::size_t>(available, static_cast<std::size_t>(size));
+    if (copied == 0) {
+        return AVERROR_EOF;
     }
+    std::copy_n(input.bytes.data() + input.position, copied, destination);
+    input.position += copied;
+    return static_cast<int>(copied);
+}
+
+std::int64_t seek_packet(void* opaque, std::int64_t offset, int whence)
+{
+    auto& input = *static_cast<MemoryInput*>(opaque);
+    if (whence == AVSEEK_SIZE) {
+        return static_cast<std::int64_t>(input.bytes.size());
+    }
+    const int origin = whence & ~AVSEEK_FORCE;
+    std::int64_t base = origin == SEEK_CUR
+        ? static_cast<std::int64_t>(input.position)
+        : origin == SEEK_END ? static_cast<std::int64_t>(input.bytes.size())
+                             : 0;
     const auto next = base + offset;
-    if (next < 0 || next > static_cast<sf_count_t>(input.bytes.size())) {
-        return -1;
+    if (next < 0 || next > static_cast<std::int64_t>(input.bytes.size())) {
+        return AVERROR(EINVAL);
     }
-    input.position = next;
+    input.position = static_cast<std::size_t>(next);
     return next;
 }
 
-sf_count_t read(void* destination, sf_count_t count, void* user_data)
+AVCodecContext* open_codec(AVFormatContext* format, int stream)
 {
-    auto& input = *static_cast<MemoryInput*>(user_data);
-    const auto available = static_cast<sf_count_t>(input.bytes.size()) - input.position;
-    const auto copied = std::min(count, available);
-    std::memcpy(
-        destination, input.bytes.data() + input.position,
-        static_cast<std::size_t>(copied));
-    input.position += copied;
-    return copied;
+    const auto* parameters = format->streams[stream]->codecpar;
+    const AVCodec* codec = avcodec_find_decoder(parameters->codec_id);
+    if (!codec) {
+        throw std::runtime_error("audio codec not available");
+    }
+    AVCodecContext* context = avcodec_alloc_context3(codec);
+    if (!context) {
+        throw std::bad_alloc();
+    }
+    int result = avcodec_parameters_to_context(context, parameters);
+    if (result >= 0) {
+        result = avcodec_open2(context, codec, nullptr);
+    }
+    if (result < 0) {
+        avcodec_free_context(&context);
+        throw ffmpeg_error("open audio codec", result);
+    }
+    return context;
 }
 
-sf_count_t write(const void*, sf_count_t, void*)
+void append_frame(
+    AudioClip& clip, SwrContext* resampler, const AVFrame* frame, int channels)
 {
-    return 0;
+    const int output_samples = av_rescale_rnd(
+        swr_get_delay(resampler, frame->sample_rate) + frame->nb_samples,
+        frame->sample_rate, frame->sample_rate, AV_ROUND_UP);
+    if (output_samples <= 0) {
+        return;
+    }
+    std::vector<float> buffer(
+        static_cast<std::size_t>(output_samples) * static_cast<std::size_t>(channels));
+    std::uint8_t* output[] = {
+        reinterpret_cast<std::uint8_t*>(buffer.data())};
+    const int converted = swr_convert(
+        resampler, output, output_samples,
+        const_cast<const std::uint8_t**>(frame->extended_data),
+        frame->nb_samples);
+    if (converted > 0) {
+        const auto sample_count = static_cast<std::size_t>(converted) * channels;
+        clip.samples.insert(
+            clip.samples.end(), buffer.data(), buffer.data() + sample_count);
+    }
 }
-
-sf_count_t tell(void* user_data)
-{
-    return static_cast<MemoryInput*>(user_data)->position;
-}
-
-SF_VIRTUAL_IO virtual_io{
-    file_length,
-    seek,
-    read,
-    write,
-    tell,
-};
 
 }  // namespace
 
 AudioClip decode_audio(std::span<const std::uint8_t> bytes)
 {
     MemoryInput input{bytes};
-    SF_INFO info{};
-    SNDFILE* file = sf_open_virtual(&virtual_io, SFM_READ, &info, &input);
-    if (!file) {
-        throw std::runtime_error(sf_strerror(nullptr));
-    }
-    if (info.frames <= 0 || info.channels <= 0 || info.samplerate <= 0) {
-        sf_close(file);
-        throw std::runtime_error("invalid audio stream");
+
+    AVFrame* frame = av_frame_alloc();
+    AVPacket* packet = av_packet_alloc();
+    if (!frame || !packet) {
+        throw std::bad_alloc();
     }
 
-    AudioClip clip{
-        info.samplerate,
-        info.channels,
-        std::vector<float>(
-            static_cast<std::size_t>(info.frames) * info.channels),
+    AVIOContext* io = nullptr;
+    AVFormatContext* format = nullptr;
+    AVCodecContext* codec = nullptr;
+    SwrContext* resampler = nullptr;
+
+    auto cleanup = [&]() {
+        swr_free(&resampler);
+        avcodec_free_context(&codec);
+        if (format) {
+            avformat_close_input(&format);
+        }
+        if (io) {
+            av_freep(&io->buffer);
+            avio_context_free(&io);
+        }
+        av_packet_free(&packet);
+        av_frame_free(&frame);
     };
-    const auto frames = sf_readf_float(file, clip.samples.data(), info.frames);
-    sf_close(file);
-    if (frames != info.frames) {
-        throw std::runtime_error("truncated decoded audio");
+
+    try {
+        auto* io_buffer = static_cast<std::uint8_t*>(av_malloc(64 * 1024));
+        if (!io_buffer) {
+            throw std::bad_alloc();
+        }
+        io = avio_alloc_context(
+            io_buffer, 64 * 1024, 0, &input, read_packet, nullptr, seek_packet);
+        format = avformat_alloc_context();
+        if (!io || !format) {
+            throw std::bad_alloc();
+        }
+        format->pb = io;
+        format->flags |= AVFMT_FLAG_CUSTOM_IO;
+
+        int result = avformat_open_input(&format, nullptr, nullptr, nullptr);
+        if (result < 0) {
+            throw ffmpeg_error("open audio", result);
+        }
+        result = avformat_find_stream_info(format, nullptr);
+        if (result < 0) {
+            throw ffmpeg_error("read audio streams", result);
+        }
+
+        const int audio_stream = av_find_best_stream(
+            format, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+        if (audio_stream < 0) {
+            throw std::runtime_error("audio file has no audio stream");
+        }
+
+        codec = open_codec(format, audio_stream);
+        if (codec->sample_rate <= 0 || codec->ch_layout.nb_channels <= 0) {
+            throw std::runtime_error("invalid audio stream");
+        }
+
+        const int channels = codec->ch_layout.nb_channels;
+        AVChannelLayout output_layout;
+        av_channel_layout_default(&output_layout, channels);
+        result = swr_alloc_set_opts2(
+            &resampler, &output_layout, AV_SAMPLE_FMT_FLT, codec->sample_rate,
+            &codec->ch_layout, codec->sample_fmt, codec->sample_rate,
+            0, nullptr);
+        av_channel_layout_uninit(&output_layout);
+        if (result < 0 || swr_init(resampler) < 0) {
+            throw std::runtime_error("cannot create audio resampler");
+        }
+
+        AudioClip clip{
+            codec->sample_rate,
+            channels,
+            {},
+        };
+
+        while (av_read_frame(format, packet) >= 0) {
+            if (packet->stream_index == audio_stream) {
+                result = avcodec_send_packet(codec, packet);
+                if (result < 0 && result != AVERROR(EAGAIN)) {
+                    throw ffmpeg_error("send audio packet", result);
+                }
+                while (result >= 0) {
+                    result = avcodec_receive_frame(codec, frame);
+                    if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) {
+                        break;
+                    }
+                    if (result < 0) {
+                        throw ffmpeg_error("receive audio frame", result);
+                    }
+                    append_frame(clip, resampler, frame, channels);
+                }
+            }
+            av_packet_unref(packet);
+        }
+
+        // Flush any buffered frames out of the decoder.
+        result = avcodec_send_packet(codec, nullptr);
+        if (result < 0 && result != AVERROR_EOF) {
+            throw ffmpeg_error("flush audio decoder", result);
+        }
+        while (true) {
+            result = avcodec_receive_frame(codec, frame);
+            if (result == AVERROR_EOF) {
+                break;
+            }
+            if (result < 0) {
+                throw ffmpeg_error("receive flushed audio frame", result);
+            }
+            append_frame(clip, resampler, frame, channels);
+        }
+
+        cleanup();
+
+        if (clip.samples.empty()) {
+            throw std::runtime_error("empty decoded audio");
+        }
+        return clip;
+    } catch (...) {
+        cleanup();
+        throw;
     }
-    return clip;
 }
 
 AudioChannel::~AudioChannel()

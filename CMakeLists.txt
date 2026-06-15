@@ -41,22 +41,11 @@ else()
     find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 endif()
 
-if(ANDROID)
-    include(FetchContent)
-    FetchContent_Declare(libsndfile
-        GIT_REPOSITORY https://github.com/libsndfile/libsndfile.git
-        GIT_TAG 1.2.2
-        GIT_SHALLOW TRUE
-    )
-    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-    set(ENABLE_EXTERNAL_LIBS ON CACHE BOOL "" FORCE)
-    set(ENABLE_MPEG OFF CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(libsndfile)
-    find_package(SDL3_ttf CONFIG REQUIRED)
-else()
-    pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
+if(NOT ANDROID)
     pkg_check_modules(SDL3_TTF REQUIRED IMPORTED_TARGET sdl3-ttf)
     pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+else()
+    find_package(SDL3_ttf CONFIG REQUIRED)
 endif()
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
     libavformat libavcodec libavutil libswscale libswresample)
@@ -100,11 +89,7 @@ add_library(th2_audio
 )
 target_include_directories(th2_audio PUBLIC src)
 target_compile_options(th2_audio PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
-if(ANDROID)
-    target_link_libraries(th2_audio PUBLIC SDL3::SDL3 sndfile)
-else()
-    target_link_libraries(th2_audio PUBLIC SDL3::SDL3 PkgConfig::SNDFILE)
-endif()
+target_link_libraries(th2_audio PUBLIC SDL3::SDL3 PkgConfig::FFMPEG)
 
 add_library(th2_character
     src/character.cpp

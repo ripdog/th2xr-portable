@@ -22,5 +22,4 @@ ffmpeg-*.7z
 /wineprefix
 
 # Android build output
-/third_party/ffmpeg-android/
-/third_party/libiconv-android/
+/third_party/
