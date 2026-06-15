@@ -30,22 +30,16 @@ jobs:
             libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
             libasound2-dev libpulse-dev libfuse2
 
-      - name: Build SDL3 from source
-        run: |
-          git clone https://github.com/libsdl-org/SDL.git --depth 1 --branch release-3.4.10
-          cmake -S SDL -B SDL/build -DCMAKE_BUILD_TYPE=Release
-          cmake --build SDL/build -- -j$(nproc)
-          sudo cmake --install SDL/build
-
-      - name: Build SDL3_ttf from source
-        run: |
-          git clone https://github.com/libsdl-org/SDL_ttf.git --depth 1 --branch release-3.2.2
-          cmake -S SDL_ttf -B SDL_ttf/build -DCMAKE_BUILD_TYPE=Release
-          cmake --build SDL_ttf/build -- -j$(nproc)
-          sudo cmake --install SDL_ttf/build
+      - uses: libsdl-org/setup-sdl@v1
+        id: sdl
+        with:
+          install-linux-dependencies: true
+          version: 3.4.10
+          version-sdl-ttf: 3.2.2
+          build-type: Release
 
       - name: Configure
-        run: cmake -S . -B build -DBUILD_TESTING=ON
+        run: cmake -S . -B build -DBUILD_TESTING=ON -DCMAKE_PREFIX_PATH="${{ steps.sdl.outputs.prefix }}"
 
       - name: Build
         run: cmake --build build -- -j$(nproc)
