@@ -15,6 +15,7 @@
 #include "touch_input.hpp"
 #include "video.hpp"
 
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_log.h>
@@ -473,6 +474,12 @@ public:
           suppress_audio_output_(soak_directory.has_value()),
           font_(fonts_)
     {
+        SDL_Log("Config path: %s", config_path_.string().c_str());
+        const auto non_zero_flags = std::ranges::count_if(
+            config_.game_flags, [](std::int32_t v) { return v != 0; });
+        SDL_Log(
+            "Loaded %zu non-zero game flags (flag98=%d)",
+            static_cast<std::size_t>(non_zero_flags), config_.game_flags[98]);
         default_player_name_ =
             th2::load_default_player_name(data / "TOHEART2.EXE");
         if (config_.player_name.family.empty()) {
@@ -636,6 +643,10 @@ public:
                 if (event.type == SDL_EVENT_WILL_ENTER_BACKGROUND) {
                     app_active_ = false;
                     SDL_Log("App entered background");
+                    // Persist the system-save flags immediately. On Android the
+                    // process may be killed while in the background before the
+                    // destructor runs.
+                    sync_game_flags();
                     continue;
                 }
                 if (event.type == SDL_EVENT_DID_ENTER_FOREGROUND) {
@@ -823,7 +834,8 @@ public:
                     if (event.button.button == SDL_BUTTON_RIGHT) {
                         open_system_menu();
                     } else if (event.button.button == SDL_BUTTON_LEFT) {
-                        if (handle_sidebar_click(event.button.x, event.button.y)) {
+                        if (event.button.which != SDL_TOUCH_MOUSEID
+                            && handle_sidebar_click(event.button.x, event.button.y)) {
                             continue;
                         }
                     }
@@ -6150,10 +6162,11 @@ private:
             }
             break;
         case Action::Tap: {
-            // Re-inject the tap as a left mouse-button-up event so the normal
-            // UI handlers run.  Coordinates are normalized, so convert to
-            // window pixels first; the event loop will map them to logical
-            // 800x600 coordinates on the next frame.
+            // Re-inject the tap as a full left-button click.  Many handlers
+            // (movie skip, menus, title) act on mouse-down, while the normal
+            // text-advance handler acts on mouse-up.  Coordinates are
+            // normalized, so convert to window pixels; the event loop maps
+            // them to logical 800x600 coordinates on the next frame.
             int window_width = 0;
             int window_height = 0;
             SDL_GetWindowSize(window_, &window_width, &window_height);
@@ -6166,13 +6179,22 @@ private:
             if (handle_sidebar_click(logical_x, logical_y)) {
                 break;
             }
-            SDL_Event synthetic{};
-            synthetic.type = SDL_EVENT_MOUSE_BUTTON_UP;
-            synthetic.button.button = SDL_BUTTON_LEFT;
-            synthetic.button.clicks = 1;
-            synthetic.button.x = touch_input_.tap_x() * window_width;
-            synthetic.button.y = touch_input_.tap_y() * window_height;
-            SDL_PushEvent(&synthetic);
+            SDL_Event down{};
+            down.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+            down.button.button = SDL_BUTTON_LEFT;
+            down.button.clicks = 1;
+            down.button.which = SDL_TOUCH_MOUSEID;
+            down.button.x = touch_input_.tap_x() * window_width;
+            down.button.y = touch_input_.tap_y() * window_height;
+            SDL_PushEvent(&down);
+            SDL_Event up{};
+            up.type = SDL_EVENT_MOUSE_BUTTON_UP;
+            up.button.button = SDL_BUTTON_LEFT;
+            up.button.clicks = 1;
+            up.button.which = SDL_TOUCH_MOUSEID;
+            up.button.x = down.button.x;
+            up.button.y = down.button.y;
+            SDL_PushEvent(&up);
             break;
         }
         default:
@@ -8332,7 +8354,8 @@ private:
                 close_backlog();
                 return;
             }
-            if (handle_sidebar_click(event.button.x, event.button.y)) {
+            if (event.button.which != SDL_TOUCH_MOUSEID
+                && handle_sidebar_click(event.button.x, event.button.y)) {
                 return;
             }
         } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {

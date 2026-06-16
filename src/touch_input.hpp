@@ -27,8 +27,8 @@ enum class TouchAction {
 };
 
 // Interprets touch and Android back-button events as high-level game actions.
-// Single-finger taps are left untouched so SDL's touch-to-mouse synthesis
-// still advances text normally.
+// Single-finger taps are reported as TouchAction::Tap and re-injected by the
+// caller as left mouse-button down/up events.
 class TouchInput {
 public:
     TouchInput();

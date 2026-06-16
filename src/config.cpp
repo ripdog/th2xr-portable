@@ -1,6 +1,7 @@
 #include "config.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <string_view>
@@ -145,8 +146,13 @@ GameConfig load_config(const std::filesystem::path& path)
 
 void save_config(const std::filesystem::path& path, const GameConfig& config)
 {
-    std::ofstream output(path);
-    output << "bgm_volume=" << config.bgm_volume << '\n'
+    // Write to a temporary file and rename atomically so a crash or kill
+    // during the write cannot leave the real config truncated.
+    const auto temp_path = path.parent_path()
+        / std::filesystem::path(path.filename().string() + ".tmp");
+    {
+        std::ofstream output(temp_path, std::ios::binary);
+        output << "bgm_volume=" << config.bgm_volume << '\n'
            << "se_volume=" << config.se_volume << '\n'
            << "voice_volume=" << config.voice_volume << '\n'
            << "bgm_muted=" << config.bgm_muted << '\n'
@@ -196,6 +202,8 @@ void save_config(const std::filesystem::path& path, const GameConfig& config)
     for (const auto replay : config.unlocked_replays) {
         output << "replay=" << replay << '\n';
     }
+    }
+    std::filesystem::rename(temp_path, path);
 }
 
 int auto_delay_ms(const GameConfig& config, bool text_is_read,
