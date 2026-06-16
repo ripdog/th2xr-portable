@@ -23,10 +23,24 @@ public:
     bool wants_mouse() const;
     void rebuild_font_atlas(float display_scale);
 
+    // Enable vertical drag-to-scroll for the current ImGui window/child on
+    // touch screens. Call once per frame inside the scrollable region.
+    void touch_drag_scroll();
+
+    // Direct touch feed for ImGui (position only). Used on Android where SDL
+    // touch-to-mouse synthesis is disabled.
+    void on_touch_down(float normalized_x, float normalized_y);
+    void on_touch_motion(
+        float normalized_x, float normalized_y,
+        float normalized_dx, float normalized_dy);
+    void on_touch_up(float normalized_x, float normalized_y);
+
 private:
 
     SDL_Window* window_;
     SDL_Renderer* renderer_;
+    bool touch_scroll_active_ = false;
+    bool touch_down_ = false;
     std::uint64_t last_frame_ticks_ = 0;
     std::string imgui_font_path_;
     float display_scale_ = 1.0f;

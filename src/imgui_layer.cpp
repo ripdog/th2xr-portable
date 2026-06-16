@@ -172,10 +172,16 @@ void ImGuiLayer::process_event(const SDL_Event& event)
     const auto mouse_y = [](float y) { return y; };
 #endif
     if (event.type == SDL_EVENT_MOUSE_MOTION) {
+        io.AddMouseSourceEvent(
+            event.motion.which == SDL_TOUCH_MOUSEID
+                ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse);
         io.AddMousePosEvent(
             mouse_x(event.motion.x), mouse_y(event.motion.y));
     } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
                || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        io.AddMouseSourceEvent(
+            event.button.which == SDL_TOUCH_MOUSEID
+                ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse);
         io.AddMousePosEvent(
             mouse_x(event.button.x), mouse_y(event.button.y));
         int button = -1;
@@ -187,6 +193,9 @@ void ImGuiLayer::process_event(const SDL_Event& event)
                 button, event.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
         }
     } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+        io.AddMouseSourceEvent(
+            event.wheel.which == SDL_TOUCH_MOUSEID
+                ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse);
         io.AddMousePosEvent(
             mouse_x(event.wheel.mouse_x), mouse_y(event.wheel.mouse_y));
         io.AddMouseWheelEvent(event.wheel.x, event.wheel.y);
@@ -338,6 +347,81 @@ void ImGuiLayer::render()
         }
     }
     SDL_SetRenderClipRect(renderer_, nullptr);
+}
+
+void ImGuiLayer::touch_drag_scroll()
+{
+#ifdef __ANDROID__
+    auto& io = ImGui::GetIO();
+    if (ImGui::GetScrollMaxY() <= 0.0f
+        || !ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
+        touch_scroll_active_ = false;
+        return;
+    }
+
+    if (touch_down_ && !touch_scroll_active_
+        && !ImGui::IsAnyItemHovered()
+        && !ImGui::IsAnyItemActive()) {
+        touch_scroll_active_ = true;
+    }
+
+    if (!touch_down_) {
+        touch_scroll_active_ = false;
+        return;
+    }
+
+    if (touch_scroll_active_ && io.MouseDelta.y != 0.0f) {
+        ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
+    }
+#endif
+}
+
+void ImGuiLayer::on_touch_down(float normalized_x, float normalized_y)
+{
+#ifdef __ANDROID__
+    auto& io = ImGui::GetIO();
+    int pixel_width = 0;
+    int pixel_height = 0;
+    SDL_GetWindowSizeInPixels(window_, &pixel_width, &pixel_height);
+    io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
+    io.AddMousePosEvent(
+        normalized_x * pixel_width / display_scale_,
+        normalized_y * pixel_height / display_scale_);
+    touch_down_ = true;
+#endif
+}
+
+void ImGuiLayer::on_touch_motion(
+    float normalized_x, float normalized_y,
+    float normalized_dx, float normalized_dy)
+{
+#ifdef __ANDROID__
+    auto& io = ImGui::GetIO();
+    int pixel_width = 0;
+    int pixel_height = 0;
+    SDL_GetWindowSizeInPixels(window_, &pixel_width, &pixel_height);
+    io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
+    io.AddMousePosEvent(
+        normalized_x * pixel_width / display_scale_,
+        normalized_y * pixel_height / display_scale_);
+    (void)normalized_dx;
+    (void)normalized_dy;
+#endif
+}
+
+void ImGuiLayer::on_touch_up(float normalized_x, float normalized_y)
+{
+#ifdef __ANDROID__
+    auto& io = ImGui::GetIO();
+    int pixel_width = 0;
+    int pixel_height = 0;
+    SDL_GetWindowSizeInPixels(window_, &pixel_width, &pixel_height);
+    io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
+    io.AddMousePosEvent(
+        normalized_x * pixel_width / display_scale_,
+        normalized_y * pixel_height / display_scale_);
+    touch_down_ = false;
+#endif
 }
 
 bool ImGuiLayer::wants_input() const

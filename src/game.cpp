@@ -50,6 +50,7 @@ extern "C" {
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -668,6 +669,17 @@ public:
                 }
                 imgui_->process_event(event);
                 touch_input_.process_event(event);
+                if (event.type == SDL_EVENT_FINGER_DOWN) {
+                    imgui_->on_touch_down(
+                        event.tfinger.x, event.tfinger.y);
+                } else if (event.type == SDL_EVENT_FINGER_MOTION) {
+                    imgui_->on_touch_motion(
+                        event.tfinger.x, event.tfinger.y,
+                        event.tfinger.dx, event.tfinger.dy);
+                } else if (event.type == SDL_EVENT_FINGER_UP) {
+                    imgui_->on_touch_up(
+                        event.tfinger.x, event.tfinger.y);
+                }
                 convert_event_to_logical_coordinates(
                     event, window_width, window_height);
                 if (config_.show_script_position
@@ -5878,7 +5890,19 @@ private:
         ImGui::SetNextWindowPos(ImVec2(115.0f, 50.0f), ImGuiCond_FirstUseEver);
 #endif
         bool open = true;
-        if (ImGui::Begin("Panel Config", &open)) {
+#ifdef __ANDROID__
+        constexpr auto config_flags =
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize
+            | ImGuiWindowFlags_NoCollapse;
+#else
+        constexpr auto config_flags = ImGuiWindowFlags{};
+#endif
+        if (ImGui::Begin("Panel Config", &open, config_flags)) {
+#ifdef __ANDROID__
+            ImGui::BeginChild(
+                "config_scroll", ImVec2(0, 0), 0,
+                ImGuiWindowFlags_NoMove);
+#endif
             bool option_changed = false;
             if (ImGui::BeginTabBar("config-tabs")) {
                 if (ImGui::BeginTabItem("Playback")) {
@@ -6037,6 +6061,10 @@ private:
                 }
                 ImGui::EndPopup();
             }
+#ifdef __ANDROID__
+            imgui_->touch_drag_scroll();
+            ImGui::EndChild();
+#endif
         }
         ImGui::End();
         if (!open) {
@@ -6057,6 +6085,9 @@ private:
             "Player Name", nullptr,
             ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize
                 | ImGuiWindowFlags_NoTitleBar);
+        ImGui::BeginChild(
+            "name_scroll", ImVec2(0, 0), 0,
+            ImGuiWindowFlags_NoMove);
 #else
         ImGui::SetNextWindowSize(ImVec2(430.0f, 330.0f), ImGuiCond_Always);
         ImGui::SetNextWindowPos(
@@ -6115,6 +6146,10 @@ private:
             title_started_ = std::chrono::steady_clock::now()
                 - std::chrono::milliseconds(120 * 1000 / 60);
         }
+#ifdef __ANDROID__
+        imgui_->touch_drag_scroll();
+        ImGui::EndChild();
+#endif
         ImGui::End();
     }
 
