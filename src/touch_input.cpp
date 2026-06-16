@@ -7,13 +7,14 @@
 namespace th2 {
 namespace {
 
-constexpr float SwipeDistance = 0.12f;      // fraction of screen dimension
+constexpr float SwipeDistance = 0.12f;       // fraction of screen dimension
 constexpr float SwipeMaxDurationMs = 500.0f;
-constexpr float SwipeMinRatio = 1.5f;       // vertical must dominate horizontal
-constexpr float TapMaxMovement = 0.03f;     // fraction of screen dimension
+constexpr float SwipeMinRatio = 1.5f;        // dominant axis must exceed other
+constexpr float TapMaxMovement = 0.03f;      // fraction of screen dimension
 constexpr float TapMaxDurationMs = 250.0f;
 constexpr float TwoFingerMaxDelayMs = 150.0f;
 constexpr float BacklogLineThreshold = 0.1f; // fraction of screen height per line
+constexpr float SkipHoldDelayMs = 150.0f;    // before a right swipe becomes hold
 
 float distance(float ax, float ay, float bx, float by)
 {
@@ -82,6 +83,18 @@ void TouchInput::remove_finger(int index)
     // If we already emitted scroll events during this drag, don't also treat
     // the lift as a swipe.
     if (had_scroll) {
+        active_gesture_ = false;
+        return;
+    }
+
+    // Rightward swipe: quick release toggles skip mode; holding for longer
+    // activates an unconditional skip while the finger is down.
+    if (horizontal_state_ != HorizontalState::none) {
+        if (horizontal_state_ == HorizontalState::right && !skip_held_) {
+            pending_ = TouchAction::SkipToggle;
+        }
+        skip_held_ = false;
+        horizontal_state_ = HorizontalState::none;
         active_gesture_ = false;
         return;
     }
@@ -173,6 +186,38 @@ void TouchInput::evaluate_single_swipe(const Finger& finger)
     }
 }
 
+void TouchInput::evaluate_horizontal_swipe(const Finger& finger)
+{
+    const float dx = finger.x - finger.start_x;
+    const float dy = finger.y - finger.start_y;
+
+    if (horizontal_state_ == HorizontalState::none) {
+        if (emitted_scroll_ || dx <= SwipeDistance) {
+            return;
+        }
+        if (std::abs(dx) < SwipeMinRatio * std::abs(dy)) {
+            return;
+        }
+        horizontal_state_ = HorizontalState::right;
+        horizontal_cross_time_ = std::chrono::steady_clock::now();
+        return;
+    }
+
+    if (horizontal_state_ == HorizontalState::right) {
+        if (!skip_held_) {
+            const auto now = std::chrono::steady_clock::now();
+            if (elapsed_ms(horizontal_cross_time_, now) >= SkipHoldDelayMs) {
+                skip_held_ = true;
+            }
+        }
+        if (dx <= -SwipeDistance) {
+            // Pulled back to the left: stop the held skip.
+            horizontal_state_ = HorizontalState::left;
+            skip_held_ = false;
+        }
+    }
+}
+
 void TouchInput::process_event(const SDL_Event& event)
 {
     switch (event.type) {
@@ -191,6 +236,7 @@ void TouchInput::process_event(const SDL_Event& event)
             fingers_[index].x = event.tfinger.x;
             fingers_[index].y = event.tfinger.y;
             maybe_emit_scroll(fingers_[index]);
+            evaluate_horizontal_swipe(fingers_[index]);
         }
         break;
     }

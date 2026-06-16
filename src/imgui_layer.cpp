@@ -239,20 +239,25 @@ void ImGuiLayer::rebuild_font_atlas(float display_scale)
 void ImGuiLayer::new_frame(SDL_Window* window, float display_scale)
 {
     auto& io = ImGui::GetIO();
-    display_scale_ = display_scale > 0.0f ? display_scale : 1.0f;
+    display_scale_ = std::max(1.0f, display_scale);
 
-    int window_width = 0;
-    int window_height = 0;
-    SDL_GetWindowSize(window, &window_width, &window_height);
+    // Use the pixel size so the math works on platforms (e.g. Android) where
+    // SDL_GetWindowSize() returns pixels rather than logical points.
+    int pixel_width = 0;
+    int pixel_height = 0;
+    SDL_GetWindowSizeInPixels(window, &pixel_width, &pixel_height);
+    if (pixel_width == 0 || pixel_height == 0) {
+        SDL_GetWindowSize(window, &pixel_width, &pixel_height);
+    }
 
+    // present_frame() renders ImGui with SDL_SetRenderScale(display_scale_).
+    // ImGui's internal coordinate system must be the matching logical
+    // coordinate system, so we divide the pixel size by the same scale that
+    // the renderer will multiply by. This keeps mouse/touch input (which is
+    // divided by display_scale_ in process_event()) aligned with the UI.
     io.DisplaySize = ImVec2(
-        static_cast<float>(window_width),
-        static_cast<float>(window_height));
-    // present_frame() renders ImGui with SDL_SetRenderScale(display_scale).
-    // On Android the window size and touch/mouse coordinates are both in
-    // pixels, so we divide mouse input in process_event() to keep the logical
-    // coordinate system consistent. The framebuffer scale is still used by
-    // ImGui for font atlas sizing and backend scaling.
+        static_cast<float>(pixel_width) / display_scale_,
+        static_cast<float>(pixel_height) / display_scale_);
     io.DisplayFramebufferScale = ImVec2(display_scale_, display_scale_);
 
     // Rebuild the font atlas when the scale changes so text stays crisp

@@ -45,18 +45,15 @@ extern "C" {
 #include <exception>
 #include <fstream>
 #include <filesystem>
-#include <format>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <numbers>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
-#include <type_traits>
 #include <vector>
 
 namespace {
@@ -901,7 +898,8 @@ public:
                 continue;
             }
             const bool control_held =
-                (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
+                (SDL_GetModState() & SDL_KMOD_CTRL) != 0
+                || touch_input_.skip_held();
             if (movie_) {
                 movie_->set_speed(control_held ? 4.0 : 1.0);
             } else if (control_held && ui_mode_ == UiMode::title) {
@@ -949,9 +947,8 @@ public:
             const float scale_x = output_width / 800.0f;
             const float scale_y = output_height / 600.0f;
             const float framebuffer_scale = std::min(scale_x, scale_y);
-            const float display_scale = SDL_GetWindowDisplayScale(window_);
-            imgui_->new_frame(
-                window_, display_scale > 0.0f ? display_scale : 1.0f);
+            const float display_scale = imgui_display_scale();
+            imgui_->new_frame(window_, display_scale);
             font_.configure(
                 config_.authentic_font, config_.font_family,
                 config_.font_size, framebuffer_scale);
@@ -5872,8 +5869,14 @@ private:
         if (!config_open_) {
             return;
         }
+#ifdef __ANDROID__
+        const auto& io = ImGui::GetIO();
+        ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
+        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
+#else
         ImGui::SetNextWindowSize(ImVec2(570.0f, 500.0f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(ImVec2(115.0f, 50.0f), ImGuiCond_FirstUseEver);
+#endif
         bool open = true;
         if (ImGui::Begin("Panel Config", &open)) {
             bool option_changed = false;
@@ -6046,12 +6049,22 @@ private:
         if (!name_input_open_) {
             return;
         }
+#ifdef __ANDROID__
+        const auto& io = ImGui::GetIO();
+        ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
+        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
+        ImGui::Begin(
+            "Player Name", nullptr,
+            ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize
+                | ImGuiWindowFlags_NoTitleBar);
+#else
         ImGui::SetNextWindowSize(ImVec2(430.0f, 330.0f), ImGuiCond_Always);
         ImGui::SetNextWindowPos(
             ImVec2(400.0f, 300.0f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
         ImGui::Begin(
             "Player Name", nullptr,
             ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize);
+#endif
         ImGui::TextUnformatted("Enter the protagonist's name.");
         ImGui::Separator();
         ImGui::InputText(
@@ -6159,6 +6172,15 @@ private:
                 open_system_menu();
             } else if (config_open_) {
                 close_config();
+            }
+            break;
+        case Action::SkipToggle:
+            if (ui_mode_ == UiMode::game) {
+                skip_mode_ = !skip_mode_;
+                if (skip_mode_) {
+                    auto_mode_ = false;
+                }
+                play_se(-1, 9104, false, 255);
             }
             break;
         case Action::Tap: {
@@ -8553,15 +8575,22 @@ private:
             renderer_, texture, &source, &destination, 0.0, nullptr, flip);
     }
 
+    float imgui_display_scale() const
+    {
+        // Cap the scale so ImGui doesn't become enormous on high-DPI phones.
+        // 2.5x is plenty for crisp text on 5K+ desktop displays and keeps
+        // phone UIs usable.
+        return std::clamp(SDL_GetWindowDisplayScale(window_), 1.0f, 2.5f);
+    }
+
     void present_frame()
     {
         upscaler_->present();
 
-        // ImGui is rendered directly to the window backbuffer using the OS
+        // ImGui is rendered directly to the window backbuffer using a capped
         // display scale, so the debug/config UI stays crisp but does not
         // balloon to the full screen magnification used for the 800x600 art.
-        const float display_scale = std::max(
-            1.0f, SDL_GetWindowDisplayScale(window_));
+        const float display_scale = imgui_display_scale();
         SDL_SetRenderTarget(renderer_, nullptr);
         SDL_SetRenderScale(renderer_, display_scale, display_scale);
         imgui_->render();
@@ -8578,9 +8607,7 @@ private:
         shake_target_.reset();
         title_masked_.reset();
         if (imgui_) {
-            const float display_scale = std::max(
-                1.0f, SDL_GetWindowDisplayScale(window_));
-            imgui_->rebuild_font_atlas(display_scale);
+            imgui_->rebuild_font_atlas(imgui_display_scale());
         }
     }
 

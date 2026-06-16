@@ -22,8 +22,11 @@ enum class TouchAction {
     // save/load menus.
     MenuToggle,
     // Single-finger tap.  Coordinates are stored separately and should be
-    // converted to a left mouse-button-up event so the normal UI handlers run.
+    // re-injected by the caller as left mouse-button down/up events.
     Tap,
+    // Swipe right and release while in-game: toggle skip mode (respects the
+    // skip-unread option just like the sidebar skip button).
+    SkipToggle,
 };
 
 // Interprets touch and Android back-button events as high-level game actions.
@@ -47,6 +50,10 @@ public:
     float tap_x() const { return tap_x_; }
     float tap_y() const { return tap_y_; }
 
+    // True while the user is actively holding a rightward swipe (the
+    // "hold to skip unconditionally" gesture).
+    bool skip_held() const { return skip_held_; }
+
     // True while a gesture is in progress.
     bool active_gesture() const;
 
@@ -66,6 +73,7 @@ private:
     int add_finger(SDL_FingerID id, float x, float y);
     void remove_finger(int index);
     void evaluate_single_swipe(const Finger& finger);
+    void evaluate_horizontal_swipe(const Finger& finger);
     void evaluate_two_finger_tap();
     void maybe_emit_scroll(const Finger& finger);
 
@@ -76,6 +84,11 @@ private:
     float scroll_anchor_y_ = -1.0f;
     float tap_x_ = 0.0f;
     float tap_y_ = 0.0f;
+
+    enum class HorizontalState { none, right, left };
+    HorizontalState horizontal_state_ = HorizontalState::none;
+    std::chrono::steady_clock::time_point horizontal_cross_time_;
+    bool skip_held_ = false;
 };
 
 }  // namespace th2
