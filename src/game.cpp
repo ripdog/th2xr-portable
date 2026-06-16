@@ -15,6 +15,7 @@
 #include "video.hpp"
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL_system.h>
@@ -43,6 +44,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -99,6 +101,125 @@ std::filesystem::path writable_directory()
 #else
     return std::filesystem::path(".");
 #endif
+}
+
+std::filesystem::path app_config_directory()
+{
+#ifdef __ANDROID__
+    return std::filesystem::path(SDL_GetAndroidInternalStoragePath());
+#else
+    char* path = SDL_GetPrefPath("Leaf", "ToHeart2XR");
+    if (!path) {
+        return std::filesystem::path(".");
+    }
+    std::filesystem::path result(path);
+    SDL_free(path);
+    return result;
+#endif
+}
+
+std::filesystem::path remembered_data_path_file()
+{
+    return app_config_directory() / "game-data-path.txt";
+}
+
+bool valid_game_data_directory(const std::filesystem::path& path)
+{
+    return std::filesystem::is_directory(path)
+        && std::filesystem::exists(path / "TOHEART2.EXE")
+        && std::filesystem::exists(path / "SDT.PAK")
+        && std::filesystem::exists(path / "GRP.PAK");
+}
+
+std::optional<std::filesystem::path> load_remembered_data_path()
+{
+    std::ifstream input(remembered_data_path_file());
+    std::string line;
+    if (!std::getline(input, line) || line.empty()) {
+        return std::nullopt;
+    }
+    return std::filesystem::path(line);
+}
+
+void save_remembered_data_path(const std::filesystem::path& path)
+{
+    std::filesystem::create_directories(app_config_directory());
+    std::ofstream output(remembered_data_path_file());
+    output << path.string() << '\n';
+}
+
+std::optional<std::filesystem::path> pick_game_executable()
+{
+    struct DialogState {
+        std::mutex mutex;
+        bool done = false;
+        std::optional<std::filesystem::path> path;
+    } state;
+
+    SDL_Window* window = SDL_CreateWindow(
+        "Select TOHEART2.EXE", 640, 120, SDL_WINDOW_HIDDEN);
+    WindowPtr window_holder(window);
+    const SDL_DialogFileFilter filters[] = {
+        {"ToHeart2 executable", "exe"},
+        {"All files", "*"},
+    };
+    auto callback = [](void* userdata, const char* const* filelist, int) {
+        auto* dialog = static_cast<DialogState*>(userdata);
+        std::lock_guard lock(dialog->mutex);
+        if (filelist && filelist[0]) {
+            dialog->path = std::filesystem::path(filelist[0]);
+        }
+        dialog->done = true;
+    };
+    SDL_ShowOpenFileDialog(
+        callback, &state, window, filters, std::size(filters), nullptr, false);
+
+    for (;;) {
+        {
+            std::lock_guard lock(state.mutex);
+            if (state.done) {
+                return state.path;
+            }
+        }
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                return std::nullopt;
+            }
+        }
+        SDL_Delay(16);
+    }
+}
+
+std::optional<std::filesystem::path> discover_game_data_path(
+    const std::filesystem::path& default_path, bool explicit_path)
+{
+    if (valid_game_data_directory(default_path)) {
+        if (explicit_path) {
+            save_remembered_data_path(default_path);
+        }
+        return default_path;
+    }
+    if (!explicit_path) {
+        if (const auto remembered = load_remembered_data_path();
+            remembered && valid_game_data_directory(*remembered)) {
+            return *remembered;
+        }
+        const auto executable = pick_game_executable();
+        if (!executable) {
+            return std::nullopt;
+        }
+        const auto directory = executable->parent_path();
+        if (valid_game_data_directory(directory)) {
+            save_remembered_data_path(directory);
+            return directory;
+        }
+        SDL_LogError(
+            SDL_LOG_CATEGORY_APPLICATION,
+            "Selected executable is not in a valid game data directory: %s",
+            executable->string().c_str());
+    }
+    return std::nullopt;
 }
 
 // Convert window-coordinate mouse events to the fixed 800x600 logical
@@ -332,7 +453,6 @@ public:
               : writable_directory() / "toheart2-config.ini"),
           config_(th2::load_config(config_path_)),
           suppress_audio_output_(soak_directory.has_value()),
-          sdl_subsystem_(),
           font_(fonts_)
     {
         default_player_name_ =
@@ -1062,10 +1182,9 @@ private:
     std::unique_ptr<th2::SoakGameDriver<Game>> soak_;
     std::size_t soak_renderer_ticks_ = 0;
 
-    // SDL subsystem lifetime.  window_/renderer_ holders are declared before
-    // every other SDL-dependent member so that textures, audio streams, etc.
-    // are destroyed while the renderer and SDL subsystems are still alive.
-    SdlSubsystem sdl_subsystem_;
+    // Window/renderer holders are declared before every other SDL-dependent
+    // member so that textures, audio streams, etc. are destroyed while the
+    // renderer still exists. SDL itself is initialized in main().
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     WindowPtr window_holder_;
@@ -8765,6 +8884,7 @@ private:
 int main(int argc, char** argv)
 {
     try {
+        SdlSubsystem sdl_subsystem;
 #ifdef __ANDROID__
         std::filesystem::path data =
             std::filesystem::path(SDL_GetAndroidInternalStoragePath()) /
@@ -8823,21 +8943,16 @@ int main(int argc, char** argv)
         SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "1");
 #endif
 
+        auto discovered_data = discover_game_data_path(data, data_set);
+        if (!discovered_data) {
+            SDL_LogError(
+                SDL_LOG_CATEGORY_APPLICATION,
+                "Game data directory not found or invalid: %s",
+                data.string().c_str());
+            return 1;
+        }
+        data = *discovered_data;
         SDL_Log("Game data path: %s", data.string().c_str());
-        if (!std::filesystem::is_directory(data)) {
-            SDL_LogError(
-                SDL_LOG_CATEGORY_APPLICATION,
-                "Game data directory does not exist: %s",
-                data.string().c_str());
-            return 1;
-        }
-        if (!std::filesystem::exists(data / "TOHEART2.EXE")) {
-            SDL_LogError(
-                SDL_LOG_CATEGORY_APPLICATION,
-                "TOHEART2.EXE not found in game data directory: %s",
-                data.string().c_str());
-            return 1;
-        }
         SDL_Log("Game files found, starting engine");
 
         return Game(data, scenario, soak_directory, soak_runs).run();
