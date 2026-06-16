@@ -4,6 +4,7 @@
 #include "character.hpp"
 #include "config.hpp"
 #include "font.hpp"
+#include "icon.hpp"
 #include "image.hpp"
 #include "imgui_layer.hpp"
 #include "message.hpp"
@@ -15,6 +16,7 @@
 #include "video.hpp"
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL_system.h>
@@ -43,6 +45,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -99,6 +102,125 @@ std::filesystem::path writable_directory()
 #else
     return std::filesystem::path(".");
 #endif
+}
+
+std::filesystem::path app_config_directory()
+{
+#ifdef __ANDROID__
+    return std::filesystem::path(SDL_GetAndroidInternalStoragePath());
+#else
+    char* path = SDL_GetPrefPath("Leaf", "ToHeart2XR");
+    if (!path) {
+        return std::filesystem::path(".");
+    }
+    std::filesystem::path result(path);
+    SDL_free(path);
+    return result;
+#endif
+}
+
+std::filesystem::path remembered_data_path_file()
+{
+    return app_config_directory() / "game-data-path.txt";
+}
+
+bool valid_game_data_directory(const std::filesystem::path& path)
+{
+    return std::filesystem::is_directory(path)
+        && std::filesystem::exists(path / "TOHEART2.EXE")
+        && std::filesystem::exists(path / "SDT.PAK")
+        && std::filesystem::exists(path / "GRP.PAK");
+}
+
+std::optional<std::filesystem::path> load_remembered_data_path()
+{
+    std::ifstream input(remembered_data_path_file());
+    std::string line;
+    if (!std::getline(input, line) || line.empty()) {
+        return std::nullopt;
+    }
+    return std::filesystem::path(line);
+}
+
+void save_remembered_data_path(const std::filesystem::path& path)
+{
+    std::filesystem::create_directories(app_config_directory());
+    std::ofstream output(remembered_data_path_file());
+    output << path.string() << '\n';
+}
+
+std::optional<std::filesystem::path> pick_game_executable()
+{
+    struct DialogState {
+        std::mutex mutex;
+        bool done = false;
+        std::optional<std::filesystem::path> path;
+    } state;
+
+    SDL_Window* window = SDL_CreateWindow(
+        "Select TOHEART2.EXE", 640, 120, SDL_WINDOW_HIDDEN);
+    WindowPtr window_holder(window);
+    const SDL_DialogFileFilter filters[] = {
+        {"ToHeart2 executable", "exe"},
+        {"All files", "*"},
+    };
+    auto callback = [](void* userdata, const char* const* filelist, int) {
+        auto* dialog = static_cast<DialogState*>(userdata);
+        std::lock_guard lock(dialog->mutex);
+        if (filelist && filelist[0]) {
+            dialog->path = std::filesystem::path(filelist[0]);
+        }
+        dialog->done = true;
+    };
+    SDL_ShowOpenFileDialog(
+        callback, &state, window, filters, std::size(filters), nullptr, false);
+
+    for (;;) {
+        {
+            std::lock_guard lock(state.mutex);
+            if (state.done) {
+                return state.path;
+            }
+        }
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                return std::nullopt;
+            }
+        }
+        SDL_Delay(16);
+    }
+}
+
+std::optional<std::filesystem::path> discover_game_data_path(
+    const std::filesystem::path& default_path, bool explicit_path)
+{
+    if (valid_game_data_directory(default_path)) {
+        if (explicit_path) {
+            save_remembered_data_path(default_path);
+        }
+        return default_path;
+    }
+    if (!explicit_path) {
+        if (const auto remembered = load_remembered_data_path();
+            remembered && valid_game_data_directory(*remembered)) {
+            return *remembered;
+        }
+        const auto executable = pick_game_executable();
+        if (!executable) {
+            return std::nullopt;
+        }
+        const auto directory = executable->parent_path();
+        if (valid_game_data_directory(directory)) {
+            save_remembered_data_path(directory);
+            return directory;
+        }
+        SDL_LogError(
+            SDL_LOG_CATEGORY_APPLICATION,
+            "Selected executable is not in a valid game data directory: %s",
+            executable->string().c_str());
+    }
+    return std::nullopt;
 }
 
 // Convert window-coordinate mouse events to the fixed 800x600 logical
@@ -238,7 +360,8 @@ int scenario_number(std::string_view name)
     return result;
 }
 
-std::vector<std::string> display_lines(std::string_view source)
+std::vector<std::string> display_lines(
+    std::string_view source, std::size_t wrap_columns)
 {
     std::vector<std::string> lines;
     std::string line;
@@ -258,9 +381,9 @@ std::vector<std::string> display_lines(std::string_view source)
         // A leading separator after \k is visible immediately. The original
         // renderer does not wrap until the next printable glyph establishes
         // that the line is over width.
-        if (line.size() >= 60 && line.back() != ' ') {
+        if (line.size() >= wrap_columns && line.back() != ' ') {
             const auto space = line.find_last_of(' ');
-            if (space != std::string::npos && space > 35) {
+            if (space != std::string::npos && space > wrap_columns / 2) {
                 lines.push_back(line.substr(0, space));
                 line.erase(0, space + 1);
             } else {
@@ -331,7 +454,6 @@ public:
               : writable_directory() / "toheart2-config.ini"),
           config_(th2::load_config(config_path_)),
           suppress_audio_output_(soak_directory.has_value()),
-          sdl_subsystem_(),
           font_(fonts_)
     {
         default_player_name_ =
@@ -361,6 +483,9 @@ public:
         SDL_DestroyProperties(renderer_properties);
         if (!window_ || !renderer_) {
             throw std::runtime_error(SDL_GetError());
+        }
+        if (auto icon = th2::load_executable_icon(data / "TOHEART2.EXE")) {
+            SDL_SetWindowIcon(window_, icon.get());
         }
         SDL_Log("SDL window and renderer created");
 #ifndef __ANDROID__
@@ -844,7 +969,9 @@ public:
     }
 
 private:
-    static constexpr std::uint32_t save_version_ = 24;
+    static constexpr std::uint32_t save_version_ = 25;
+    static constexpr std::uint32_t first_backlog_voice_save_version_ = 25;
+    static constexpr std::uint32_t oldest_supported_save_version_ = 24;
 
     enum class AudioWaitKind {
         bgm,
@@ -1083,10 +1210,9 @@ private:
     std::unique_ptr<th2::SoakGameDriver<Game>> soak_;
     std::size_t soak_renderer_ticks_ = 0;
 
-    // SDL subsystem lifetime.  window_/renderer_ holders are declared before
-    // every other SDL-dependent member so that textures, audio streams, etc.
-    // are destroyed while the renderer and SDL subsystems are still alive.
-    SdlSubsystem sdl_subsystem_;
+    // Window/renderer holders are declared before every other SDL-dependent
+    // member so that textures, audio streams, etc. are destroyed while the
+    // renderer still exists. SDL itself is initialized in main().
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     WindowPtr window_holder_;
@@ -2384,6 +2510,9 @@ private:
     struct SaveMetadata {
         bool exists = false;
         std::time_t timestamp = 0;
+        int game_month = 0;
+        int game_day = 0;
+        int game_time = 0;
         std::string message;
     };
     std::array<SaveMetadata, 10> visible_saves_{};
@@ -2393,7 +2522,7 @@ private:
         if (!message_.empty()) {
             return message_text_y()
                 + static_cast<float>(display_lines(message_.visible()).size())
-                    * 31.0f
+                    * text_line_height()
                 + 1.0f;
         }
         return 468.0f;
@@ -2402,7 +2531,7 @@ private:
     float choice_height(const Choice& choice) const
     {
         return std::max<std::size_t>(
-            1, display_lines(choice.text).size()) * 31.0f;
+            1, display_lines(choice.text).size()) * text_line_height();
     }
 
     std::vector<std::string> choice_lines(
@@ -2413,6 +2542,28 @@ private:
             lines.front() = std::format("{}. {}", index + 1, lines.front());
         }
         return lines;
+    }
+
+    std::size_t text_wrap_columns() const
+    {
+        if (font_.authentic()) {
+            return 60;
+        }
+        return static_cast<std::size_t>(std::clamp(
+            60 * 24 / std::max(config_.font_size, 1), 30, 80));
+    }
+
+    float text_line_height() const
+    {
+        if (font_.authentic()) {
+            return 31.0f;
+        }
+        return static_cast<float>(std::max(31, config_.font_size + 7));
+    }
+
+    std::vector<std::string> display_lines(std::string_view source) const
+    {
+        return ::display_lines(source, text_wrap_columns());
     }
 
     float message_text_x() const
@@ -4768,7 +4919,10 @@ private:
         if (metadata) {
             auto excerpt = message_.visible();
             std::replace(excerpt.begin(), excerpt.end(), '\n', ' ');
-            metadata << std::time(nullptr) << '\n' << excerpt.substr(0, 18) << '\n';
+            metadata << std::time(nullptr) << '\n'
+                     << runtime_.flag(0) << ' ' << runtime_.flag(1) << ' '
+                     << runtime_.flag(2) << '\n'
+                     << excerpt.substr(0, 18) << '\n';
         }
     }
 
@@ -4784,6 +4938,15 @@ private:
             long long timestamp = 0;
             metadata >> timestamp;
             metadata.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            auto after_timestamp = metadata.tellg();
+            if (metadata >> result.game_month >> result.game_day
+                         >> result.game_time) {
+                metadata.ignore(
+                    std::numeric_limits<std::streamsize>::max(), '\n');
+            } else {
+                metadata.clear();
+                metadata.seekg(after_timestamp);
+            }
             std::getline(metadata, result.message);
             result.timestamp = static_cast<std::time_t>(timestamp);
         }
@@ -5025,6 +5188,16 @@ private:
             write_u32(out, static_cast<std::uint32_t>(entry.text.size()));
             out.write(entry.text.data(),
                       static_cast<std::streamsize>(entry.text.size()));
+            write_u32(out, static_cast<std::uint32_t>(entry.voices.size()));
+            for (const auto& voice : entry.voices) {
+                write_u32(out, static_cast<std::uint32_t>(voice.start));
+                write_u32(out, static_cast<std::uint32_t>(voice.end));
+                write_i32(out, voice.scenario);
+                write_i32(out, voice.voice);
+                write_i32(out, voice.character);
+                write_i32(out, voice.volume);
+                write_i32(out, voice.alternate ? 1 : 0);
+            }
         }
         write_i32(out, backlog_depth_);
         write_i32(out, ui_mode_ == UiMode::backlog ? 1 : 0);
@@ -5059,7 +5232,8 @@ private:
     bool load_body(std::istream& in)
     {
         const auto version = read_u32(in);
-        if (version != save_version_) {
+        if (version < oldest_supported_save_version_
+            || version > save_version_) {
             return false;
         }
 
@@ -5311,7 +5485,23 @@ private:
                 in.read(history_text.data(),
                         static_cast<std::streamsize>(size));
             }
-            backlog_.push_back({std::move(history_text)});
+            std::vector<BacklogVoice> voices;
+            if (version >= first_backlog_voice_save_version_) {
+                const auto voice_count = read_u32(in);
+                voices.reserve(voice_count);
+                for (std::uint32_t v = 0; v < voice_count; ++v) {
+                    voices.push_back(BacklogVoice{
+                        read_u32(in),
+                        read_u32(in),
+                        read_i32(in),
+                        read_i32(in),
+                        read_i32(in),
+                        read_i32(in),
+                        read_i32(in) != 0,
+                    });
+                }
+            }
+            backlog_.push_back({std::move(history_text), std::move(voices)});
         }
         backlog_depth_ = std::clamp(
             read_i32(in), 0, static_cast<int>(backlog_.size()));
@@ -6013,6 +6203,7 @@ private:
         }
         save_return_mode_ =
             ui_mode_ == UiMode::title ? UiMode::title : UiMode::game;
+        begin_transition(1, 12, 128, false);
         ui_mode_ = mode;
         save_confirm_slot_ = -1;
         save_hover_ = -1;
@@ -7358,8 +7549,9 @@ private:
 
             const int slot = save_page_ * 10 + i;
             const auto slot_text = std::format("{:03d}", slot + 1);
-            font_.draw(renderer_, x + 102.0f, y + 6.0f, slot_text, 0, 0, 0);
-            font_.draw(
+            font_.draw_original(
+                renderer_, x + 102.0f, y + 6.0f, slot_text, 0, 0, 0);
+            font_.draw_original(
                 renderer_, x + 100.0f, y + 6.0f, slot_text, 245, 220, 190);
             if (!visible_saves_[i].exists) {
                 continue;
@@ -7371,12 +7563,19 @@ private:
                 "{:04d}/{:02d}/{:02d}  {:02d}:{:02d}",
                 local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
                 local.tm_hour, local.tm_min);
-            font_.draw(
+            const auto game_date = visible_saves_[i].game_month == 0
+                ? std::string("?/?")
+                : std::format(
+                    "{}/{}", visible_saves_[i].game_month,
+                    visible_saves_[i].game_day);
+            font_.draw_original(
+                renderer_, x + 154.0f, y + 10.0f, game_date, 255, 245, 225);
+            font_.draw_original(
                 renderer_, x + 101.0f, y + 45.0f, date, 70, 25, 34);
-            font_.draw(
+            font_.draw_original(
                 renderer_, x + 100.0f, y + 44.0f, date, 210, 110, 120);
-            font_.draw(
-                renderer_, x + 134.0f, y + 9.0f,
+            font_.draw_original(
+                renderer_, x + 224.0f, y + 9.0f,
                 visible_saves_[i].message.substr(0, 18), 255, 245, 225);
             if (slot == newest_save_slot_ && ui_save_new_) {
                 const SDL_FRect badge{x + 302.0f, y + 37.0f, 56.0f, 29.0f};
@@ -7385,7 +7584,7 @@ private:
             }
         }
 
-        font_.draw(
+        font_.draw_original(
             renderer_, 366.0f, 80.0f,
             std::format("{:02d}/10", save_page_ + 1), 255, 245, 225);
         if (ui_save_controls_) {
@@ -7429,11 +7628,20 @@ private:
                 }
                 const auto slot_text =
                     std::format("{:03d}", save_confirm_slot_ + 1);
-                font_.draw(
+                font_.draw_original(
                     renderer_, x + 102.0f, y + 4.0f,
                     slot_text, 245, 220, 190);
-                font_.draw(
-                    renderer_, x + 134.0f, y + 4.0f,
+                const auto game_date =
+                    visible_saves_[selected].game_month == 0
+                    ? std::string("?/?")
+                    : std::format(
+                        "{}/{}", visible_saves_[selected].game_month,
+                        visible_saves_[selected].game_day);
+                font_.draw_original(
+                    renderer_, x + 154.0f, y + 4.0f,
+                    game_date, 255, 245, 225);
+                font_.draw_original(
+                    renderer_, x + 224.0f, y + 4.0f,
                     visible_saves_[selected].message.substr(0, 18),
                     255, 245, 225);
 
@@ -7444,7 +7652,7 @@ private:
                     "{:04d}/{:02d}/{:02d}  {:02d}:{:02d}",
                     local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
                     local.tm_hour, local.tm_min);
-                font_.draw(
+                font_.draw_original(
                     renderer_, x + 100.0f, y + 36.0f,
                     date, 210, 110, 120);
             }
@@ -7466,8 +7674,10 @@ private:
         }
 
         if (!load_error_.empty()) {
-            font_.draw(renderer_, 21.0f, 571.0f, load_error_, 0, 0, 0);
-            font_.draw(renderer_, 20.0f, 570.0f, load_error_, 255, 80, 80);
+            font_.draw_original(
+                renderer_, 21.0f, 571.0f, load_error_, 0, 0, 0);
+            font_.draw_original(
+                renderer_, 20.0f, 570.0f, load_error_, 255, 80, 80);
         }
     }
 
@@ -7777,7 +7987,7 @@ private:
                 font_.draw(renderer_, x + 2.0f, y + 2.0f, line, 0, 0, 0);
             }
             font_.draw(renderer_, x, y, line, 255, 144, 32);
-            y += 31.0f;
+            y += text_line_height();
             if (y > 535.0f) {
                 break;
             }
@@ -7789,7 +7999,7 @@ private:
             for (const auto& rect :
                  backlog_voice_rects(*entry, backlog_voice_hover_)) {
                 const auto line = static_cast<std::size_t>(
-                    (rect.y - message_text_y()) / 31.0f);
+                    (rect.y - message_text_y()) / text_line_height());
                 if (line >= lines.size()) {
                     continue;
                 }
@@ -7849,10 +8059,11 @@ private:
                     message_text_x() + font_.text_width(prefix);
                 const float right =
                     message_text_x() + font_.text_width(voiced);
-                result.push_back({left, y, right - left, 31.0f});
+                result.push_back(
+                    {left, y, right - left, text_line_height()});
             }
             source_cursor = line_end;
-            y += 31.0f;
+            y += text_line_height();
         }
         return result;
     }
@@ -8178,7 +8389,7 @@ private:
         const float x = message_text_x() + width + 4.0f;
         const float y = message_text_y()
             + (std::min(lines.size(), static_cast<std::size_t>(15)) - 1)
-            * 31.0f - 2.0f;
+            * text_line_height() - 2.0f;
 
         // Time-based 30fps animation matching original GlobalCount/2%30 (1s cycle)
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -8717,7 +8928,7 @@ private:
                     glyph_offset += glyph_bytes;
                 }
                 source_cursor = line_start + line.size();
-                y += 31.0f;
+                y += text_line_height();
                 if (y > 535.0f) {
                     break;
                 }
@@ -8739,7 +8950,7 @@ private:
                         highlighted ? 255 : 128,
                         highlighted ? 255 : 128,
                         highlighted ? 255 : 128);
-                    y += 31.0f;
+                    y += text_line_height();
                 }
             }
         }
@@ -8779,6 +8990,7 @@ private:
 int main(int argc, char** argv)
 {
     try {
+        SdlSubsystem sdl_subsystem;
 #ifdef __ANDROID__
         std::filesystem::path data =
             std::filesystem::path(SDL_GetAndroidInternalStoragePath()) /
@@ -8840,21 +9052,16 @@ int main(int argc, char** argv)
         SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
 #endif
 
+        auto discovered_data = discover_game_data_path(data, data_set);
+        if (!discovered_data) {
+            SDL_LogError(
+                SDL_LOG_CATEGORY_APPLICATION,
+                "Game data directory not found or invalid: %s",
+                data.string().c_str());
+            return 1;
+        }
+        data = *discovered_data;
         SDL_Log("Game data path: %s", data.string().c_str());
-        if (!std::filesystem::is_directory(data)) {
-            SDL_LogError(
-                SDL_LOG_CATEGORY_APPLICATION,
-                "Game data directory does not exist: %s",
-                data.string().c_str());
-            return 1;
-        }
-        if (!std::filesystem::exists(data / "TOHEART2.EXE")) {
-            SDL_LogError(
-                SDL_LOG_CATEGORY_APPLICATION,
-                "TOHEART2.EXE not found in game data directory: %s",
-                data.string().c_str());
-            return 1;
-        }
         SDL_Log("Game files found, starting engine");
 
         return Game(data, scenario, soak_directory, soak_runs).run();

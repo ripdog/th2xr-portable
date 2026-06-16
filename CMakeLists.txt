@@ -233,6 +233,7 @@ if(ANDROID)
         src/anime4k.cpp
         src/font.cpp
         src/game.cpp
+        src/icon.cpp
         src/image.cpp
         src/imgui_layer.cpp
         src/message.cpp
@@ -246,6 +247,7 @@ else()
         src/anime4k.cpp
         src/font.cpp
         src/game.cpp
+        src/icon.cpp
         src/image.cpp
         src/imgui_layer.cpp
         src/message.cpp
@@ -362,6 +364,16 @@ if(BUILD_TESTING)
     )
     target_link_libraries(th2-config-test PRIVATE th2_config)
     add_test(NAME config-roundtrip COMMAND th2-config-test)
+
+    add_executable(th2-icon-test
+        src/icon.cpp
+        src/icon_test.cpp
+    )
+    target_link_libraries(th2-icon-test PRIVATE SDL3::SDL3)
+    add_test(
+        NAME executable-icon
+        COMMAND th2-icon-test
+            "${CMAKE_CURRENT_SOURCE_DIR}/legacy/ToHeart2/ScriptEngine/ToHeart2.exe")
 
     add_executable(th2-player-name-test
         src/player_name_test.cpp
