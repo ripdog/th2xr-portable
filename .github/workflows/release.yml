@@ -228,10 +228,10 @@ jobs:
           mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" \
              "$ANDROID_SDK_ROOT/cmdline-tools/latest"
           SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1
+          yes 2>/dev/null | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
           "$SDKMANAGER" --install \
-            "platforms;android-37" \
-            "build-tools;35.0.0" \
+            "platforms;android-37.0" \
+            "build-tools;37.0.0" \
             "ndk;29.0.14206865" \
             "cmake;3.22.1" \
             "platform-tools"
@@ -264,6 +264,7 @@ jobs:
         if: steps.cache-sdl3-ttf-aar.outputs.cache-hit != 'true'
         run: |
           export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
+          export PATH="$ANDROID_SDK_ROOT/cmake/3.22.1/bin:$PATH"
           curl -fsSL -o /tmp/sdl3-ttf-aar.zip \
             https://github.com/libsdl-org/SDL_ttf/releases/download/release-3.2.2/SDL3_ttf-devel-3.2.2-android.zip
           unzip -jo /tmp/sdl3-ttf-aar.zip '*.aar' -d android/app/libs/
