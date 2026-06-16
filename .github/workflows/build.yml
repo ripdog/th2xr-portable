@@ -204,3 +204,116 @@ jobs:
         with:
           name: toheart2-windows-x64.zip
           path: toheart2-windows-x64.zip
+
+  android:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install system tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends glslang-tools
+
+      - name: Setup Android SDK
+        run: |
+          ANDROID_SDK_ROOT="$HOME/android-sdk"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+
+          # Download command-line tools
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          curl -fsSL -o /tmp/cmdline-tools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
+          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" \
+             "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+
+          # Accept licenses and install packages
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1
+          "$SDKMANAGER" --install \
+            "platforms;android-37" \
+            "build-tools;35.0.0" \
+            "ndk;29.0.14206865" \
+            "cmake;3.22.1" \
+            "platform-tools"
+
+      - name: Cache SDL3 AAR
+        id: cache-sdl3-aar
+        uses: actions/cache@v4
+        with:
+          path: android/app/libs/SDL3-3.4.10.aar
+          key: sdl3-aar-3.4.10
+
+      - name: Download SDL3 AAR
+        if: steps.cache-sdl3-aar.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p android/app/libs
+          curl -fsSL -o /tmp/sdl3-android.zip \
+            https://github.com/libsdl-org/SDL/releases/download/release-3.4.10/SDL3-devel-3.4.10-android.zip
+          unzip -jo /tmp/sdl3-android.zip '*.aar' -d android/app/libs/
+          test -f android/app/libs/SDL3-3.4.10.aar || \
+            (echo "ERROR: SDL3 AAR not found in archive" && unzip -l /tmp/sdl3-android.zip && exit 1)
+
+      - name: Cache SDL3_ttf AAR (16KB-aligned)
+        id: cache-sdl3-ttf-aar
+        uses: actions/cache@v4
+        with:
+          path: android/app/libs/SDL3_ttf-3.2.2.aar
+          key: sdl3-ttf-aar-3.2.2-16kb-v2
+
+      - name: Build SDL3_ttf from source (16KB-aligned)
+        if: steps.cache-sdl3-ttf-aar.outputs.cache-hit != 'true'
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
+          # The official 3.2.2 AAR is only 4KB-aligned; download it as a
+          # template, then build SDL3_ttf from source and repack with the
+          # 16KB-aligned .so.
+          curl -fsSL -o /tmp/sdl3-ttf-aar.zip \
+            https://github.com/libsdl-org/SDL_ttf/releases/download/release-3.2.2/SDL3_ttf-devel-3.2.2-android.zip
+          unzip -jo /tmp/sdl3-ttf-aar.zip '*.aar' -d android/app/libs/
+          bash third_party/build-sdl3-ttf-aar.sh
+
+      - name: Cache FFmpeg
+        id: cache-ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: third_party/ffmpeg-android
+          key: ffmpeg-android-7.1.1-ndk29-arm64-v8a
+
+      - name: Build FFmpeg
+        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
+          bash third_party/build-ffmpeg-android.sh
+
+      - name: Cache libiconv
+        id: cache-libiconv
+        uses: actions/cache@v4
+        with:
+          path: third_party/libiconv-android
+          key: libiconv-android-1.19-ndk29-arm64-v8a
+
+      - name: Build libiconv
+        if: steps.cache-libiconv.outputs.cache-hit != 'true'
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
+          bash third_party/build-libiconv-android.sh
+
+      - name: Build APK
+        run: |
+          chmod +x android/gradlew
+          cd android && ./gradlew :app:assembleDebug
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: th2xr-portable-debug.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk

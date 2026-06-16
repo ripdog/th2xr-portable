@@ -312,6 +312,10 @@ target_link_libraries(th2-anime4k-test PRIVATE SDL3::SDL3)
 if(ANDROID)
     target_link_libraries(toheart2 PRIVATE
         SDL3::SDL3 SDL3_ttf::SDL3_ttf th2_runtime th2_soak)
+    # 16 KB page alignment required by Android 15+ (API 35+).
+    target_link_options(toheart2 PRIVATE
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,common-page-size=16384")
 else()
     target_link_libraries(toheart2 PRIVATE
         SDL3::SDL3 PkgConfig::SDL3_TTF PkgConfig::FONTCONFIG th2_runtime th2_soak)

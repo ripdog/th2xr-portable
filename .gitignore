@@ -22,4 +22,6 @@ ffmpeg-*.7z
 /wineprefix
 
 # Android build output
-/third_party/
+/third_party/*
+!/third_party/
+!/third_party/build*.sh
