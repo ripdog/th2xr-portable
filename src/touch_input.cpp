@@ -107,6 +107,20 @@ void TouchInput::remove_finger(int index)
     }
 
     evaluate_single_swipe(finger);
+
+    // If it wasn't a swipe, treat a short, still lift as a tap.
+    if (pending_ == TouchAction::None) {
+        const auto now = std::chrono::steady_clock::now();
+        const float duration = elapsed_ms(finger.start_time, now);
+        const float movement =
+            distance(finger.start_x, finger.start_y, finger.x, finger.y);
+        if (movement < TapMaxMovement && duration < TapMaxDurationMs) {
+            pending_ = TouchAction::Tap;
+            tap_x_ = finger.x;
+            tap_y_ = finger.y;
+            active_gesture_ = false;
+        }
+    }
 }
 
 void TouchInput::maybe_emit_scroll(const Finger& finger)
@@ -209,11 +223,6 @@ TouchAction TouchInput::poll_action()
 bool TouchInput::active_gesture() const
 {
     return active_gesture_;
-}
-
-bool TouchInput::had_gesture() const
-{
-    return pending_ != TouchAction::None;
 }
 
 }  // namespace th2

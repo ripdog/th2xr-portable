@@ -225,8 +225,8 @@ std::optional<std::filesystem::path> discover_game_data_path(
 
 // Convert window-coordinate mouse events to the fixed 800x600 logical
 // coordinate system used by the core game, applying 4:3 letterboxing.
-void convert_event_to_logical_coordinates(
-    SDL_Event& event, int window_width, int window_height)
+std::pair<float, float> logical_coordinates(
+    float x, float y, int window_width, int window_height)
 {
     const float scale = std::min(
         window_width / 800.0f, window_height / 600.0f);
@@ -234,27 +234,40 @@ void convert_event_to_logical_coordinates(
     const float logical_height = 600.0f * scale;
     const float offset_x = (window_width - logical_width) / 2.0f;
     const float offset_y = (window_height - logical_height) / 2.0f;
+    return {(x - offset_x) / scale, (y - offset_y) / scale};
+}
 
-    auto convert = [&](float x, float y) {
-        return std::pair{(x - offset_x) / scale, (y - offset_y) / scale};
-    };
+void convert_event_to_logical_coordinates(
+    SDL_Event& event, int window_width, int window_height)
+{
+    const float scale = std::min(
+        window_width / 800.0f, window_height / 600.0f);
 
     switch (event.type) {
-    case SDL_EVENT_MOUSE_MOTION:
-        std::tie(event.motion.x, event.motion.y) =
-            convert(event.motion.x, event.motion.y);
+    case SDL_EVENT_MOUSE_MOTION: {
+        const auto [x, y] = logical_coordinates(
+            event.motion.x, event.motion.y, window_width, window_height);
+        event.motion.x = x;
+        event.motion.y = y;
         event.motion.xrel /= scale;
         event.motion.yrel /= scale;
         break;
+    }
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
-    case SDL_EVENT_MOUSE_BUTTON_UP:
-        std::tie(event.button.x, event.button.y) =
-            convert(event.button.x, event.button.y);
+    case SDL_EVENT_MOUSE_BUTTON_UP: {
+        const auto [x, y] = logical_coordinates(
+            event.button.x, event.button.y, window_width, window_height);
+        event.button.x = x;
+        event.button.y = y;
         break;
-    case SDL_EVENT_MOUSE_WHEEL:
-        std::tie(event.wheel.mouse_x, event.wheel.mouse_y) =
-            convert(event.wheel.mouse_x, event.wheel.mouse_y);
+    }
+    case SDL_EVENT_MOUSE_WHEEL: {
+        const auto [x, y] = logical_coordinates(
+            event.wheel.mouse_x, event.wheel.mouse_y, window_width, window_height);
+        event.wheel.mouse_x = x;
+        event.wheel.mouse_y = y;
         break;
+    }
     default:
         break;
     }
@@ -645,25 +658,6 @@ public:
                 touch_input_.process_event(event);
                 convert_event_to_logical_coordinates(
                     event, window_width, window_height);
-
-                // Ignore synthetic mouse events generated from a touch gesture
-                // (swipe/scroll/two-finger tap) so they don't also advance text
-                // or close menus.
-                if (touch_input_.had_gesture()
-                    && (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
-                        || event.type == SDL_EVENT_MOUSE_BUTTON_UP
-                        || event.type == SDL_EVENT_MOUSE_MOTION
-                        || event.type == SDL_EVENT_MOUSE_WHEEL)) {
-                    const SDL_MouseID mouse_id =
-                        event.type == SDL_EVENT_MOUSE_MOTION
-                            ? event.motion.which
-                        : event.type == SDL_EVENT_MOUSE_WHEEL
-                            ? event.wheel.which
-                            : event.button.which;
-                    if (mouse_id == SDL_TOUCH_MOUSEID) {
-                        continue;
-                    }
-                }
                 if (config_.show_script_position
                     && imgui_->wants_mouse()
                     && (event.type == SDL_EVENT_MOUSE_MOTION
@@ -6151,6 +6145,32 @@ private:
                 close_config();
             }
             break;
+        case Action::Tap: {
+            // Re-inject the tap as a left mouse-button-up event so the normal
+            // UI handlers run.  Coordinates are normalized, so convert to
+            // window pixels first; the event loop will map them to logical
+            // 800x600 coordinates on the next frame.
+            int window_width = 0;
+            int window_height = 0;
+            SDL_GetWindowSize(window_, &window_width, &window_height);
+            const auto [logical_x, logical_y] = logical_coordinates(
+                touch_input_.tap_x() * window_width,
+                touch_input_.tap_y() * window_height,
+                window_width, window_height);
+            // Sidebar buttons need to work on touch too, but we must not
+            // double-handle them for desktop mice (they fire on mouse-down).
+            if (handle_sidebar_click(logical_x, logical_y)) {
+                break;
+            }
+            SDL_Event synthetic{};
+            synthetic.type = SDL_EVENT_MOUSE_BUTTON_UP;
+            synthetic.button.button = SDL_BUTTON_LEFT;
+            synthetic.button.clicks = 1;
+            synthetic.button.x = touch_input_.tap_x() * window_width;
+            synthetic.button.y = touch_input_.tap_y() * window_height;
+            SDL_PushEvent(&synthetic);
+            break;
+        }
         default:
             break;
         }
@@ -9050,6 +9070,10 @@ int main(int argc, char** argv)
         // Keep the Android back button as an SDL key event instead of letting
         // the OS finish the activity.
         SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+        // We handle touch gestures ourselves; don't let SDL synthesize mouse
+        // events from finger input, which otherwise causes a "tap" on release
+        // to leave the backlog/Advance text.
+        SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 #endif
 
         auto discovered_data = discover_game_data_path(data, data_set);

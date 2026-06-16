@@ -21,6 +21,9 @@ enum class TouchAction {
     // Android back button: toggle the system menu in-game, or close the
     // save/load menus.
     MenuToggle,
+    // Single-finger tap.  Coordinates are stored separately and should be
+    // converted to a left mouse-button-up event so the normal UI handlers run.
+    Tap,
 };
 
 // Interprets touch and Android back-button events as high-level game actions.
@@ -39,14 +42,13 @@ public:
     // Returns the most recently recognized action and clears it.
     TouchAction poll_action();
 
-    // True while a gesture is in progress and the game should ignore
-    // synthetic mouse events from the same touch.
-    bool active_gesture() const;
+    // Normalized coordinates (0..1) of the last recognized tap.  Only valid
+    // when poll_action() returns TouchAction::Tap.
+    float tap_x() const { return tap_x_; }
+    float tap_y() const { return tap_y_; }
 
-    // True if a gesture action (swipe/scroll/two-finger tap/back button) is
-    // waiting to be polled.  Used to suppress SDL's synthetic touch mouse
-    // events for the same interaction.
-    bool had_gesture() const;
+    // True while a gesture is in progress.
+    bool active_gesture() const;
 
 private:
     struct Finger {
@@ -72,6 +74,8 @@ private:
     bool active_gesture_ = false;
     bool emitted_scroll_ = false;
     float scroll_anchor_y_ = -1.0f;
+    float tap_x_ = 0.0f;
+    float tap_y_ = 0.0f;
 };
 
 }  // namespace th2
