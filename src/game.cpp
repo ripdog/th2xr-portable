@@ -23,6 +23,10 @@
 #include <SDL3/SDL_video.h>
 #include <imgui.h>
 
+extern "C" {
+    #include <libavutil/log.h>
+}
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -9075,7 +9079,7 @@ int main(int argc, char** argv)
         // to leave the backlog/Advance text.
         SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 #endif
-
+        av_log_set_level(AV_LOG_ERROR);   // suppress warnings, keep errors
         auto discovered_data = discover_game_data_path(data, data_set);
         if (!discovered_data) {
             SDL_LogError(
