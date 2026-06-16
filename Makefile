@@ -24,6 +24,7 @@ GAME_DATA_DIR ?= game-data
 # Release build with tests enabled.
 desktop:
 	cmake -S . -B $(DESKTOP_BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+	ln -sf $(DESKTOP_BUILD_DIR)/compile_commands.json compile_commands.json
 	cmake --build $(DESKTOP_BUILD_DIR) --target $(DESKTOP_TARGET) -- -j$$(nproc)
 
 # Build and run the desktop executable.
