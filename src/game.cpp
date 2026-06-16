@@ -4,6 +4,7 @@
 #include "character.hpp"
 #include "config.hpp"
 #include "font.hpp"
+#include "icon.hpp"
 #include "image.hpp"
 #include "imgui_layer.hpp"
 #include "message.hpp"
@@ -361,6 +362,9 @@ public:
         SDL_DestroyProperties(renderer_properties);
         if (!window_ || !renderer_) {
             throw std::runtime_error(SDL_GetError());
+        }
+        if (auto icon = th2::load_executable_icon(data / "TOHEART2.EXE")) {
+            SDL_SetWindowIcon(window_, icon.get());
         }
         SDL_Log("SDL window and renderer created");
 #ifndef __ANDROID__
