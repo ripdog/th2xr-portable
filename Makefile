@@ -2,12 +2,13 @@
 #
 # Usage:
 #   make desktop          # configure and build the desktop executable
+#   make run              # build and run the desktop executable
 #   make android          # build the Android debug APK
 #   make install-android  # install the debug APK on a connected device
 #   make test             # run the desktop test suite
 #   make clean            # remove all build artifacts
 
-.PHONY: all desktop android install-android test clean clean-desktop clean-android logcat
+.PHONY: all desktop run android install-android test clean clean-desktop clean-android logcat
 
 # Default target builds both desktop and Android.
 all: desktop android
@@ -18,11 +19,16 @@ all: desktop android
 
 DESKTOP_BUILD_DIR := build
 DESKTOP_TARGET := toheart2
+GAME_DATA_DIR ?= game-data
 
 # Release build with tests enabled.
 desktop:
 	cmake -S . -B $(DESKTOP_BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 	cmake --build $(DESKTOP_BUILD_DIR) --target $(DESKTOP_TARGET) -- -j$$(nproc)
+
+# Build and run the desktop executable.
+run: desktop
+	./$(DESKTOP_BUILD_DIR)/$(DESKTOP_TARGET) $(GAME_DATA_DIR)
 
 # Run the desktop test suite.
 test: desktop
