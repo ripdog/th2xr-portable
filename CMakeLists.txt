@@ -236,6 +236,7 @@ if(ANDROID)
         src/image.cpp
         src/imgui_layer.cpp
         src/message.cpp
+        src/touch_input.cpp
         src/upscaler.cpp
         src/video.cpp
     )
@@ -248,6 +249,7 @@ else()
         src/image.cpp
         src/imgui_layer.cpp
         src/message.cpp
+        src/touch_input.cpp
         src/upscaler.cpp
         src/video.cpp
     )

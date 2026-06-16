@@ -11,6 +11,7 @@
 #include "script_runtime.hpp"
 #include "soak.hpp"
 #include "soak_game.hpp"
+#include "touch_input.hpp"
 #include "video.hpp"
 
 #include <SDL3/SDL.h>
@@ -516,8 +517,28 @@ public:
                     continue;
                 }
                 imgui_->process_event(event);
+                touch_input_.process_event(event);
                 convert_event_to_logical_coordinates(
                     event, window_width, window_height);
+
+                // Ignore synthetic mouse events generated from a touch gesture
+                // (swipe/scroll/two-finger tap) so they don't also advance text
+                // or close menus.
+                if (touch_input_.had_gesture()
+                    && (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                        || event.type == SDL_EVENT_MOUSE_BUTTON_UP
+                        || event.type == SDL_EVENT_MOUSE_MOTION
+                        || event.type == SDL_EVENT_MOUSE_WHEEL)) {
+                    const SDL_MouseID mouse_id =
+                        event.type == SDL_EVENT_MOUSE_MOTION
+                            ? event.motion.which
+                        : event.type == SDL_EVENT_MOUSE_WHEEL
+                            ? event.wheel.which
+                            : event.button.which;
+                    if (mouse_id == SDL_TOUCH_MOUSEID) {
+                        continue;
+                    }
+                }
                 if (config_.show_script_position
                     && imgui_->wants_mouse()
                     && (event.type == SDL_EVENT_MOUSE_MOTION
@@ -681,7 +702,11 @@ public:
                     } else if (event.button.button == SDL_BUTTON_LEFT) {
                         if (handle_sidebar_click(event.button.x, event.button.y)) {
                             continue;
-                        } else if (choosing_) {
+                        }
+                    }
+                } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+                    if (event.button.button == SDL_BUTTON_LEFT) {
+                        if (choosing_) {
                             const float mouse_y = event.button.y;
                             float y = choice_y_start();
                             for (int i = 0;
@@ -693,12 +718,13 @@ public:
                                     manual_advance();
                                     break;
                                 }
-                                y += height;
+                                y += choice_height(choices_[i]);
                             }
                         } else {
                             manual_advance();
                         }
                     }
+                    backlog_handle_dragging_ = false;
                 } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
                     if (event.wheel.y > 0
                         && config_.wheel_opens_backlog) {
@@ -731,6 +757,8 @@ public:
                     backlog_handle_dragging_ = false;
                 }
             }
+            handle_touch_actions();
+
             if (!app_active_) {
                 // Pause the loop while the app is in the background so we
                 // don't keep rendering to a surface that may be destroyed.
@@ -1066,6 +1094,7 @@ private:
 
     std::unique_ptr<th2::ImGuiLayer> imgui_;
     std::unique_ptr<th2::Upscaler> upscaler_;
+    th2::TouchInput touch_input_;
     th2::GameFont font_;
     bool anime4k_available_ = false;
     bool last_anime4k_wanted_ = false;
@@ -5893,6 +5922,50 @@ private:
         ui_mode_ = UiMode::game;
     }
 
+    void handle_touch_actions()
+    {
+        using Action = th2::TouchAction;
+        const auto action = touch_input_.poll_action();
+        if (action == Action::None) {
+            return;
+        }
+
+        switch (action) {
+        case Action::BacklogOlder:
+            if (ui_mode_ == UiMode::backlog) {
+                backlog_older();
+            } else if (ui_mode_ == UiMode::game) {
+                open_backlog();
+            }
+            break;
+        case Action::BacklogNewer:
+            if (ui_mode_ == UiMode::backlog) {
+                backlog_newer();
+            }
+            break;
+        case Action::BacklogOrHideTextbox:
+            if (ui_mode_ == UiMode::backlog) {
+                close_backlog();
+            } else if (ui_mode_ == UiMode::game) {
+                message_visible_ = false;
+            }
+            break;
+        case Action::MenuToggle:
+            if (ui_mode_ == UiMode::save || ui_mode_ == UiMode::load) {
+                close_save_load();
+            } else if (ui_mode_ == UiMode::system_menu) {
+                close_system_menu();
+            } else if (ui_mode_ == UiMode::game || ui_mode_ == UiMode::backlog) {
+                open_system_menu();
+            } else if (config_open_) {
+                close_config();
+            }
+            break;
+        default:
+            break;
+        }
+    }
+
     bool backlog_older()
     {
         if (backlog_depth_ >= static_cast<int>(backlog_.size())) {
@@ -8027,26 +8100,25 @@ private:
             if (handle_sidebar_click(event.button.x, event.button.y)) {
                 return;
             }
-            if (event.button.button == SDL_BUTTON_LEFT
-                && backlog_voice_hover_ >= 0
-                && backlog_depth_ > 0
-                && backlog_depth_
-                    <= static_cast<int>(backlog_.size())) {
-                const auto& entry = backlog_[
-                    backlog_.size()
-                    - static_cast<std::size_t>(backlog_depth_)];
-                if (backlog_voice_hover_
-                    < static_cast<int>(entry.voices.size())) {
-                    replay_backlog_voice(
-                        entry.voices[backlog_voice_hover_]);
-                    return;
-                }
-            }
-            close_backlog();
         } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
             if (event.button.button == SDL_BUTTON_LEFT) {
-                backlog_handle_dragging_ = false;
+                if (backlog_voice_hover_ >= 0
+                    && backlog_depth_ > 0
+                    && backlog_depth_
+                        <= static_cast<int>(backlog_.size())) {
+                    const auto& entry = backlog_[
+                        backlog_.size()
+                        - static_cast<std::size_t>(backlog_depth_)];
+                    if (backlog_voice_hover_
+                        < static_cast<int>(entry.voices.size())) {
+                        replay_backlog_voice(
+                            entry.voices[backlog_voice_hover_]);
+                        return;
+                    }
+                }
+                close_backlog();
             }
+            backlog_handle_dragging_ = false;
         } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
             if (event.wheel.y > 0) {
                 backlog_older();
@@ -8763,6 +8835,9 @@ int main(int argc, char** argv)
         // main loop still checks app_active_, but this keeps SDL from
         // presenting frames to a surface that may be destroyed on sleep.
         SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "1");
+        // Keep the Android back button as an SDL key event instead of letting
+        // the OS finish the activity.
+        SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
 #endif
 
         SDL_Log("Game data path: %s", data.string().c_str());
