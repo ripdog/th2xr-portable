@@ -27,6 +27,10 @@ public:
         SDL_Renderer* renderer, float x, float y, std::string_view text,
         std::uint8_t red = 255, std::uint8_t green = 255,
         std::uint8_t blue = 255, std::uint8_t alpha = 255) const;
+    void draw_original(
+        SDL_Renderer* renderer, float x, float y, std::string_view text,
+        std::uint8_t red = 255, std::uint8_t green = 255,
+        std::uint8_t blue = 255, std::uint8_t alpha = 255) const;
     void draw_authentic_shadow(
         SDL_Renderer* renderer, float x, float y, std::string_view text,
         std::uint8_t alpha = 255) const;

@@ -2481,6 +2481,9 @@ private:
     struct SaveMetadata {
         bool exists = false;
         std::time_t timestamp = 0;
+        int game_month = 0;
+        int game_day = 0;
+        int game_time = 0;
         std::string message;
     };
     std::array<SaveMetadata, 10> visible_saves_{};
@@ -4887,7 +4890,10 @@ private:
         if (metadata) {
             auto excerpt = message_.visible();
             std::replace(excerpt.begin(), excerpt.end(), '\n', ' ');
-            metadata << std::time(nullptr) << '\n' << excerpt.substr(0, 18) << '\n';
+            metadata << std::time(nullptr) << '\n'
+                     << runtime_.flag(0) << ' ' << runtime_.flag(1) << ' '
+                     << runtime_.flag(2) << '\n'
+                     << excerpt.substr(0, 18) << '\n';
         }
     }
 
@@ -4903,6 +4909,15 @@ private:
             long long timestamp = 0;
             metadata >> timestamp;
             metadata.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            auto after_timestamp = metadata.tellg();
+            if (metadata >> result.game_month >> result.game_day
+                         >> result.game_time) {
+                metadata.ignore(
+                    std::numeric_limits<std::streamsize>::max(), '\n');
+            } else {
+                metadata.clear();
+                metadata.seekg(after_timestamp);
+            }
             std::getline(metadata, result.message);
             result.timestamp = static_cast<std::time_t>(timestamp);
         }
@@ -7461,8 +7476,9 @@ private:
 
             const int slot = save_page_ * 10 + i;
             const auto slot_text = std::format("{:03d}", slot + 1);
-            font_.draw(renderer_, x + 102.0f, y + 6.0f, slot_text, 0, 0, 0);
-            font_.draw(
+            font_.draw_original(
+                renderer_, x + 102.0f, y + 6.0f, slot_text, 0, 0, 0);
+            font_.draw_original(
                 renderer_, x + 100.0f, y + 6.0f, slot_text, 245, 220, 190);
             if (!visible_saves_[i].exists) {
                 continue;
@@ -7474,12 +7490,19 @@ private:
                 "{:04d}/{:02d}/{:02d}  {:02d}:{:02d}",
                 local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
                 local.tm_hour, local.tm_min);
-            font_.draw(
+            const auto game_date = visible_saves_[i].game_month == 0
+                ? std::string("?/?")
+                : std::format(
+                    "{}/{}", visible_saves_[i].game_month,
+                    visible_saves_[i].game_day);
+            font_.draw_original(
+                renderer_, x + 154.0f, y + 10.0f, game_date, 255, 245, 225);
+            font_.draw_original(
                 renderer_, x + 101.0f, y + 45.0f, date, 70, 25, 34);
-            font_.draw(
+            font_.draw_original(
                 renderer_, x + 100.0f, y + 44.0f, date, 210, 110, 120);
-            font_.draw(
-                renderer_, x + 134.0f, y + 9.0f,
+            font_.draw_original(
+                renderer_, x + 224.0f, y + 9.0f,
                 visible_saves_[i].message.substr(0, 18), 255, 245, 225);
             if (slot == newest_save_slot_ && ui_save_new_) {
                 const SDL_FRect badge{x + 302.0f, y + 37.0f, 56.0f, 29.0f};
@@ -7488,7 +7511,7 @@ private:
             }
         }
 
-        font_.draw(
+        font_.draw_original(
             renderer_, 366.0f, 80.0f,
             std::format("{:02d}/10", save_page_ + 1), 255, 245, 225);
         if (ui_save_controls_) {
@@ -7532,11 +7555,20 @@ private:
                 }
                 const auto slot_text =
                     std::format("{:03d}", save_confirm_slot_ + 1);
-                font_.draw(
+                font_.draw_original(
                     renderer_, x + 102.0f, y + 4.0f,
                     slot_text, 245, 220, 190);
-                font_.draw(
-                    renderer_, x + 134.0f, y + 4.0f,
+                const auto game_date =
+                    visible_saves_[selected].game_month == 0
+                    ? std::string("?/?")
+                    : std::format(
+                        "{}/{}", visible_saves_[selected].game_month,
+                        visible_saves_[selected].game_day);
+                font_.draw_original(
+                    renderer_, x + 154.0f, y + 4.0f,
+                    game_date, 255, 245, 225);
+                font_.draw_original(
+                    renderer_, x + 224.0f, y + 4.0f,
                     visible_saves_[selected].message.substr(0, 18),
                     255, 245, 225);
 
@@ -7547,7 +7579,7 @@ private:
                     "{:04d}/{:02d}/{:02d}  {:02d}:{:02d}",
                     local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
                     local.tm_hour, local.tm_min);
-                font_.draw(
+                font_.draw_original(
                     renderer_, x + 100.0f, y + 36.0f,
                     date, 210, 110, 120);
             }
@@ -7569,8 +7601,10 @@ private:
         }
 
         if (!load_error_.empty()) {
-            font_.draw(renderer_, 21.0f, 571.0f, load_error_, 0, 0, 0);
-            font_.draw(renderer_, 20.0f, 570.0f, load_error_, 255, 80, 80);
+            font_.draw_original(
+                renderer_, 21.0f, 571.0f, load_error_, 0, 0, 0);
+            font_.draw_original(
+                renderer_, 20.0f, 570.0f, load_error_, 255, 80, 80);
         }
     }
 

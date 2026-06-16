@@ -639,6 +639,14 @@ void GameFont::draw(
     }
 }
 
+void GameFont::draw_original(
+    SDL_Renderer* renderer, float x, float y, std::string_view text,
+    std::uint8_t red, std::uint8_t green, std::uint8_t blue,
+    std::uint8_t alpha) const
+{
+    draw_bitmap(renderer, x, y, text, red, green, blue, alpha);
+}
+
 void GameFont::draw_authentic_shadow(
     SDL_Renderer* renderer, float x, float y, std::string_view text,
     std::uint8_t alpha) const
