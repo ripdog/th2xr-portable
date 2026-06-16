@@ -36,6 +36,7 @@ public:
     void on_touch_up(float normalized_x, float normalized_y);
 
 private:
+    void apply_mobile_style(float scale);
 
     SDL_Window* window_;
     SDL_Renderer* renderer_;
@@ -45,6 +46,7 @@ private:
     std::string imgui_font_path_;
     float display_scale_ = 1.0f;
     float last_font_scale_ = 0.0f;
+    float last_style_scale_ = 0.0f;
 #ifdef __ANDROID__
     // ImGui's AddFontFromMemoryTTF needs the TTF data to stay alive until
     // the atlas is built; we free it when the atlas is rebuilt or destroyed.

@@ -6029,6 +6029,18 @@ private:
                 play_se(-1, 9104, false, 255);
             }
             ImGui::Separator();
+#ifdef __ANDROID__
+            if (ImGui::Button("Close", ImVec2(-FLT_MIN, 0.0f))) {
+                play_se(-1, 9104, false, 255);
+                open = false;
+            }
+            if (ui_mode_ != UiMode::title
+                && ImGui::Button("Return to Title", ImVec2(-FLT_MIN, 0.0f))) {
+                play_se(-1, 9104, false, 255);
+                confirm_return_title_ = true;
+                ImGui::OpenPopup("Return to Title?");
+            }
+#else
             if (ImGui::Button("Close", ImVec2(110.0f, 0.0f))) {
                 play_se(-1, 9104, false, 255);
                 open = false;
@@ -6042,11 +6054,25 @@ private:
                     ImGui::OpenPopup("Return to Title?");
                 }
             }
+#endif
             if (ImGui::BeginPopupModal(
                     "Return to Title?", nullptr,
                     ImGuiWindowFlags_AlwaysAutoResize)) {
                 ImGui::TextUnformatted(
                     "Unsaved progress will be lost.\nReturn to the title screen?");
+#ifdef __ANDROID__
+                if (ImGui::Button("Return", ImVec2(-FLT_MIN, 0.0f))) {
+                    play_se(-1, 9104, false, 255);
+                    return_to_title();
+                    ImGui::CloseCurrentPopup();
+                    open = false;
+                }
+                if (ImGui::Button("Cancel", ImVec2(-FLT_MIN, 0.0f))) {
+                    play_se(-1, 9107, false, 255);
+                    confirm_return_title_ = false;
+                    ImGui::CloseCurrentPopup();
+                }
+#else
                 if (ImGui::Button("Return", ImVec2(120.0f, 0.0f))) {
                     play_se(-1, 9104, false, 255);
                     return_to_title();
@@ -6059,6 +6085,7 @@ private:
                     confirm_return_title_ = false;
                     ImGui::CloseCurrentPopup();
                 }
+#endif
                 ImGui::EndPopup();
             }
 #ifdef __ANDROID__
@@ -6098,6 +6125,22 @@ private:
 #endif
         ImGui::TextUnformatted("Enter the protagonist's name.");
         ImGui::Separator();
+#ifdef __ANDROID__
+        const auto full_width_input = [&](
+            const char* label, char* buf, std::size_t size) {
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::InputText(label, buf, size);
+        };
+        full_width_input("Family name", name_family_.data(), name_family_.size());
+        full_width_input("Given name", name_given_.data(), name_given_.size());
+        full_width_input(
+            "Family reading", name_family_reading_.data(),
+            name_family_reading_.size());
+        full_width_input(
+            "Given reading", name_given_reading_.data(),
+            name_given_reading_.size());
+        full_width_input("Nickname", name_nickname_.data(), name_nickname_.size());
+#else
         ImGui::InputText(
             "Family name", name_family_.data(), name_family_.size());
         ImGui::InputText(
@@ -6110,11 +6153,43 @@ private:
             name_given_reading_.size());
         ImGui::InputText(
             "Nickname", name_nickname_.data(), name_nickname_.size());
+#endif
         if (!name_error_.empty()) {
             ImGui::TextColored(
                 ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s",
                 name_error_.c_str());
         }
+#ifdef __ANDROID__
+        if (ImGui::Button("Start Game", ImVec2(-FLT_MIN, 0.0f))) {
+            if (name_family_[0] == '\0' || name_given_[0] == '\0'
+                || name_family_reading_[0] == '\0'
+                || name_given_reading_[0] == '\0'
+                || name_nickname_[0] == '\0') {
+                name_error_ = "Every field must contain a name.";
+            } else {
+                config_.player_name = {
+                    name_family_.data(),
+                    name_given_.data(),
+                    name_family_reading_.data(),
+                    name_given_reading_.data(),
+                    name_nickname_.data(),
+                    name_nickname_.data(),
+                };
+                th2::save_config(config_path_, config_);
+                name_input_open_ = false;
+                start_new_game();
+            }
+        }
+        if (ImGui::Button("Reset Defaults", ImVec2(-FLT_MIN, 0.0f))) {
+            config_.player_name = default_player_name_;
+            open_name_input();
+        }
+        if (ImGui::Button("Cancel", ImVec2(-FLT_MIN, 0.0f))) {
+            name_input_open_ = false;
+            title_started_ = std::chrono::steady_clock::now()
+                - std::chrono::milliseconds(120 * 1000 / 60);
+        }
+#else
         if (ImGui::Button("Start Game", ImVec2(120.0f, 0.0f))) {
             if (name_family_[0] == '\0' || name_given_[0] == '\0'
                 || name_family_reading_[0] == '\0'
@@ -6146,6 +6221,7 @@ private:
             title_started_ = std::chrono::steady_clock::now()
                 - std::chrono::milliseconds(120 * 1000 / 60);
         }
+#endif
 #ifdef __ANDROID__
         imgui_->touch_drag_scroll();
         ImGui::EndChild();

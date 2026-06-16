@@ -7,6 +7,7 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
@@ -245,6 +246,47 @@ void ImGuiLayer::rebuild_font_atlas(float display_scale)
     }
     last_font_scale_ = display_scale;
 }
+
+void ImGuiLayer::apply_mobile_style(float scale)
+{
+#ifdef __ANDROID__
+    (void)scale;
+    auto& style = ImGui::GetStyle();
+
+    // Reset to a clean base style so repeated calls do not accumulate.
+    ImGui::StyleColorsDark();
+    style = ImGuiStyle();
+
+    constexpr float k = 1.5f;
+
+    // More breathing room and fatter hit targets without ballooning the UI.
+    style.WindowPadding     = ImVec2(style.WindowPadding.x * k,
+                                     style.WindowPadding.y * k);
+    style.FramePadding      = ImVec2(style.FramePadding.x * k,
+                                     style.FramePadding.y * k);
+    // Extra vertical gap between controls; this is what makes scrolling and
+    // tapping a long settings list feel less cramped.
+    style.ItemSpacing       = ImVec2(style.ItemSpacing.x * k,
+                                     style.ItemSpacing.y * 2.0f);
+    style.ItemInnerSpacing  = ImVec2(style.ItemInnerSpacing.x * k,
+                                     style.ItemInnerSpacing.y * k);
+    style.CellPadding       = ImVec2(style.CellPadding.x * k,
+                                     style.CellPadding.y * k);
+
+    style.ScrollbarSize     = style.ScrollbarSize * k;
+    style.GrabMinSize       = style.GrabMinSize * k;
+
+    // Padding outside a widget's visible rectangle that still accepts taps.
+    style.TouchExtraPadding = ImVec2(8.0f, 8.0f);
+
+    style.WindowRounding    = 8.0f;
+    style.FrameRounding     = 4.0f;
+    style.GrabRounding      = 4.0f;
+
+    last_style_scale_ = scale;
+#endif
+}
+
 void ImGuiLayer::new_frame(SDL_Window* window, float display_scale)
 {
     auto& io = ImGui::GetIO();
@@ -274,6 +316,25 @@ void ImGuiLayer::new_frame(SDL_Window* window, float display_scale)
     if (std::abs(display_scale_ - last_font_scale_) > 0.05f) {
         rebuild_font_atlas(display_scale_);
     }
+
+#ifdef __ANDROID__
+    if (std::abs(display_scale_ - last_style_scale_) > 0.05f) {
+        apply_mobile_style(display_scale_);
+        SDL_Log(
+            "ImGui mobile style applied: scale=%.2f "
+            "WindowPadding=%.1f,%.1f FramePadding=%.1f,%.1f "
+            "ItemSpacing=%.1f,%.1f TouchExtraPadding=%.1f,%.1f",
+            display_scale_,
+            ImGui::GetStyle().WindowPadding.x,
+            ImGui::GetStyle().WindowPadding.y,
+            ImGui::GetStyle().FramePadding.x,
+            ImGui::GetStyle().FramePadding.y,
+            ImGui::GetStyle().ItemSpacing.x,
+            ImGui::GetStyle().ItemSpacing.y,
+            ImGui::GetStyle().TouchExtraPadding.x,
+            ImGui::GetStyle().TouchExtraPadding.y);
+    }
+#endif
 
     const auto ticks = SDL_GetTicks();
     io.DeltaTime = last_frame_ticks_ == 0
