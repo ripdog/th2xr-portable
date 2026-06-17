@@ -31,6 +31,23 @@ android {
             }
         }
     }
+    signingConfigs {
+        debug {
+            def ciKeystore = rootProject.file('../keys/debug.keystore')
+            if (ciKeystore.exists()) {
+                storeFile ciKeystore
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
+        release {
+            storeFile rootProject.file('../keys/release.keystore')
+            storePassword 'th2xrportable'
+            keyAlias 'th2xr'
+            keyPassword 'th2xrportable'
+        }
+    }
     buildTypes {
         debug {
             if (isCi) {
@@ -41,16 +58,8 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-        }
-    }
-    signingConfigs {
-        debug {
-            def ciKeystore = rootProject.file('../keys/debug.keystore')
-            if (ciKeystore.exists()) {
-                storeFile ciKeystore
-                storePassword 'android'
-                keyAlias 'androiddebugkey'
-                keyPassword 'android'
+            if (rootProject.file('../keys/release.keystore').exists()) {
+                signingConfig signingConfigs.release
             }
         }
     }
