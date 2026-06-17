@@ -298,8 +298,14 @@ jobs:
 
       - name: Build APK
         run: |
+          mkdir -p keys
+          if [ -n "$DEBUG_KEYSTORE_B64" ]; then
+            echo "$DEBUG_KEYSTORE_B64" | base64 -d > keys/debug.keystore
+          fi
           chmod +x android/gradlew
-          cd android && ./gradlew :app:assembleDebug
+          cd android && ./gradlew :app:assembleDebug -Pci=true
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
 
       - name: Upload APK
         run: gh release upload ${{ github.ref_name }} android/app/build/outputs/apk/debug/app-debug.apk

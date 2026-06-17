@@ -4,6 +4,8 @@ plugins {
 
 def buildWithCMake = true
 
+def isCi = project.hasProperty('ci')
+
 android {
     namespace = "io.github.ripdog.th2xr_portable"
     compileSdk 37
@@ -30,9 +32,26 @@ android {
         }
     }
     buildTypes {
+        debug {
+            if (isCi) {
+                applicationIdSuffix ".debug"
+            }
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    signingConfigs {
+        debug {
+            def ciKeystore = rootProject.file('../keys/debug.keystore')
+            if (ciKeystore.exists()) {
+                storeFile ciKeystore
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
         }
     }
     androidComponents {

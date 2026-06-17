@@ -282,7 +282,7 @@ jobs:
 
       - name: Cache FFmpeg
         id: cache-ffmpeg
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: third_party/ffmpeg-android
           key: ffmpeg-android-7.1.1-ndk29-arm64-v8a
@@ -308,8 +308,14 @@ jobs:
 
       - name: Build APK
         run: |
+          mkdir -p keys
+          if [ -n "$DEBUG_KEYSTORE_B64" ]; then
+            echo "$DEBUG_KEYSTORE_B64" | base64 -d > keys/debug.keystore
+          fi
           chmod +x android/gradlew
-          cd android && ./gradlew :app:assembleDebug
+          cd android && ./gradlew :app:assembleDebug -Pci=true
+        env:
+          DEBUG_KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
 
       - uses: actions/upload-artifact@v7
         with:

@@ -2,8 +2,10 @@
 /game-data/
 /debug/
 /logs/
+/keys/
 /.agents/skills
 toheart2-config.ini
+CMakeUserPresets.json
 
 # Save files
 save_*.sav
