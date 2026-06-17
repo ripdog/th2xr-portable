@@ -26,7 +26,12 @@ struct GameConfig {
     bool auto_skip_read = false;
     bool skip_unread = false;
     bool wheel_opens_backlog = true;
-    int sidebar_mode = 0;
+    bool autosave_enabled = true;
+#ifdef __ANDROID__
+    int sidebar_mode = 3;  // Hidden by default — touch gestures replace it
+#else
+    int sidebar_mode = 0;  // Fade when away
+#endif
     bool fullscreen = false;
     bool anime4k = true;
     bool authentic_font = false;
