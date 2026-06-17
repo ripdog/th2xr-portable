@@ -2,7 +2,7 @@
 
 A portable, cross-platform reimplementation of the ToHeart2 XRATED visual novel engine.
 
-Runs on Linux, macOS, and Windows using SDL3.
+Runs on Linux, macOS, Windows, and Android using SDL3.
 
 ## How the project came about
 
@@ -21,50 +21,13 @@ platform supported by SDL3.
 
 - CMake 3.20+
 - C++20 compiler (GCC 13+, Clang 17+, MSVC 19.40+)
-- SDL3
-- SDL3_ttf
+- SDL3, SDL3_ttf, fontconfig
 - FFmpeg (libavformat, libavcodec, libavutil, libswscale, libswresample)
-- fontconfig
-- glslangValidator (for shader compilation)
+- glslangValidator
 
-### Installing dependencies
-
-**Ubuntu 24.04+** — SDL3 is not yet packaged, so it is built from source:
-```bash
-# System packages
-sudo apt install cmake g++ libfontconfig-dev \
-  libavformat-dev libavcodec-dev libavutil-dev \
-  libswscale-dev libswresample-dev glslang-tools \
-  libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
-  libxfixes-dev libxi-dev libxss-dev libxtst-dev \
-  libxkbcommon-dev libdrm-dev libgbm-dev \
-  libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev
-
-# Build SDL3
-git clone https://github.com/libsdl-org/SDL.git --depth 1 --branch release-3.4.10
-cmake -S SDL -B SDL/build -DCMAKE_BUILD_TYPE=Release
-cmake --build SDL/build -- -j$(nproc)
-sudo cmake --install SDL/build
-
-# Build SDL3_ttf
-git clone https://github.com/libsdl-org/SDL_ttf.git --depth 1 --branch release-3.2.2
-cmake -S SDL_ttf -B SDL_ttf/build -DCMAKE_BUILD_TYPE=Release
-cmake --build SDL_ttf/build -- -j$(nproc)
-sudo cmake --install SDL_ttf/build
-```
-
-**macOS**:
-```bash
-brew install cmake sdl3 sdl3_ttf fontconfig ffmpeg glslang
-```
-
-**Windows** — use vcpkg:
-```powershell
-git clone https://github.com/microsoft/vcpkg.git
-.\vcpkg\bootstrap-vcpkg.bat
-.\vcpkg\vcpkg install --triplet x64-windows `
-  pkgconf sdl3 sdl3-ttf fontconfig ffmpeg glslang
-```
+See [HACKING.md](HACKING.md#desktop-build) for platform-specific
+dependency installation and [HACKING.md](HACKING.md#android-build)
+for the Android build.
 
 ## Building
 
@@ -115,7 +78,42 @@ scenario:
 ./build/toheart2 /path/to/data --scenario 010301000.sdt
 ```
 
-### Automated route soak
+## Android
+
+See [HACKING.md](HACKING.md#android-build) for build instructions and
+[HACKING.md](HACKING.md#android-architecture) for architecture details.
+
+### Game data
+
+On first launch the app opens the Android **Storage Access Framework**
+document tree picker. Select the folder that contains `TOHEART2.EXE`
+(typically the root of your ToHeart2 XRATED installation). The game
+data is imported into internal storage and persists across restarts.
+
+### Touch controls
+
+The touch interface provides two-finger and swipe gestures as shortcuts
+to common actions. Taps act as left mouse clicks for menus, choices,
+and game advance.
+
+| Gesture | Action |
+|---|---|
+| Single-finger tap | Left click (advance text, select menu item, confirm choice) |
+| Swipe down | Open the backlog; additional swipes scroll older entries |
+| Swipe up | Scroll newer entries; at the newest, close the backlog |
+| Two-finger tap | Close the backlog; if not in backlog, hide/show the textbox |
+| Swipe right (quick) | Toggle skip mode (respects the "skip-unread" setting) |
+| Swipe right (hold) | Hold to skip unconditionally, release to stop |
+| Android back button | Open the system menu in-game; close save/load menus |
+
+### Configuration panel
+
+Open with a two-finger tap when the textbox is hidden, or via the
+system menu. On small screens the panel and the player-name entry
+screen are full-size with drag-to-scroll.  Controls are padded and
+spaced for finger-friendly operation.
+
+## Automated route soak
 
 The soak explorer drives the normal game runtime through text, choices, maps,
 effects, movies, and endings. It persists newly discovered decision paths and

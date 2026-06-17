@@ -1,11 +1,11 @@
 # Makefile for ToHeart2 XRATED portable
 #
 # Usage:
-#   make desktop          # configure and build the desktop executable
+#   make desktop          # configure and build via CMake preset (does not test)
 #   make run              # build and run the desktop executable
 #   make android          # build the Android debug APK
 #   make install-android  # install the debug APK on a connected device
-#   make test             # run the desktop test suite
+#   make test             # build and run the desktop test suite
 #   make clean            # remove all build artifacts
 
 .PHONY: all desktop run android install-android test clean clean-desktop clean-android logcat
@@ -17,27 +17,26 @@ all: desktop android
 # Desktop build
 # -----------------------------------------------------------------------------
 
-DESKTOP_BUILD_DIR := build
+DESKTOP_BUILD_DIR := build/release
 DESKTOP_TARGET := toheart2
 GAME_DATA_DIR ?= game-data
 
-# Release build with tests enabled.
+# Configure and build (no tests).
 desktop:
-	cmake -S . -B $(DESKTOP_BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-	ln -sf $(DESKTOP_BUILD_DIR)/compile_commands.json compile_commands.json
-	cmake --build $(DESKTOP_BUILD_DIR) --target $(DESKTOP_TARGET) -- -j$$(nproc)
+	cmake --preset desktop-release
+	cmake --build --preset desktop-release
 
 # Build and run the desktop executable.
 run: desktop
 	./$(DESKTOP_BUILD_DIR)/$(DESKTOP_TARGET) $(GAME_DATA_DIR)
 
-# Run the desktop test suite.
+# Build and test.
 test: desktop
-	ctest --test-dir $(DESKTOP_BUILD_DIR) --output-on-failure
+	ctest --preset desktop-release
 
-# Remove the desktop build tree.
+# Remove the preset and manual build trees.
 clean-desktop:
-	rm -rf $(DESKTOP_BUILD_DIR)
+	rm -rf build/
 
 # -----------------------------------------------------------------------------
 # Android build
