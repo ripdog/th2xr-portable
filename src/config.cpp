@@ -66,6 +66,8 @@ GameConfig load_config(const std::filesystem::path& path)
             config.skip_unread = parse_bool(value);
         } else if (key == "wheel_opens_backlog") {
             config.wheel_opens_backlog = parse_bool(value);
+        } else if (key == "autosave_enabled") {
+            config.autosave_enabled = parse_bool(value);
         } else if (key == "sidebar_mode") {
             config.sidebar_mode =
                 parse_int(value, config.sidebar_mode, 0, 3);
@@ -163,8 +165,9 @@ void save_config(const std::filesystem::path& path, const GameConfig& config)
            << "text_speed_ms=" << config.text_speed_ms << '\n'
            << "auto_skip_read=" << config.auto_skip_read << '\n'
            << "skip_unread=" << config.skip_unread << '\n'
-           << "wheel_opens_backlog=" << config.wheel_opens_backlog << '\n'
-           << "sidebar_mode=" << config.sidebar_mode << '\n'
+            << "wheel_opens_backlog=" << config.wheel_opens_backlog << '\n'
+            << "autosave_enabled=" << config.autosave_enabled << '\n'
+            << "sidebar_mode=" << config.sidebar_mode << '\n'
            << "fullscreen=" << config.fullscreen << '\n'
            << "anime4k=" << config.anime4k << '\n'
            << "authentic_font=" << config.authentic_font << '\n'

@@ -1606,6 +1606,8 @@ private:
     int newest_save_slot_ = -1;
     Surface save_snapshot_;
     std::array<Texture, 10> save_thumbnails_{};
+    std::chrono::steady_clock::time_point last_save_time_{};
+    bool just_advanced_past_block_end_ = false;
     bool config_open_ = false;
     bool confirm_return_title_ = false;
     bool name_input_open_ = false;
@@ -4737,6 +4739,12 @@ private:
             || movie_) {
             return;
         }
+        // Record whether the player is advancing past a block end (page end).
+        // Used at the end of advance() to decide whether to autosave.
+        just_advanced_past_block_end_ = false;
+        if (waiting_for_input_ && message_ends_block_ && !message_.has_hidden_segments()) {
+            just_advanced_past_block_end_ = true;
+        }
         if (waiting_for_input_) {
             mark_current_text_read();
         }
@@ -4872,6 +4880,25 @@ private:
                 }
             }
         }
+        // Autosave after advancing past a block end, if enabled and enough time has passed.
+        if (just_advanced_past_block_end_) {
+            just_advanced_past_block_end_ = false;
+            if (config_.autosave_enabled && ui_mode_ == UiMode::game
+                && !replay_mode_ && !demo_mode_) {
+                const auto now = std::chrono::steady_clock::now();
+                constexpr auto minimum_interval = std::chrono::minutes(2);
+                if (last_save_time_.time_since_epoch().count() == 0
+                    || now - last_save_time_ >= minimum_interval) {
+                    if (!save_snapshot_) {
+                        save_snapshot_ = capture_frame_pixels();
+                    }
+                    perform_autosave();
+                    // Refresh the save snapshot so the next autosave has an
+                    // up-to-date thumbnail.
+                    save_snapshot_.reset();
+                }
+            }
+        }
     }
 
     void save(int slot)
@@ -4893,6 +4920,7 @@ private:
         save_body(file);
         file.close();
         save_preview(slot);
+        last_save_time_ = std::chrono::steady_clock::now();
     }
 
     bool load(int slot)
@@ -4978,8 +5006,67 @@ private:
         return result;
     }
 
+    void perform_autosave()
+    {
+        // Autosave slots are 100-109, reusing the same save/load infrastructure.
+        // Priority: lowest-numbered empty slot, then oldest occupied slot.
+        constexpr int autosave_base = 100;
+        int target_slot = -1;
+        std::time_t oldest_time = std::numeric_limits<std::time_t>::max();
+        for (int i = 0; i < 10; ++i) {
+            const auto metadata = read_save_metadata(autosave_base + i);
+            if (!metadata.exists) {
+                target_slot = autosave_base + i;
+                break;
+            }
+            if (metadata.timestamp < oldest_time) {
+                oldest_time = metadata.timestamp;
+                target_slot = autosave_base + i;
+            }
+        }
+        if (target_slot < 0) {
+            return;
+        }
+        save(target_slot);
+    }
+
     void refresh_save_page()
     {
+        constexpr int autosave_base = 100;
+        // Page 10 (displayed as 11/11) shows autosave slots 100-109.
+        if (save_page_ == 10) {
+            newest_save_slot_ = -1;
+            std::time_t newest_time = 0;
+            for (int slot = 0; slot < 100; ++slot) {
+                const auto metadata = read_save_metadata(slot);
+                if (metadata.exists && metadata.timestamp >= newest_time) {
+                    newest_time = metadata.timestamp;
+                    newest_save_slot_ = slot;
+                }
+            }
+            for (int i = 0; i < 10; ++i) {
+                const auto metadata = read_save_metadata(autosave_base + i);
+                if (metadata.exists && metadata.timestamp >= newest_time) {
+                    newest_time = metadata.timestamp;
+                    newest_save_slot_ = autosave_base + i;
+                }
+            }
+            for (int i = 0; i < 10; ++i) {
+                const int slot = autosave_base + i;
+                visible_saves_[i] = read_save_metadata(slot);
+                save_thumbnails_[i].reset();
+                if (!visible_saves_[i].exists) {
+                    continue;
+                }
+                SDL_Surface* surface =
+                    SDL_LoadBMP(thumbnail_path(slot).string().c_str());
+                if (surface) {
+                    save_thumbnails_[i] = texture_from_surface(surface);
+                    SDL_DestroySurface(surface);
+                }
+            }
+            return;
+        }
         newest_save_slot_ = -1;
         std::time_t newest_time = 0;
         for (int slot = 0; slot < 100; ++slot) {
@@ -4987,6 +5074,13 @@ private:
             if (metadata.exists && metadata.timestamp >= newest_time) {
                 newest_time = metadata.timestamp;
                 newest_save_slot_ = slot;
+            }
+        }
+        for (int i = 0; i < 10; ++i) {
+            const auto metadata = read_save_metadata(autosave_base + i);
+            if (metadata.exists && metadata.timestamp >= newest_time) {
+                newest_time = metadata.timestamp;
+                newest_save_slot_ = autosave_base + i;
             }
         }
         for (int i = 0; i < 10; ++i) {
@@ -5922,6 +6016,10 @@ private:
                     option_changed |= ImGui::Checkbox(
                         "Auto-skip includes unread text",
                         &config_.skip_unread);
+                    ImGui::Separator();
+                    option_changed |= ImGui::Checkbox(
+                        "Autosave after text block (2 min interval)",
+                        &config_.autosave_enabled);
                     ImGui::EndTabItem();
                 }
                 if (ImGui::BeginTabItem("Audio")) {
@@ -6389,7 +6487,8 @@ private:
         load_error_.clear();
         refresh_save_page();
         if (newest_save_slot_ >= 0) {
-            save_page_ = newest_save_slot_ / 10;
+            save_page_ = newest_save_slot_ >= 100
+                ? 10 : newest_save_slot_ / 10;
             refresh_save_page();
         }
     }
@@ -7710,6 +7809,8 @@ private:
                 renderer_, ui_save_rows_.get(), nullptr, &rows_dst);
         }
 
+        const bool autosave_page = save_page_ >= 10;
+
         for (int i = 0; i < 10; ++i) {
             const float x = 16.0f + 390.0f * (i / 5);
             const float y = 112.0f + 76.0f * (i % 5);
@@ -7727,7 +7828,9 @@ private:
             }
 
             const int slot = save_page_ * 10 + i;
-            const auto slot_text = std::format("{:03d}", slot + 1);
+            const auto slot_text = autosave_page
+                ? std::format("A{:02d}", i + 1)
+                : std::format("{:03d}", slot + 1);
             font_.draw_original(
                 renderer_, x + 102.0f, y + 6.0f, slot_text, 0, 0, 0);
             font_.draw_original(
@@ -7763,9 +7866,11 @@ private:
             }
         }
 
+        constexpr int total_pages = 11;
         font_.draw_original(
             renderer_, 366.0f, 80.0f,
-            std::format("{:02d}/10", save_page_ + 1), 255, 245, 225);
+            std::format("{:02d}/{:02d}", save_page_ + 1, total_pages),
+            255, 245, 225);
         if (ui_save_controls_) {
             const SDL_FRect prev_src{
                 0.0f, save_hover_ == 10 ? 64.0f : 0.0f, 130.0f, 32.0f};
@@ -7805,8 +7910,9 @@ private:
                         renderer_, save_thumbnails_[selected].get(),
                         nullptr, &thumb);
                 }
-                const auto slot_text =
-                    std::format("{:03d}", save_confirm_slot_ + 1);
+                const auto slot_text = autosave_page
+                    ? std::format("A{:02d}", save_confirm_slot_ % 10 + 1)
+                    : std::format("{:03d}", save_confirm_slot_ + 1);
                 font_.draw_original(
                     renderer_, x + 102.0f, y + 4.0f,
                     slot_text, 245, 220, 190);
@@ -7898,7 +8004,8 @@ private:
             }
         } else if (item == 10 || item == 11) {
             play_se(-1, 9104, false, 255);
-            save_page_ = (save_page_ + (item == 10 ? 9 : 1)) % 10;
+            constexpr int page_count = 11;
+            save_page_ = (save_page_ + (item == 10 ? page_count - 1 : 1)) % page_count;
             refresh_save_page();
         } else if (item == 12) {
             play_se(-1, 9104, false, 255);
@@ -7958,6 +8065,10 @@ private:
                 activate_save_load_item(11);
             } else if (event.key.key == SDLK_RETURN
                        || event.key.key == SDLK_SPACE) {
+                // When a save slot has been clicked and the confirmation
+                // dialog is showing, save_hover_ points at the yes/no buttons
+                // (13/14).  Enter/Space activates whatever save_hover_ is
+                // currently set to.
                 activate_save_load_item(save_hover_);
             }
         }
