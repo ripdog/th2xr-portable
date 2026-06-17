@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="100%" height="100%">
+  <defs>
+    <!-- Background Heart Gradient -->
+    <linearGradient id="grad-heart" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#F9C6D9"/>
+      <stop offset="100%" stop-color="#EF9DBF"/>
+    </linearGradient>
+
+    <!-- 't' Gradient (Orange) -->
+    <linearGradient id="grad-t" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#EE5E21"/>
+      <stop offset="100%" stop-color="#F69B1E"/>
+    </linearGradient>
+
+    <!-- 'h' Gradient (Green) -->
+    <linearGradient id="grad-h" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#A1D217"/>
+      <stop offset="100%" stop-color="#46B43F"/>
+    </linearGradient>
+
+    <!-- '2' Gradient (Cyan/Blue) -->
+    <linearGradient id="grad-2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1EC8F6"/>
+      <stop offset="100%" stop-color="#0080C8"/>
+    </linearGradient>
+
+    <!--
+      Grouping the text so we can layer it later to create the thick, fused outlines.
+      The '2' is placed first so the 'th' slightly overlaps it, matching the depth
+      style of the original logo.
+    -->
+    <g id="logo-text">
+      <!-- The Number '2' -->
+      <text x="400" y="450"
+            font-family="'Arial Black', 'Impact', 'Segoe UI Black', sans-serif"
+            font-size="340"
+            font-style="italic"
+            font-weight="900"
+            fill="url(#grad-2)">
+        2
+      </text>
+
+      <!-- The Text 'th' -->
+      <text x="180" y="420"
+            font-family="'Arial Black', 'Impact', 'Segoe UI Black', sans-serif"
+            font-size="240"
+            font-weight="900"
+            letter-spacing="-25">
+        <tspan fill="url(#grad-t)">t</tspan>
+        <tspan fill="url(#grad-h)">h</tspan>
+      </text>
+    </g>
+  </defs>
+
+  <!-- 1. The Background Heart -->
+  <path d="M 400 530
+           C 250 420, 120 290, 160 170
+           C 180 90, 320 90, 400 150
+           C 480 90, 620 90, 640 170
+           C 680 290, 550 420, 400 530 Z"
+        fill="url(#grad-heart)" />
+
+  <!-- 2. Text Outline Layer: Deep Blue Drop Shadow (Slightly Offset) -->
+  <use href="#logo-text"
+       x="8" y="12"
+       stroke="#0A2658"
+       stroke-width="48"
+       stroke-linejoin="round"
+       stroke-linecap="round" />
+
+  <!-- 3. Text Outline Layer: Main Medium Blue Outline -->
+  <use href="#logo-text"
+       stroke="#0E75BC"
+       stroke-width="48"
+       stroke-linejoin="round"
+       stroke-linecap="round" />
+
+  <!-- 4. Text Outline Layer: Inner White Outline -->
+  <use href="#logo-text"
+       stroke="#FFFFFF"
+       stroke-width="18"
+       stroke-linejoin="round"
+       stroke-linecap="round" />
+
+  <!-- 5. Top Text Layer: The actual color gradients -->
+  <!-- (Since it has no stroke, it perfectly fills the space inside the white outline) -->
+  <use href="#logo-text" />
+
+</svg>
