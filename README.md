@@ -2,7 +2,7 @@
 
 A portable, cross-platform reimplementation of the ToHeart2 XRATED visual novel engine.
 
-Runs on Linux, macOS, Windows, and Android using SDL3.
+Runs on Linux, macOS, Windows, and Android.
 
 ## How the project came about
 
@@ -17,40 +17,42 @@ source as a reference for data formats and engine behavior. The result is a
 modern, cross-platform engine that can run the original game data on any
 platform supported by SDL3.
 
-## Prerequisites
+## Enhancements
 
-- CMake 3.20+
-- C++20 compiler (GCC 13+, Clang 17+, MSVC 19.40+)
-- SDL3, SDL3_ttf, fontconfig
-- FFmpeg (libavformat, libavcodec, libavutil, libswscale, libswresample)
-- glslangValidator
+Compared to the original engine, we have:
 
-See [HACKING.md](HACKING.md#desktop-build) for platform-specific
-dependency installation and [HACKING.md](HACKING.md#android-build)
-for the Android build.
+ * Fully resizable window
+ * Anime4k-based upscaling of art (optional)
+ * Desktop-resolution text rendering, any font (optional)
+ * Autosaves (optional)
+ * Native builds on Mac, Linux, Android
+ * Settings in a nice in-game window, replacing the old menu bar
 
-## Building
+ ## Status
 
-```bash
-# Linux / macOS
-cmake -S . -B build -DBUILD_TESTING=ON
-cmake --build build -- -j$(nproc)
+ On Linux, Windows, and Android, I've tested that the game runs acceptibly, and
+ spent considerable time ensuring the engine is accurate and correctly implemented. 
+ However, I am not familiar with To Heart 2, this is my first time playing,
+ so proper testing from anyone familiar with the game would be appreciated.
 
-# Windows (MSVC, with vcpkg)
-cmake -S . -B build -DBUILD_TESTING=ON `
-  -DCMAKE_TOOLCHAIN_FILE="C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake"
-cmake --build build --config Release
-```
+ I do not own a mac, so I have not tested the .app. If the .app does not run, please
+ run the actual binary (inside the .app bundle) in the terminal, and file an issue
+ with whatever error you see. Thanks!
 
-## Running tests
 
-```bash
-ctest --test-dir build
-```
+## Getting Started
 
-## Running the engine
+Grab your platform's build from [releases](https://github.com/ripdog/th2xr-portable/releases/latest)
 
-Place your ToHeart2 XRATED game data in a `game-data/` directory next to the
+## Desktop
+
+You need the original game files from the To Heart 2 XRATED english patch. This engine has not been tested with the japanese release, and probably won't work. (PRs accepted!)
+
+Simply run the engine (.exe/.app/.AppImage), and a file picker will appear. Select the toheart2.exe from the game files, and the game will launch.
+
+On mac, you'll probably have to fight your OS to run the engine, as it's unsigned. Good luck.
+
+Alternatively, place your ToHeart2 XRATED game data in a `game-data/` directory next to the
 binary—the engine looks there by default:
 
 ```
@@ -66,29 +68,33 @@ th2xr-portable/
     └── ...
 ```
 
-Then simply run:
-```bash
-./build/toheart2
-```
+### In Game
 
-You can also point to an alternate data directory or launch directly into a
-scenario:
-```bash
-./build/toheart2 /path/to/data
-./build/toheart2 /path/to/data --scenario 010301000.sdt
-```
+The "Side-bar configuration" button has been co-opted to open our new settings panel.
+
+Note that by default, the game auto-saves every 2 minutes. To access them, open the 
+load panel, and click the left arrow from page 1. They're on page 11.
 
 ## Android
 
-See [HACKING.md](HACKING.md#android-build) for build instructions and
-[HACKING.md](HACKING.md#android-architecture) for architecture details.
+### Warning
+
+The APKs I'm generated are unverified. That means Android will kick up a fuss when
+you try to install them. If your device has been infected by "Android Developer Verification",
+you'll need to enable the so-called ["Advanced Flow"](https://android-developers.googleblog.com/2026/03/android-developer-verification.html) to install the engine. 
+
+You might also have to enable "Install unknown apps" in your device settings.
+
+You might get a "Google Play Protect" popup when installing. Tap "More Details" then
+"Install Anyway" to bypass.
 
 ### Game data
 
-On first launch the app opens the Android **Storage Access Framework**
-document tree picker. Select the folder that contains `TOHEART2.EXE`
+On first launch the app opens the Android folder picker. Select the 
+folder that contains `TOHEART2.EXE`
 (typically the root of your ToHeart2 XRATED installation). The game
 data is imported into internal storage and persists across restarts.
+Be patient, the copy takes a few seconds.
 
 ### Touch controls
 
@@ -99,75 +105,25 @@ and game advance.
 | Gesture | Action |
 |---|---|
 | Single-finger tap | Left click (advance text, select menu item, confirm choice) |
-| Swipe down | Open the backlog; additional swipes scroll older entries |
+| Swipe down | Open the backlog; keep swiping to move further back |
 | Swipe up | Scroll newer entries; at the newest, close the backlog |
 | Two-finger tap | Close the backlog; if not in backlog, hide/show the textbox |
 | Swipe right (quick) | Toggle skip mode (respects the "skip-unread" setting) |
-| Swipe right (hold) | Hold to skip unconditionally, release to stop |
+| Swipe right (hold) | Hold to ctrl-skip, release to stop |
 | Android back button | Open the system menu in-game; close save/load menus |
 
 ### Configuration panel
 
-Open with a two-finger tap when the textbox is hidden, or via the
-system menu. On small screens the panel and the player-name entry
-screen are full-size with drag-to-scroll.  Controls are padded and
-spaced for finger-friendly operation.
+Open with the android back button, then "Side Bar Configuration". 
+On small screens the panel and the player-name entry
+screen are full-size with drag-to-scroll. 
 
-## Automated route soak
+## Development
 
-The soak explorer drives the normal game runtime through text, choices, maps,
-effects, movies, and endings. It persists newly discovered decision paths and
-resumes unfinished work after interruption:
+See [HACKING.md](HACKING.md#desktop-build) for platform-specific
+dependency installation and [HACKING.md](HACKING.md#android-build)
+for the Android build.
 
-```bash
-# Explore one route and store progress in logs/soak/
-./build/toheart2 game-data --soak
-
-# Explore up to 20 queued routes in this process
-./build/toheart2 game-data --soak --soak-runs 20
-
-# Use a separate state/report directory
-./build/toheart2 game-data --soak-state /tmp/th2-soak --soak-runs 20
-```
-
-Soak configuration and completion flags are isolated from the normal player
-configuration. `state.txt` contains the persistent decision tree and
-`runs.log` records completed or failed paths.
-
-The currently known remaining run count can be inspected without loading the
-game:
-
-```bash
-python3 tools/soak_status.py
-python3 tools/soak_status.py --json
-```
-
-The count is the current exploration frontier. It can increase when a queued
-run reaches a choice or map branch that has not previously been discovered.
-
-Independent routes can be processed concurrently:
-
-```bash
-# Run up to 20 routes using four engine processes.
-python3 tools/soak_parallel.py --workers 4 --runs 20
-```
-
-If a decision baseline was recorded from invalid engine state, stop the
-parallel coordinator and preview pruning that decision and its descendants:
-
-```sh
-python3 tools/soak_prune.py 1,0,0 --state logs/soak
-python3 tools/soak_prune.py 1,0,0 --state logs/soak --apply
-```
-
-The decision prefix is queued again so its current options and all descendant
-routes are rediscovered without discarding unrelated campaign progress.
-
-Each worker receives an isolated state and configuration directory. The
-coordinator leases distinct paths, waits for the batch, then atomically merges
-new branches and results into `logs/soak/state.txt`. Only one coordinator or
-single-process soak should use a campaign directory at a time. Four workers is
-the conservative default because every process also owns SDL GPU resources.
 
 ## License
 
@@ -177,11 +133,14 @@ This project is licensed under the GNU General Public License v2.0. See
 ## Acknowledgements
 
 The [original ToHeart2 source code](https://github.com/autch/aquaplus_gpl)
-was released by Aquaplus under the GPLv2. This project contains a complete
-rewrite of that source targeting modern platforms.
+was released by Aquaplus under the GPLv2. 
 
 This project uses:
 - [SDL3](https://libsdl.org/) for cross-platform windowing, input, and rendering
-- [Dear ImGui](https://github.com/ocornut/imgui) for the user interface
+- [Dear ImGui](https://github.com/ocornut/imgui) for the config and player name panels
 - [Anime4K](https://github.com/bloc97/Anime4K) for real-time upscaling
-- [FFmpeg](https://ffmpeg.org/) for video playback
+- [FFmpeg](https://ffmpeg.org/) for video/audio playback
+
+## AI Disclosure
+
+Yeah, AI wrote almost all of this. I kept a hand on the tiller, though.

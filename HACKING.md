@@ -267,3 +267,62 @@ reinstall.
 [th2xr-portable]: https://github.com/ripdog/th2xr-portable
 [SDL releases]: https://github.com/libsdl-org/SDL/releases
 [vcpkg]: https://github.com/microsoft/vcpkg
+
+
+## Automated route soak
+
+The soak explorer drives the normal game runtime through text, choices, maps,
+effects, movies, and endings. The purpose is to search for bugs in the engine
+by simulating normal play and watching for common errors.
+It persists newly discovered decision paths and
+resumes unfinished work after interruption:
+
+```bash
+# Explore one route and store progress in logs/soak/
+./build/toheart2 game-data --soak
+
+# Explore up to 20 queued routes in this process
+./build/toheart2 game-data --soak --soak-runs 20
+
+# Use a separate state/report directory
+./build/toheart2 game-data --soak-state /tmp/th2-soak --soak-runs 20
+```
+
+Soak configuration and completion flags are isolated from the normal player
+configuration. `state.txt` contains the persistent decision tree and
+`runs.log` records completed or failed paths.
+
+The currently known remaining run count can be inspected without loading the
+game:
+
+```bash
+python3 tools/soak_status.py
+python3 tools/soak_status.py --json
+```
+
+The count is the current exploration frontier. It can increase when a queued
+run reaches a choice or map branch that has not previously been discovered.
+
+Independent routes can be processed concurrently:
+
+```bash
+# Run up to 20 routes using four engine processes.
+python3 tools/soak_parallel.py --workers 4 --runs 20
+```
+
+If a decision baseline was recorded from invalid engine state, stop the
+parallel coordinator and preview pruning that decision and its descendants:
+
+```sh
+python3 tools/soak_prune.py 1,0,0 --state logs/soak
+python3 tools/soak_prune.py 1,0,0 --state logs/soak --apply
+```
+
+The decision prefix is queued again so its current options and all descendant
+routes are rediscovered without discarding unrelated campaign progress.
+
+Each worker receives an isolated state and configuration directory. The
+coordinator leases distinct paths, waits for the batch, then atomically merges
+new branches and results into `logs/soak/state.txt`. Only one coordinator or
+single-process soak should use a campaign directory at a time. Four workers is
+the conservative default because every process also owns SDL GPU resources.
