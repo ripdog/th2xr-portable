@@ -7858,7 +7858,7 @@ private:
             }
 
             const int slot = save_page_ * 10 + i;
-            draw_save_digit_number(x + 84.0f, y + 10.0f, slot + 1, 3);
+            draw_save_digit_number(x + 98.0f, y + 10.0f, slot + 1, 3);
             if (!visible_saves_[i].exists) {
                 continue;
             }
@@ -7936,7 +7936,7 @@ private:
                         nullptr, &thumb);
                 }
                 draw_save_digit_number(
-                    x + 84.0f, y + 4.0f, save_confirm_slot_ + 1, 3);
+                    x + 98.0f, y + 4.0f, save_confirm_slot_ + 1, 3);
                 const auto game_date =
                     visible_saves_[selected].game_month == 0
                     ? std::string("?A?B")
