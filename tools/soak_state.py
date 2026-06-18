@@ -43,6 +43,70 @@ def unique(routes: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(routes))
 
 
+def split_route(route: str) -> list[int]:
+    if not route:
+        return []
+    return [int(part) for part in route.split(",")]
+
+
+def join_route(parts: Iterable[int]) -> str:
+    return ",".join(str(part) for part in parts)
+
+
+def edge_key(node: SoakNode, selection: int) -> tuple[str, str, str, str]:
+    option = node.options[selection]
+    return (node.kind, node.checkpoint, option.label, option.target)
+
+
+def route_edges(
+    nodes: dict[str, SoakNode], route: str
+) -> tuple[list[tuple[str, str, str, str]], bool]:
+    parts = split_route(route)
+    edges: list[tuple[str, str, str, str]] = []
+    for depth, selection in enumerate(parts):
+        prefix = join_route(parts[:depth])
+        node = nodes.get(prefix)
+        if node is None:
+            return edges, True
+        if selection < 0 or selection >= len(node.options):
+            return edges, True
+        edges.append(edge_key(node, selection))
+    return edges, False
+
+
+def covered_edges(state: SoakState) -> set[tuple[str, str, str, str]]:
+    covered: set[tuple[str, str, str, str]] = set()
+    for route in state.completed:
+        edges, _ = route_edges(state.nodes, route)
+        covered.update(edges)
+    return covered
+
+
+def route_has_new_coverage(
+    state: SoakState, covered: set[tuple[str, str, str, str]], route: str
+) -> bool:
+    edges, reaches_unknown = route_edges(state.nodes, route)
+    return reaches_unknown or any(edge not in covered for edge in edges)
+
+
+def prune_covered_pending_routes(state: SoakState) -> int:
+    covered = covered_edges(state)
+    before = len(state.pending)
+    state.pending = [
+        route for route in state.pending
+        if route_has_new_coverage(state, covered, route)
+    ]
+    state.pending_records = len(state.pending)
+    return before - len(state.pending)
+
+
+def recover_active_routes(state: SoakState) -> None:
+    state.pending = unique([*state.active, *state.pending])
+    state.active.clear()
+    remove_all(state.pending, state.completed)
+    state.pending_records = len(state.pending)
+
+
 def append_unique(routes: list[str], route: str) -> None:
     if route not in routes:
         routes.append(route)

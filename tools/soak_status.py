@@ -4,12 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from soak_state import parse_state
+from soak_state import (
+    covered_edges,
+    parse_state,
+    prune_covered_pending_routes,
+    recover_active_routes,
+)
 
 
 @dataclass(frozen=True)
@@ -20,10 +26,15 @@ class SoakSummary:
     completed_runs: int
     decision_nodes: int
     duplicate_pending_records: int
+    covered_edges: int
+    coverage_guided_runs_remaining: int
 
 
 def summarize_state(path: Path) -> SoakSummary:
     state = parse_state(path)
+    coverage_state = copy.deepcopy(state)
+    recover_active_routes(coverage_state)
+    prune_covered_pending_routes(coverage_state)
     completed = set(state.completed)
     active = set(state.active)
     pending = set(state.pending)
@@ -34,6 +45,8 @@ def summarize_state(path: Path) -> SoakSummary:
         completed_runs=len(state.completed),
         decision_nodes=len(state.nodes),
         duplicate_pending_records=state.pending_records - len(state.pending),
+        covered_edges=len(covered_edges(state)),
+        coverage_guided_runs_remaining=len(coverage_state.remaining),
     )
 
 
@@ -70,6 +83,11 @@ def main() -> int:
     print(f"  queued:            {summary.queued_runs}")
     print(f"Completed runs:       {summary.completed_runs}")
     print(f"Decision nodes:       {summary.decision_nodes}")
+    print(f"Covered edges:        {summary.covered_edges}")
+    print(
+        "Coverage-guided left: "
+        f"{summary.coverage_guided_runs_remaining}"
+    )
     if summary.duplicate_pending_records:
         print(
             "Duplicate pending records ignored: "

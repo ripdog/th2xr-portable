@@ -15,9 +15,13 @@ from soak_state import (
     SoakNode,
     SoakOption,
     SoakState,
+    covered_edges,
     merge_state,
     parse_state,
+    prune_covered_pending_routes,
     prune_subtree,
+    recover_active_routes,
+    route_has_new_coverage,
     write_state,
 )
 
@@ -138,6 +142,63 @@ class SoakStateTest(unittest.TestCase):
             independent_prefixes(["0,1", "0,1,0", "2", ""]),
             [""],
         )
+
+    def test_coverage_guided_prunes_recombined_edges(self) -> None:
+        state = SoakState(
+            pending=["0,0", "0,1", "1,0", "1,1"],
+            completed=["0,0", "1,1"],
+            nodes={
+                "": SoakNode(
+                    "choice",
+                    "root",
+                    (SoakOption("A", ""), SoakOption("B", "")),
+                ),
+                "0": SoakNode(
+                    "choice",
+                    "shared",
+                    (
+                        SoakOption("left", ""),
+                        SoakOption("right", ""),
+                    ),
+                ),
+                "1": SoakNode(
+                    "choice",
+                    "shared",
+                    (
+                        SoakOption("left", ""),
+                        SoakOption("right", ""),
+                    ),
+                ),
+            },
+        )
+
+        removed = prune_covered_pending_routes(state)
+
+        self.assertEqual(removed, 4)
+        self.assertEqual(state.pending, [])
+
+    def test_unknown_route_prefix_is_kept_for_discovery(self) -> None:
+        state = SoakState(
+            completed=["0"],
+            nodes={
+                "": SoakNode("choice", "root", (SoakOption("A", ""),)),
+            },
+        )
+        coverage = covered_edges(state)
+
+        self.assertTrue(route_has_new_coverage(state, coverage, "0,0"))
+
+    def test_recover_active_routes_requeues_interrupted_work(self) -> None:
+        state = SoakState(
+            active=["0", "1"],
+            pending=["1", "2"],
+            completed=["2"],
+        )
+
+        recover_active_routes(state)
+
+        self.assertEqual(state.active, [])
+        self.assertEqual(state.pending, ["0", "1"])
 
 
 if __name__ == "__main__":

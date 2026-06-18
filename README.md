@@ -124,6 +124,14 @@ See [HACKING.md](HACKING.md#desktop-build) for platform-specific
 dependency installation and [HACKING.md](HACKING.md#android-build)
 for the Android build.
 
+### Soak Testing
+
+`tools/soak_parallel.py` is coverage-guided by default: it keeps routes that
+select new choice/map options or reach unknown script state, and drops routes
+that only recombine decision edges already covered elsewhere. Use `--exhaustive`
+only when deliberately debugging full route enumeration; the complete route
+space is combinatorial and is not practical to exhaust.
+
 
 ## License
 

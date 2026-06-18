@@ -15,8 +15,9 @@ from soak_state import (
     append_unique,
     merge_state,
     parse_state,
+    prune_covered_pending_routes,
+    recover_active_routes,
     remove_all,
-    unique,
     write_state,
 )
 
@@ -54,9 +55,7 @@ def worker_state(global_state: SoakState, route: str) -> SoakState:
 
 
 def lease_routes(state: SoakState, count: int) -> list[str]:
-    state.pending = unique([*state.active, *state.pending])
-    state.active.clear()
-    remove_all(state.pending, state.completed)
+    recover_active_routes(state)
     leased = state.pending[:count]
     del state.pending[: len(leased)]
     state.active.extend(leased)
@@ -121,6 +120,16 @@ def main() -> int:
         default=20,
         help="maximum total routes for this invocation (default: 20)",
     )
+    parser.add_argument(
+        "--exhaustive",
+        action="store_true",
+        help="enumerate every route instead of pruning covered edges",
+    )
+    parser.add_argument(
+        "--prune-only",
+        action="store_true",
+        help="apply coverage-guided pruning and exit without launching workers",
+    )
     arguments = parser.parse_args()
 
     if arguments.workers <= 0:
@@ -141,8 +150,32 @@ def main() -> int:
 
     try:
         with CoordinatorLock(lock_path):
+            if arguments.prune_only:
+                state = parse_state(state_path)
+                recover_active_routes(state)
+                pruned = 0
+                if not arguments.exhaustive:
+                    pruned = prune_covered_pending_routes(state)
+                write_state(state_path, state)
+                print(
+                    f"coverage-guided soak: pruned {pruned} covered routes, "
+                    f"{len(state.remaining)} known remaining",
+                    flush=True,
+                )
+                return 0
+
             while completed < arguments.runs:
                 state = parse_state(state_path)
+                recover_active_routes(state)
+                if not arguments.exhaustive:
+                    pruned = prune_covered_pending_routes(state)
+                    if pruned:
+                        write_state(state_path, state)
+                        print(
+                            f"coverage-guided soak: pruned {pruned} "
+                            "covered routes",
+                            flush=True,
+                        )
                 batch_size = min(
                     arguments.workers,
                     arguments.runs - completed,
@@ -237,6 +270,14 @@ def main() -> int:
                 requeue_failed_routes(
                     state, [route for _, route, _ in failed]
                 )
+                if not arguments.exhaustive:
+                    pruned = prune_covered_pending_routes(state)
+                    if pruned:
+                        print(
+                            f"coverage-guided soak: pruned {pruned} "
+                            "covered routes",
+                            flush=True,
+                        )
                 state.pending_records = len(state.pending)
                 write_state(state_path, state)
                 print(
