@@ -21,6 +21,14 @@ constexpr std::size_t full_glyph_count = 7023;
 constexpr std::size_t full_glyph_bytes = 24 * 24 / 2;
 constexpr std::size_t half_glyph_bytes = 24 * 12 / 2;
 constexpr std::size_t ascii_offset = full_glyph_count * full_glyph_bytes;
+constexpr int save_menu_size = 16;
+constexpr int save_menu_width = 8;
+constexpr std::size_t save_menu_full_glyph_bytes =
+    save_menu_size * save_menu_size / 2;
+constexpr std::size_t save_menu_half_glyph_bytes =
+    save_menu_size * save_menu_width / 2;
+constexpr std::size_t save_menu_ascii_offset =
+    full_glyph_count * save_menu_full_glyph_bytes;
 constexpr std::size_t shadow_full_bytes = 14 * 28;
 constexpr std::size_t shadow_half_bytes = 8 * 28;
 constexpr std::size_t shadow_ascii_offset =
@@ -306,6 +314,13 @@ GameFont::GameFont(const Archive& archive)
     if (data_.size() < ascii_offset + 158 * half_glyph_bytes) {
         throw std::runtime_error("font24.fd0 is truncated");
     }
+    if (const auto* save_entry = archive.find("font16.fd0")) {
+        save_menu_data_ = archive.read(*save_entry);
+        if (save_menu_data_.size()
+            < save_menu_ascii_offset + 158 * save_menu_half_glyph_bytes) {
+            throw std::runtime_error("font16.fd0 is truncated");
+        }
+    }
     const auto* shadow_entry = archive.find("font24.fk0");
     if (!shadow_entry) {
         throw std::runtime_error("font24.fk0 not found");
@@ -456,11 +471,12 @@ const std::vector<std::string>& GameFont::system_families()
 namespace {
 
 void draw_glyph(
-    SDL_Renderer* renderer, float x, float y, int glyph_width,
+    SDL_Renderer* renderer, float x, float y, int glyph_height,
+    int glyph_width,
     const std::uint8_t* bitmap, std::uint8_t red, std::uint8_t green,
     std::uint8_t blue, std::uint8_t alpha)
 {
-    for (int row = 0; row < 24; ++row) {
+    for (int row = 0; row < glyph_height; ++row) {
         for (int column = 0; column < glyph_width; ++column) {
             const auto packed = bitmap[row * (glyph_width / 2) + column / 2];
             const auto coverage =
@@ -504,7 +520,24 @@ void GameFont::draw_bitmap(
     std::uint8_t red, std::uint8_t green, std::uint8_t blue,
     std::uint8_t alpha) const
 {
+    draw_bitmap_face(
+        renderer, data_, size, width, x, y, text, red, green, blue, alpha);
+}
+
+void GameFont::draw_bitmap_face(
+    SDL_Renderer* renderer, const std::vector<std::uint8_t>& data,
+    int font_size, int half_width, float x, float y, std::string_view text,
+    std::uint8_t red, std::uint8_t green, std::uint8_t blue,
+    std::uint8_t alpha) const
+{
     const float start_x = x;
+    const auto full_bytes =
+        static_cast<std::size_t>(font_size) * font_size / 2;
+    const auto half_bytes =
+        static_cast<std::size_t>(font_size) * half_width / 2;
+    const auto ascii = full_glyph_count * full_bytes;
+    const float line_step =
+        font_size == GameFont::size ? 31.0f : static_cast<float>(font_size + 4);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
     std::string cp932;
@@ -514,16 +547,20 @@ void GameFont::draw_bitmap(
         for (const auto byte : text) {
             if (byte == '\n') {
                 x = start_x;
-                y += 31;
+                y += line_step;
                 continue;
             }
-            const auto* bitmap = glyph(static_cast<unsigned char>(byte));
+            const auto index = glyph_index(static_cast<unsigned char>(byte));
+            const auto* bitmap = index < 0 ? nullptr
+                : data.data() + ascii
+                    + static_cast<std::size_t>(index) * half_bytes;
             if (!bitmap) {
                 continue;
             }
             draw_glyph(
-                renderer, x, y, width, bitmap, red, green, blue, alpha);
-            x += width;
+                renderer, x, y, font_size, half_width, bitmap,
+                red, green, blue, alpha);
+            x += half_width;
         }
         return;
     }
@@ -532,7 +569,7 @@ void GameFont::draw_bitmap(
         const auto byte = static_cast<unsigned char>(cp932[i]);
         if (byte == '\n') {
             x = start_x;
-            y += 31;
+            y += line_step;
             ++i;
             continue;
         }
@@ -546,22 +583,25 @@ void GameFont::draw_bitmap(
             const auto index = cp932_full_index(code);
             if (index >= 0) {
                 const auto* bitmap =
-                    data_.data() + index * full_glyph_bytes;
+                    data.data() + static_cast<std::size_t>(index) * full_bytes;
                 draw_glyph(
-                    renderer, x, y, size, bitmap, red, green, blue, alpha);
-                x += size;
+                    renderer, x, y, font_size, font_size, bitmap,
+                    red, green, blue, alpha);
+                x += font_size;
             } else if (code == 0x8140) {
-                x += size;
+                x += font_size;
             }
             i += 2;
         } else if (is_cp932_half(byte)) {
             const auto index = cp932_half_index(byte);
             if (index >= 0) {
                 const auto* bitmap =
-                    data_.data() + ascii_offset + index * half_glyph_bytes;
+                    data.data() + ascii
+                    + static_cast<std::size_t>(index) * half_bytes;
                 draw_glyph(
-                    renderer, x, y, width, bitmap, red, green, blue, alpha);
-                x += width;
+                    renderer, x, y, font_size, half_width, bitmap,
+                    red, green, blue, alpha);
+                x += half_width;
             }
             ++i;
         } else {
@@ -645,6 +685,20 @@ void GameFont::draw_original(
     std::uint8_t alpha) const
 {
     draw_bitmap(renderer, x, y, text, red, green, blue, alpha);
+}
+
+void GameFont::draw_save_menu(
+    SDL_Renderer* renderer, float x, float y, std::string_view text,
+    std::uint8_t red, std::uint8_t green, std::uint8_t blue,
+    std::uint8_t alpha) const
+{
+    if (save_menu_data_.empty()) {
+        draw_bitmap(renderer, x, y, text, red, green, blue, alpha);
+        return;
+    }
+    draw_bitmap_face(
+        renderer, save_menu_data_, save_menu_size, save_menu_width,
+        x, y, text, red, green, blue, alpha);
 }
 
 void GameFont::draw_authentic_shadow(
