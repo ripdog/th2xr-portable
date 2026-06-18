@@ -7886,7 +7886,7 @@ private:
                 renderer_, x + 222.0f, y + 10.0f,
                 visible_saves_[i].message.substr(0, 18), 255, 245, 225);
             if (slot == newest_save_slot_ && ui_save_new_) {
-                const SDL_FRect badge{x + 302.0f, y + 37.0f, 56.0f, 29.0f};
+                const SDL_FRect badge{x + 316.0f, y + 37.0f, 56.0f, 29.0f};
                 SDL_RenderTexture(
                     renderer_, ui_save_new_.get(), nullptr, &badge);
             }
