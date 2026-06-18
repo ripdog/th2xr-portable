@@ -7476,9 +7476,9 @@ private:
 
             const int slot = save_page_ * 10 + i;
             const auto slot_text = std::format("{:03d}", slot + 1);
-            font_.draw_original(
+            font_.draw_save_menu(
                 renderer_, x + 102.0f, y + 6.0f, slot_text, 0, 0, 0);
-            font_.draw_original(
+            font_.draw_save_menu(
                 renderer_, x + 100.0f, y + 6.0f, slot_text, 245, 220, 190);
             if (!visible_saves_[i].exists) {
                 continue;
@@ -7495,13 +7495,13 @@ private:
                 : std::format(
                     "{}/{}", visible_saves_[i].game_month,
                     visible_saves_[i].game_day);
-            font_.draw_original(
+            font_.draw_save_menu(
                 renderer_, x + 154.0f, y + 10.0f, game_date, 255, 245, 225);
-            font_.draw_original(
+            font_.draw_save_menu(
                 renderer_, x + 101.0f, y + 45.0f, date, 70, 25, 34);
-            font_.draw_original(
+            font_.draw_save_menu(
                 renderer_, x + 100.0f, y + 44.0f, date, 210, 110, 120);
-            font_.draw_original(
+            font_.draw_save_menu(
                 renderer_, x + 224.0f, y + 9.0f,
                 visible_saves_[i].message.substr(0, 18), 255, 245, 225);
             if (slot == newest_save_slot_ && ui_save_new_) {
@@ -7511,7 +7511,7 @@ private:
             }
         }
 
-        font_.draw_original(
+        font_.draw_save_menu(
             renderer_, 366.0f, 80.0f,
             std::format("{:02d}/10", save_page_ + 1), 255, 245, 225);
         if (ui_save_controls_) {
@@ -7555,7 +7555,7 @@ private:
                 }
                 const auto slot_text =
                     std::format("{:03d}", save_confirm_slot_ + 1);
-                font_.draw_original(
+                font_.draw_save_menu(
                     renderer_, x + 102.0f, y + 4.0f,
                     slot_text, 245, 220, 190);
                 const auto game_date =
@@ -7564,10 +7564,10 @@ private:
                     : std::format(
                         "{}/{}", visible_saves_[selected].game_month,
                         visible_saves_[selected].game_day);
-                font_.draw_original(
+                font_.draw_save_menu(
                     renderer_, x + 154.0f, y + 4.0f,
                     game_date, 255, 245, 225);
-                font_.draw_original(
+                font_.draw_save_menu(
                     renderer_, x + 224.0f, y + 4.0f,
                     visible_saves_[selected].message.substr(0, 18),
                     255, 245, 225);
@@ -7579,7 +7579,7 @@ private:
                     "{:04d}/{:02d}/{:02d}  {:02d}:{:02d}",
                     local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
                     local.tm_hour, local.tm_min);
-                font_.draw_original(
+                font_.draw_save_menu(
                     renderer_, x + 100.0f, y + 36.0f,
                     date, 210, 110, 120);
             }
@@ -7601,9 +7601,9 @@ private:
         }
 
         if (!load_error_.empty()) {
-            font_.draw_original(
+            font_.draw_save_menu(
                 renderer_, 21.0f, 571.0f, load_error_, 0, 0, 0);
-            font_.draw_original(
+            font_.draw_save_menu(
                 renderer_, 20.0f, 570.0f, load_error_, 255, 80, 80);
         }
     }

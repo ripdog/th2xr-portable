@@ -31,6 +31,10 @@ public:
         SDL_Renderer* renderer, float x, float y, std::string_view text,
         std::uint8_t red = 255, std::uint8_t green = 255,
         std::uint8_t blue = 255, std::uint8_t alpha = 255) const;
+    void draw_save_menu(
+        SDL_Renderer* renderer, float x, float y, std::string_view text,
+        std::uint8_t red = 255, std::uint8_t green = 255,
+        std::uint8_t blue = 255, std::uint8_t alpha = 255) const;
     void draw_authentic_shadow(
         SDL_Renderer* renderer, float x, float y, std::string_view text,
         std::uint8_t alpha = 255) const;
@@ -40,6 +44,7 @@ private:
     static constexpr int size = 24;
     static constexpr int width = 12;
     std::vector<std::uint8_t> data_;
+    std::vector<std::uint8_t> save_menu_data_;
     std::vector<std::uint8_t> shadow_data_;
     int shadow_width_ = 0;
     std::unique_ptr<Modern> modern_;
@@ -53,6 +58,11 @@ private:
         SDL_Renderer* renderer, float x, float y, std::string_view text,
         std::uint8_t red, std::uint8_t green, std::uint8_t blue,
         std::uint8_t alpha) const;
+    void draw_bitmap_face(
+        SDL_Renderer* renderer, const std::vector<std::uint8_t>& data,
+        int font_size, int half_width, float x, float y,
+        std::string_view text, std::uint8_t red, std::uint8_t green,
+        std::uint8_t blue, std::uint8_t alpha) const;
 };
 
 }  // namespace th2
