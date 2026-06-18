@@ -10,6 +10,7 @@ from soak_parallel import (
     requeue_failed_routes,
     worker_state,
 )
+from soak_prune import independent_prefixes
 from soak_state import (
     SoakNode,
     SoakOption,
@@ -130,6 +131,12 @@ class SoakStateTest(unittest.TestCase):
         requeue_failed_routes(state, ["failed-1", "failed-2"])
         self.assertEqual(
             state.pending, ["failed-1", "failed-2", "later"]
+        )
+
+    def test_independent_prefixes_drop_descendants(self) -> None:
+        self.assertEqual(
+            independent_prefixes(["0,1", "0,1,0", "2", ""]),
+            [""],
         )
 
 
