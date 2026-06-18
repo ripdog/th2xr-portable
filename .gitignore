@@ -3,14 +3,12 @@
 /debug/
 /logs/
 /keys/
+/conformance/*.SDT
 /.agents/skills
 toheart2-config.ini
 CMakeUserPresets.json
 
 # Save files
-save_*.sav
-save_*.bmp
-save_*.meta
 /save/
 
 # Downloaded binaries
