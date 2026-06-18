@@ -29,6 +29,7 @@ constexpr std::size_t save_menu_half_glyph_bytes =
     save_menu_size * save_menu_width / 2;
 constexpr std::size_t save_menu_ascii_offset =
     full_glyph_count * save_menu_full_glyph_bytes;
+constexpr std::size_t half_glyph_bitmap_count = 157;
 constexpr std::size_t shadow_full_bytes = 14 * 28;
 constexpr std::size_t shadow_half_bytes = 8 * 28;
 constexpr std::size_t shadow_ascii_offset =
@@ -317,7 +318,8 @@ GameFont::GameFont(const Archive& archive)
     if (const auto* save_entry = archive.find("font16.fd0")) {
         save_menu_data_ = archive.read(*save_entry);
         if (save_menu_data_.size()
-            < save_menu_ascii_offset + 158 * save_menu_half_glyph_bytes) {
+            < save_menu_ascii_offset
+                + half_glyph_bitmap_count * save_menu_half_glyph_bytes) {
             throw std::runtime_error("font16.fd0 is truncated");
         }
     }
@@ -551,9 +553,16 @@ void GameFont::draw_bitmap_face(
                 continue;
             }
             const auto index = glyph_index(static_cast<unsigned char>(byte));
-            const auto* bitmap = index < 0 ? nullptr
-                : data.data() + ascii
-                    + static_cast<std::size_t>(index) * half_bytes;
+            if (index < 0) {
+                continue;
+            }
+            if (index >= static_cast<int>(half_glyph_bitmap_count)) {
+                x += half_width;
+                continue;
+            }
+            const auto* bitmap =
+                data.data() + ascii
+                + static_cast<std::size_t>(index) * half_bytes;
             if (!bitmap) {
                 continue;
             }
@@ -595,6 +604,11 @@ void GameFont::draw_bitmap_face(
         } else if (is_cp932_half(byte)) {
             const auto index = cp932_half_index(byte);
             if (index >= 0) {
+                if (index >= static_cast<int>(half_glyph_bitmap_count)) {
+                    x += half_width;
+                    ++i;
+                    continue;
+                }
                 const auto* bitmap =
                     data.data() + ascii
                     + static_cast<std::size_t>(index) * half_bytes;

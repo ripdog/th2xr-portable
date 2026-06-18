@@ -6501,6 +6501,60 @@ private:
         ui_mode_ = save_return_mode_;
     }
 
+    void draw_save_digit_sheet_text(
+        float x, float y, std::string_view text,
+        std::uint8_t red = 255, std::uint8_t green = 255,
+        std::uint8_t blue = 255)
+    {
+        if (!ui_save_digits_) {
+            return;
+        }
+        float texture_width = 0.0f;
+        float texture_height = 0.0f;
+        SDL_GetTextureSize(ui_save_digits_.get(), &texture_width, &texture_height);
+        const float glyph_width = texture_width / 16.0f;
+        const float glyph_height = texture_height / 4.0f;
+        SDL_SetTextureColorMod(ui_save_digits_.get(), red, green, blue);
+        for (const unsigned char character : text) {
+            if (character >= '!' && character <= '_') {
+                const int index = static_cast<int>(character) - ('!' - 1);
+                const SDL_FRect src{
+                    glyph_width * static_cast<float>(index % 16),
+                    glyph_height * static_cast<float>(index / 16),
+                    glyph_width, glyph_height};
+                const SDL_FRect dst{x, y, glyph_width, glyph_height};
+                SDL_RenderTexture(
+                    renderer_, ui_save_digits_.get(), &src, &dst);
+            }
+            x += glyph_width;
+        }
+        SDL_SetTextureColorMod(ui_save_digits_.get(), 255, 255, 255);
+    }
+
+    void draw_save_digit_number(float x, float y, int number, int digits)
+    {
+        if (!ui_save_digits_) {
+            return;
+        }
+        float texture_width = 0.0f;
+        float texture_height = 0.0f;
+        SDL_GetTextureSize(ui_save_digits_.get(), &texture_width, &texture_height);
+        const float glyph_width = texture_width / 16.0f;
+        const float glyph_height = texture_height / 4.0f;
+        const auto text = std::format("{:0{}d}", number, digits);
+        for (const unsigned char character : text) {
+            if (character >= '0' && character <= '9') {
+                const SDL_FRect src{
+                    glyph_width * static_cast<float>(character - '0'),
+                    glyph_height, glyph_width, glyph_height};
+                const SDL_FRect dst{x, y, glyph_width, glyph_height};
+                SDL_RenderTexture(
+                    renderer_, ui_save_digits_.get(), &src, &dst);
+            }
+            x += glyph_width;
+        }
+    }
+
     void draw_system_menu()
     {
         // Background
@@ -6513,31 +6567,9 @@ private:
             SDL_RenderFillRect(renderer_, nullptr);
         }
 
-        // The original renders "<month>A<day>B" with sys0230.tga at (138, 12).
-        // A and B are the month/day suffix glyphs on the sheet's second row.
-        if (ui_save_digits_) {
-            float x = 138.0f;
-            const auto draw_date_glyph = [&](int column, int row) {
-                const SDL_FRect src{
-                    static_cast<float>(column * 14),
-                    static_cast<float>(row * 30), 14.0f, 30.0f};
-                const SDL_FRect dst{
-                    x, row == 0 ? -3.0f : 12.0f, 14.0f, 30.0f};
-                SDL_RenderTexture(
-                    renderer_, ui_save_digits_.get(), &src, &dst);
-                x += 14.0f;
-            };
-            const auto draw_number = [&](int value) {
-                const auto digits = std::to_string(value);
-                for (const char digit : digits) {
-                    draw_date_glyph(digit - '0', 0);
-                }
-            };
-            draw_number(runtime_.flag(0));
-            draw_date_glyph(1, 1);
-            draw_number(runtime_.flag(1));
-            draw_date_glyph(2, 1);
-        }
+        draw_save_digit_sheet_text(
+            138.0f, 12.0f,
+            std::format("{}A{}B", runtime_.flag(0), runtime_.flag(1)));
 
         // 4 main buttons from sys0110.tga
         // Layout: Save(0,0) Load(400,0) Hide(0,246) Settings(400,246)
@@ -7828,36 +7860,37 @@ private:
             }
 
             const int slot = save_page_ * 10 + i;
-            const auto slot_text = autosave_page
-                ? std::format("A{:02d}", i + 1)
-                : std::format("{:03d}", slot + 1);
-            font_.draw_save_menu(
-                renderer_, x + 102.0f, y + 6.0f, slot_text, 0, 0, 0);
-            font_.draw_save_menu(
-                renderer_, x + 100.0f, y + 6.0f, slot_text, 245, 220, 190);
+            if (autosave_page) {
+                draw_save_digit_sheet_text(
+                    x + 84.0f, y + 10.0f, std::format("A{:02d}", i + 1));
+            } else {
+                draw_save_digit_number(x + 84.0f, y + 10.0f, slot + 1, 3);
+            }
             if (!visible_saves_[i].exists) {
                 continue;
             }
 
             std::tm local{};
             localtime_r(&visible_saves_[i].timestamp, &local);
-            const auto date = std::format(
-                "{:04d}/{:02d}/{:02d}  {:02d}:{:02d}",
-                local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
-                local.tm_hour, local.tm_min);
             const auto game_date = visible_saves_[i].game_month == 0
-                ? std::string("?/?")
+                ? std::string("?A?B")
                 : std::format(
-                    "{}/{}", visible_saves_[i].game_month,
+                    "{}A{}B", visible_saves_[i].game_month,
                     visible_saves_[i].game_day);
+            draw_save_digit_sheet_text(x + 138.0f, y + 10.0f, game_date);
+            draw_save_digit_sheet_text(
+                x + 84.0f, y + 43.0f,
+                std::format("{:04d}", local.tm_year + 1900), 120, 43, 56);
+            draw_save_digit_sheet_text(
+                x + 150.0f, y + 43.0f,
+                std::format("{:02d}/{:02d}", local.tm_mon + 1, local.tm_mday),
+                120, 43, 56);
+            draw_save_digit_sheet_text(
+                x + 230.0f, y + 43.0f,
+                std::format("{:02d}:{:02d}", local.tm_hour, local.tm_min),
+                120, 43, 56);
             font_.draw_save_menu(
-                renderer_, x + 154.0f, y + 10.0f, game_date, 255, 245, 225);
-            font_.draw_save_menu(
-                renderer_, x + 101.0f, y + 45.0f, date, 70, 25, 34);
-            font_.draw_save_menu(
-                renderer_, x + 100.0f, y + 44.0f, date, 210, 110, 120);
-            font_.draw_save_menu(
-                renderer_, x + 224.0f, y + 9.0f,
+                renderer_, x + 208.0f, y + 10.0f,
                 visible_saves_[i].message.substr(0, 18), 255, 245, 225);
             if (slot == newest_save_slot_ && ui_save_new_) {
                 const SDL_FRect badge{x + 302.0f, y + 37.0f, 56.0f, 29.0f};
@@ -7867,10 +7900,9 @@ private:
         }
 
         constexpr int total_pages = 11;
-        font_.draw_save_menu(
-            renderer_, 366.0f, 80.0f,
-            std::format("{:02d}/{:02d}", save_page_ + 1, total_pages),
-            255, 245, 225);
+        draw_save_digit_sheet_text(
+            364.0f, 78.0f,
+            std::format("{:02d}/{:02d}", save_page_ + 1, total_pages));
         if (ui_save_controls_) {
             const SDL_FRect prev_src{
                 0.0f, save_hover_ == 10 ? 64.0f : 0.0f, 130.0f, 32.0f};
@@ -7910,36 +7942,42 @@ private:
                         renderer_, save_thumbnails_[selected].get(),
                         nullptr, &thumb);
                 }
-                const auto slot_text = autosave_page
-                    ? std::format("A{:02d}", save_confirm_slot_ % 10 + 1)
-                    : std::format("{:03d}", save_confirm_slot_ + 1);
-                font_.draw_save_menu(
-                    renderer_, x + 102.0f, y + 4.0f,
-                    slot_text, 245, 220, 190);
+                if (autosave_page) {
+                    draw_save_digit_sheet_text(
+                        x + 84.0f, y + 4.0f,
+                        std::format("A{:02d}", save_confirm_slot_ % 10 + 1));
+                } else {
+                    draw_save_digit_number(
+                        x + 84.0f, y + 4.0f, save_confirm_slot_ + 1, 3);
+                }
                 const auto game_date =
                     visible_saves_[selected].game_month == 0
-                    ? std::string("?/?")
+                    ? std::string("?A?B")
                     : std::format(
-                        "{}/{}", visible_saves_[selected].game_month,
+                        "{}A{}B", visible_saves_[selected].game_month,
                         visible_saves_[selected].game_day);
+                draw_save_digit_sheet_text(x + 138.0f, y + 4.0f, game_date);
                 font_.draw_save_menu(
-                    renderer_, x + 154.0f, y + 4.0f,
-                    game_date, 255, 245, 225);
-                font_.draw_save_menu(
-                    renderer_, x + 224.0f, y + 4.0f,
+                    renderer_, x + 208.0f, y + 4.0f,
                     visible_saves_[selected].message.substr(0, 18),
                     255, 245, 225);
 
                 std::tm local{};
                 localtime_r(
                     &visible_saves_[selected].timestamp, &local);
-                const auto date = std::format(
-                    "{:04d}/{:02d}/{:02d}  {:02d}:{:02d}",
-                    local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
-                    local.tm_hour, local.tm_min);
-                font_.draw_save_menu(
-                    renderer_, x + 100.0f, y + 36.0f,
-                    date, 210, 110, 120);
+                draw_save_digit_sheet_text(
+                    x + 84.0f, y + 37.0f,
+                    std::format("{:04d}", local.tm_year + 1900),
+                    120, 43, 56);
+                draw_save_digit_sheet_text(
+                    x + 150.0f, y + 37.0f,
+                    std::format(
+                        "{:02d}/{:02d}", local.tm_mon + 1, local.tm_mday),
+                    120, 43, 56);
+                draw_save_digit_sheet_text(
+                    x + 230.0f, y + 37.0f,
+                    std::format("{:02d}:{:02d}", local.tm_hour, local.tm_min),
+                    120, 43, 56);
             }
             if (ui_confirm_buttons_) {
                 const SDL_FRect yes_src{
