@@ -7841,8 +7841,6 @@ private:
                 renderer_, ui_save_rows_.get(), nullptr, &rows_dst);
         }
 
-        const bool autosave_page = save_page_ >= 10;
-
         for (int i = 0; i < 10; ++i) {
             const float x = 16.0f + 390.0f * (i / 5);
             const float y = 112.0f + 76.0f * (i % 5);
@@ -7860,12 +7858,7 @@ private:
             }
 
             const int slot = save_page_ * 10 + i;
-            if (autosave_page) {
-                draw_save_digit_sheet_text(
-                    x + 84.0f, y + 10.0f, std::format("A{:02d}", i + 1));
-            } else {
-                draw_save_digit_number(x + 84.0f, y + 10.0f, slot + 1, 3);
-            }
+            draw_save_digit_number(x + 84.0f, y + 10.0f, slot + 1, 3);
             if (!visible_saves_[i].exists) {
                 continue;
             }
@@ -7877,20 +7870,20 @@ private:
                 : std::format(
                     "{}A{}B", visible_saves_[i].game_month,
                     visible_saves_[i].game_day);
-            draw_save_digit_sheet_text(x + 138.0f, y + 10.0f, game_date);
+            draw_save_digit_sheet_text(x + 152.0f, y + 10.0f, game_date);
             draw_save_digit_sheet_text(
-                x + 84.0f, y + 43.0f,
+                x + 98.0f, y + 43.0f,
                 std::format("{:04d}", local.tm_year + 1900), 120, 43, 56);
             draw_save_digit_sheet_text(
-                x + 150.0f, y + 43.0f,
+                x + 164.0f, y + 43.0f,
                 std::format("{:02d}/{:02d}", local.tm_mon + 1, local.tm_mday),
                 120, 43, 56);
             draw_save_digit_sheet_text(
-                x + 230.0f, y + 43.0f,
+                x + 244.0f, y + 43.0f,
                 std::format("{:02d}:{:02d}", local.tm_hour, local.tm_min),
                 120, 43, 56);
             font_.draw_save_menu(
-                renderer_, x + 208.0f, y + 10.0f,
+                renderer_, x + 222.0f, y + 10.0f,
                 visible_saves_[i].message.substr(0, 18), 255, 245, 225);
             if (slot == newest_save_slot_ && ui_save_new_) {
                 const SDL_FRect badge{x + 302.0f, y + 37.0f, 56.0f, 29.0f};
@@ -7942,23 +7935,17 @@ private:
                         renderer_, save_thumbnails_[selected].get(),
                         nullptr, &thumb);
                 }
-                if (autosave_page) {
-                    draw_save_digit_sheet_text(
-                        x + 84.0f, y + 4.0f,
-                        std::format("A{:02d}", save_confirm_slot_ % 10 + 1));
-                } else {
-                    draw_save_digit_number(
-                        x + 84.0f, y + 4.0f, save_confirm_slot_ + 1, 3);
-                }
+                draw_save_digit_number(
+                    x + 84.0f, y + 4.0f, save_confirm_slot_ + 1, 3);
                 const auto game_date =
                     visible_saves_[selected].game_month == 0
                     ? std::string("?A?B")
                     : std::format(
                         "{}A{}B", visible_saves_[selected].game_month,
                         visible_saves_[selected].game_day);
-                draw_save_digit_sheet_text(x + 138.0f, y + 4.0f, game_date);
+                draw_save_digit_sheet_text(x + 152.0f, y + 4.0f, game_date);
                 font_.draw_save_menu(
-                    renderer_, x + 208.0f, y + 4.0f,
+                    renderer_, x + 222.0f, y + 4.0f,
                     visible_saves_[selected].message.substr(0, 18),
                     255, 245, 225);
 
@@ -7966,16 +7953,16 @@ private:
                 localtime_r(
                     &visible_saves_[selected].timestamp, &local);
                 draw_save_digit_sheet_text(
-                    x + 84.0f, y + 37.0f,
+                    x + 98.0f, y + 37.0f,
                     std::format("{:04d}", local.tm_year + 1900),
                     120, 43, 56);
                 draw_save_digit_sheet_text(
-                    x + 150.0f, y + 37.0f,
+                    x + 164.0f, y + 37.0f,
                     std::format(
                         "{:02d}/{:02d}", local.tm_mon + 1, local.tm_mday),
                     120, 43, 56);
                 draw_save_digit_sheet_text(
-                    x + 230.0f, y + 37.0f,
+                    x + 244.0f, y + 37.0f,
                     std::format("{:02d}:{:02d}", local.tm_hour, local.tm_min),
                     120, 43, 56);
             }
