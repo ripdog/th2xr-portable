@@ -9127,6 +9127,11 @@ private:
                 draw_overlay(i);
             }
         }
+        if (ui_mode_ == UiMode::system_menu) {
+            draw_system_menu();
+        } else if (ui_mode_ == UiMode::save || ui_mode_ == UiMode::load) {
+            draw_save_load();
+        }
         draw_active_transition();
         if (shake_art) {
             SDL_SetRenderTarget(renderer_, art_target);
@@ -9156,7 +9161,7 @@ private:
                 800, 600};
             SDL_SetRenderViewport(renderer_, &viewport);
         }
-        if (ui_mode_ != UiMode::backlog
+        if (ui_mode_ == UiMode::game
             && message_visible_ && !message_.empty()) {
             if (font_.authentic()) {
                 begin_authentic_text();
@@ -9264,7 +9269,7 @@ private:
                 select_overlay();
             }
         }
-        if (ui_mode_ != UiMode::backlog
+        if (ui_mode_ == UiMode::game
             && message_visible_ && choosing_ && !choices_.empty()) {
             float y = choice_y_start();
             for (int i = 0; i < static_cast<int>(choices_.size()); ++i) {
@@ -9285,12 +9290,8 @@ private:
         if (ui_mode_ == UiMode::game) {
             draw_click_indicator();
         }
-        if (ui_mode_ == UiMode::system_menu) {
-            draw_system_menu();
-        } else if (ui_mode_ == UiMode::backlog) {
+        if (ui_mode_ == UiMode::backlog) {
             draw_backlog();
-        } else if (ui_mode_ == UiMode::save || ui_mode_ == UiMode::load) {
-            draw_save_load();
         }
         select_sidebar();
         if ((ui_mode_ == UiMode::game || ui_mode_ == UiMode::backlog) && message_visible_) {
