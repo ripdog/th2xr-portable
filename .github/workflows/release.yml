@@ -41,7 +41,7 @@ jobs:
             libxfixes-dev libxi-dev libxss-dev libxtst-dev \
             libxkbcommon-dev libdrm-dev libgbm-dev \
             libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
-            libasound2-dev libpulse-dev libfuse2 libsqlite3-0
+            libasound2-dev libpulse-dev libfuse2 sqlite3
 
       - uses: libsdl-org/setup-sdl@main
         id: sdl
