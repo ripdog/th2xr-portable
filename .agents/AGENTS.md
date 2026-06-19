@@ -45,14 +45,8 @@ guess. Do not assume. The original engines are right there in the repo.
 - Asset loading: archives are KCAP or LAC format, accessed via `th2::Archive`
 - Images: `.tga` and `.bmp` via `th2::load_image()`, converted to SDL textures
 - Audio: `.wav`, `.ogg` via `th2::decode_audio()`, played through SDL audio streams
-
-## Building
-
-```sh
-cmake -B build -S .
-cmake --build build --target toheart2 -j$(nproc)
-ctest --test-dir build --output-on-failure
-```
+- Avoid creating over-long files. 1000 lines is the limit. Once over that, break into new cpp files.
+- 
 
 ## Save file format
 

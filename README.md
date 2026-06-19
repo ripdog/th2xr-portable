@@ -55,15 +55,15 @@ You need the original game files from the To Heart 2 XRATED english patch. This 
 
 Simply run the engine (.exe/.app/.AppImage), and a file picker will appear. Select the toheart2.exe from the game files, and the game will launch.
 
-On mac, you'll probably have to fight your OS to run the engine, as it's unsigned. Good luck.
+On macOS you may need to right-click the app and select Open the first time,
+since it's not signed with an Apple developer certificate. If it still doesn't work, see [apple docs.](https://support.apple.com/en-us/guide/mac-help/mh40616/mac)
 
 Alternatively, place your ToHeart2 XRATED game data in a `game-data/` directory next to the
 binary—the engine looks there by default:
 
 ```
 th2xr-portable/
-├── build/
-│   └── toheart2          (or toheart2.exe)
+├── toheart2          (or toheart2.exe)
 └── game-data/
     ├── bgm.PAK
     ├── GRP.PAK
@@ -72,6 +72,9 @@ th2xr-portable/
     ├── voice.pak
     └── ...
 ```
+
+Saves, config, and profiles are stored separately in your system user data
+directory (see [Save and config location](#save-and-config-location) below).
 
 ### In Game
 
@@ -102,6 +105,24 @@ folder that contains `TOHEART2.EXE`
 data is imported into internal storage.
 Be patient, the copy takes a few seconds.
 
+### Save and config location
+
+On desktop, saves, config, and profiles are stored in your system user data directory:
+
+| Platform | Path |
+|---|---|
+| Linux | `~/.local/share/ripdog/ToHeart2XR/` |
+| macOS | `~/Library/Application Support/ripdog/ToHeart2XR/` |
+| Windows | `%APPDATA%\ripdog\ToHeart2XR\` |
+
+The engine creates `save/`, `profile/`, and `logs/` subdirectories there.
+You can copy these folders between machines or desktop installs to transfer your progress.
+
+On Android these are stored in private app data.
+To get saves in and out, use the import/export saves function in 
+the game config panel. For example, export saves from your desktop install,
+copy the resulting file to your android device, and import it from a user-accessible folder.
+
 ### Touch controls
 
 The touch interface provides two-finger and swipe gestures as shortcuts
@@ -129,14 +150,6 @@ screen are full-size with drag-to-scroll.
 See [HACKING.md](HACKING.md#desktop-build) for platform-specific
 dependency installation and [HACKING.md](HACKING.md#android-build)
 for the Android build.
-
-### Soak Testing
-
-`tools/soak_parallel.py` is coverage-guided by default: it keeps routes that
-select new choice/map options or reach unknown script state, and drops routes
-that only recombine decision edges already covered elsewhere. Use `--exhaustive`
-only when deliberately debugging full route enumeration; the complete route
-space is combinatorial and is not practical to exhaust.
 
 
 ## License

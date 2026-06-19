@@ -27,12 +27,20 @@ void IoDeleter::operator()(SDL_IOStream* stream) const
 
 // Directory for writable files (config, saves, logs). On Android the current
 // working directory is not writable, so use the app-internal storage path.
+// On desktop platforms use the system-preferred user data directory so the
+// game works regardless of where the binary is launched from.
 std::filesystem::path writable_directory()
 {
 #ifdef __ANDROID__
     return std::filesystem::path(SDL_GetAndroidInternalStoragePath());
 #else
-    return std::filesystem::path(".");
+    char* path = SDL_GetPrefPath("ripdog", "ToHeart2XR");
+    if (!path) {
+        return std::filesystem::path(".");
+    }
+    std::filesystem::path result(path);
+    SDL_free(path);
+    return result;
 #endif
 }
 
@@ -46,7 +54,7 @@ std::filesystem::path app_config_directory()
 #ifdef __ANDROID__
     return std::filesystem::path(SDL_GetAndroidInternalStoragePath());
 #else
-    char* path = SDL_GetPrefPath("Leaf", "ToHeart2XR");
+    char* path = SDL_GetPrefPath("ripdog", "ToHeart2XR");
     if (!path) {
         return std::filesystem::path(".");
     }
