@@ -251,6 +251,21 @@ if(ANDROID)
         src/anime4k.cpp
         src/font.cpp
         src/game.cpp
+        src/game_backlog_touch.cpp
+        src/game_config_ui.cpp
+        src/game_events.cpp
+        src/game_flow.cpp
+        src/game_map.cpp
+        src/game_media.cpp
+        src/game_omake_input.cpp
+        src/game_render_effects.cpp
+        src/game_render_main.cpp
+        src/game_save.cpp
+        src/game_save_bundle.cpp
+        src/game_save_ui.cpp
+        src/game_state.cpp
+        src/game_support.cpp
+        src/game_title_draw.cpp
         src/icon.cpp
         src/image.cpp
         src/imgui_layer.cpp
@@ -265,6 +280,21 @@ else()
         src/anime4k.cpp
         src/font.cpp
         src/game.cpp
+        src/game_backlog_touch.cpp
+        src/game_config_ui.cpp
+        src/game_events.cpp
+        src/game_flow.cpp
+        src/game_map.cpp
+        src/game_media.cpp
+        src/game_omake_input.cpp
+        src/game_render_effects.cpp
+        src/game_render_main.cpp
+        src/game_save.cpp
+        src/game_save_bundle.cpp
+        src/game_save_ui.cpp
+        src/game_state.cpp
+        src/game_support.cpp
+        src/game_title_draw.cpp
         src/icon.cpp
         src/image.cpp
         src/imgui_layer.cpp

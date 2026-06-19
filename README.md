@@ -39,6 +39,11 @@ Compared to the original engine, we have:
  run the actual binary (inside the .app bundle) in the terminal, and file an issue
  with whatever error you see. Thanks!
 
+ ## Known Issues
+
+  * On Android, there is only one modern font, bundled with the app.
+  * On Android, when the app is left in the background for a while, either the audio, visuals, or both can break. The app doesn't crash, just becomes invisible or inaudible. Swipe away the app from recents and relaunch to fix, then load your autosave.
+
 
 ## Getting Started
 
@@ -90,10 +95,11 @@ You might get a "Google Play Protect" popup when installing. Tap "More Details" 
 
 ### Game data
 
-On first launch the app opens the Android folder picker. Select the 
+On first launch the app opens the Android folder picker. Navigate to the 
 folder that contains `TOHEART2.EXE`
-(typically the root of your ToHeart2 XRATED installation). The game
-data is imported into internal storage and persists across restarts.
+(typically the root of your ToHeart2 XRATED installation), then tap
+"Use This Folder", then "Allow". The game
+data is imported into internal storage.
 Be patient, the copy takes a few seconds.
 
 ### Touch controls
