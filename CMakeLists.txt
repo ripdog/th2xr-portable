@@ -50,6 +50,9 @@ if(ANDROID)
         INTERFACE_INCLUDE_DIRECTORIES "${SQLITE_INCLUDE_DIR}")
 else()
     find_package(SQLite3 REQUIRED)
+    if(NOT TARGET SQLite3::SQLite3) # CMake < 4.3
+        add_library(SQLite3::SQLite3 ALIAS SQLite::SQLite3)
+    endif()
 endif()
 if(WIN32)
     find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED
