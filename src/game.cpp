@@ -3949,17 +3949,23 @@ private:
                 return;
             }
         }
+        const bool alternate = name != standard_name;
+        pending_backlog_voice_ = BacklogVoice{
+            0, 0, scenario, voice, character, volume, alternate};
+        const auto* voice_entry = voice_archive_.find(name);
+        if (!voice_entry) {
+            voice_sound_[channel] = -1;
+            voice_loop_[channel] = false;
+            return;
+        }
         voice_channel.play(
-            load_audio(voice_archive_, name), loop,
+            th2::decode_audio(voice_archive_.read(*voice_entry)), loop,
             voice_gain(volume, character));
         voice_sound_[channel] = voice;
         voice_character_[channel] = character;
         voice_scenario_[channel] = scenario;
         voice_volume_[channel] = volume;
         voice_loop_[channel] = loop;
-        pending_backlog_voice_ = BacklogVoice{
-            0, 0, scenario, voice, character, volume,
-            name != standard_name};
     }
 
     void replay_backlog_voice(const BacklogVoice& voice)
