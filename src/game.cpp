@@ -487,8 +487,12 @@ public:
             runtime_.set_game_flag(i, config_.game_flags[i]);
         }
         window_ = SDL_CreateWindow(
-            "ToHeart2 XRATED", 1600, 1200, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+            "ToHeart2 XRATED", config_.window_width, config_.window_height,
+            SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
         window_holder_.reset(window_);
+        if (window_ && config_.window_x >= 0 && config_.window_y >= 0) {
+            SDL_SetWindowPosition(window_, config_.window_x, config_.window_y);
+        }
         SDL_PropertiesID renderer_properties = SDL_CreateProperties();
         SDL_SetStringProperty(
             renderer_properties, SDL_PROP_RENDERER_CREATE_NAME_STRING,
@@ -601,6 +605,7 @@ public:
         // window_holder_/renderer_holder_, so they are destroyed before the
         // renderer/window and before SDL_Quit().  Only the config needs an
         // explicit teardown step.
+        sync_window_config();
         th2::save_config(config_path_, config_);
     }
 
@@ -667,6 +672,14 @@ public:
                     SDL_Log("Render device lost");
                     continue;
                 }
+#ifndef __ANDROID__
+                if (event.type == SDL_EVENT_WINDOW_MOVED
+                    || event.type == SDL_EVENT_WINDOW_RESIZED
+                    || event.type == SDL_EVENT_WINDOW_RESTORED
+                    || event.type == SDL_EVENT_WINDOW_MAXIMIZED) {
+                    sync_window_config();
+                }
+#endif
                 imgui_->process_event(event);
                 touch_input_.process_event(event);
                 if (event.type == SDL_EVENT_FINGER_DOWN) {
@@ -833,6 +846,7 @@ public:
                                   & SDL_WINDOW_FULLSCREEN);
                             SDL_SetWindowFullscreen(
                                 window_, config_.fullscreen);
+                            sync_window_config();
                             th2::save_config(config_path_, config_);
                         } else if (event.key.key == SDLK_RETURN
                                    || event.key.key == SDLK_SPACE) {
@@ -1349,6 +1363,32 @@ private:
             voice_channels_[i].set_gain(
                 voice_gain(voice_volume_[i], voice_character_[i]));
         }
+    }
+
+    void sync_window_config()
+    {
+#ifndef __ANDROID__
+        if (!window_) {
+            return;
+        }
+        config_.fullscreen =
+            (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) != 0;
+        if (config_.fullscreen) {
+            return;
+        }
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        SDL_GetWindowPosition(window_, &x, &y);
+        SDL_GetWindowSize(window_, &width, &height);
+        if (width > 0 && height > 0) {
+            config_.window_x = x;
+            config_.window_y = y;
+            config_.window_width = width;
+            config_.window_height = height;
+        }
+#endif
     }
 
     void start_movie(int mode, int number, bool resume_script)
@@ -6054,6 +6094,7 @@ private:
 #ifndef __ANDROID__
                     if (ImGui::Checkbox("Fullscreen", &config_.fullscreen)) {
                         SDL_SetWindowFullscreen(window_, config_.fullscreen);
+                        sync_window_config();
                         option_changed = true;
                     }
 #endif

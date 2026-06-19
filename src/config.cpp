@@ -73,6 +73,16 @@ GameConfig load_config(const std::filesystem::path& path)
                 parse_int(value, config.sidebar_mode, 0, 3);
         } else if (key == "fullscreen") {
             config.fullscreen = parse_bool(value);
+        } else if (key == "window_x") {
+            config.window_x = parse_int(value, config.window_x, -32768, 32767);
+        } else if (key == "window_y") {
+            config.window_y = parse_int(value, config.window_y, -32768, 32767);
+        } else if (key == "window_width") {
+            config.window_width =
+                parse_int(value, config.window_width, 640, 16384);
+        } else if (key == "window_height") {
+            config.window_height =
+                parse_int(value, config.window_height, 480, 16384);
         } else if (key == "anime4k") {
             config.anime4k = parse_bool(value);
         } else if (key == "authentic_font") {
@@ -169,6 +179,10 @@ void save_config(const std::filesystem::path& path, const GameConfig& config)
             << "autosave_enabled=" << config.autosave_enabled << '\n'
             << "sidebar_mode=" << config.sidebar_mode << '\n'
            << "fullscreen=" << config.fullscreen << '\n'
+           << "window_x=" << config.window_x << '\n'
+           << "window_y=" << config.window_y << '\n'
+           << "window_width=" << config.window_width << '\n'
+           << "window_height=" << config.window_height << '\n'
            << "anime4k=" << config.anime4k << '\n'
            << "authentic_font=" << config.authentic_font << '\n'
            << "font_family=" << config.font_family << '\n'

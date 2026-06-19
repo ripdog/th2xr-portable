@@ -33,6 +33,10 @@ struct GameConfig {
     int sidebar_mode = 0;  // Fade when away
 #endif
     bool fullscreen = false;
+    int window_x = -1;
+    int window_y = -1;
+    int window_width = 1600;
+    int window_height = 1200;
     bool anime4k = true;
     bool authentic_font = false;
     std::string font_family = "Noto Sans";
