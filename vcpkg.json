@@ -5,6 +5,7 @@
     "pkgconf",
     "sdl3",
     "sdl3-ttf",
+    "sqlite3",
     "fontconfig",
     "libiconv",
     "glslang"

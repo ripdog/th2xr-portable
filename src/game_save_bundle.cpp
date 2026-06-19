@@ -147,7 +147,7 @@ void Game::initialize_scenario_flags()
     runtime_.set_flag(4, 0);
     runtime_.set_flag(
         5, th2::uses_default_voice_name(
-               config_.player_name, default_player_name_)
+               player_name_, default_player_name_)
             ? 1 : 0);
     runtime_.set_flag(6, 0);
     runtime_.set_flag(7, 0);
@@ -158,7 +158,7 @@ void Game::start_new_game()
     reset_play_state();
     initialize_scenario_flags();
     direct_scenario_ = false;
-    load_script("EV_0301MORNING.SDT");
+    load_script("010301000.sdt");
     ui_mode_ = UiMode::game;
     advance();
 }
@@ -171,11 +171,11 @@ void Game::open_name_input()
         std::snprintf(
             destination.data(), destination.size(), "%s", source.c_str());
     };
-    copy(name_family_, config_.player_name.family);
-    copy(name_given_, config_.player_name.given);
-    copy(name_family_reading_, config_.player_name.family_reading);
-    copy(name_given_reading_, config_.player_name.given_reading);
-    copy(name_nickname_, config_.player_name.nickname);
+    copy(name_family_, default_player_name_.family);
+    copy(name_given_, default_player_name_.given);
+    copy(name_family_reading_, default_player_name_.family_reading);
+    copy(name_given_reading_, default_player_name_.given_reading);
+    copy(name_nickname_, default_player_name_.nickname);
 }
 
 void Game::begin_title_exit(bool start_game)
@@ -401,7 +401,14 @@ bool Game::safe_bundle_path(std::string_view path)
     if (path.starts_with("save/")) {
         return true;
     }
-    return parsed.parent_path().empty() && parsed.extension() == ".ini";
+    if (path.starts_with("profile/")) {
+        return parsed.parent_path() == "profile"
+            && (parsed.extension() == ".ini"
+                || parsed.extension() == ".sqlite3");
+    }
+    return parsed.parent_path().empty()
+        && (parsed.extension() == ".ini"
+            || parsed.extension() == ".sqlite3");
 }
 
 std::vector<std::pair<std::string, std::filesystem::path>>
@@ -419,15 +426,11 @@ Game::save_bundle_files() const
             files.emplace_back(std::move(relative), path);
         };
 
-    if (std::filesystem::is_directory(root)) {
-        for (const auto& entry : std::filesystem::directory_iterator(root)) {
-            if (entry.is_regular_file()
-                && entry.path().extension() == ".ini") {
-                add_file(entry.path().filename().generic_string(), entry.path());
-            }
-        }
-    }
-    add_file(config_path_.filename().generic_string(), config_path_);
+    const auto add_relative_file = [&](const std::filesystem::path& path) {
+        add_file(std::filesystem::relative(path, root).generic_string(), path);
+    };
+    add_relative_file(config_path_);
+    add_relative_file(state_path_);
 
     const auto save_dir = root / "save";
     if (std::filesystem::is_directory(save_dir)) {
@@ -532,40 +535,52 @@ void Game::import_save_bundle(const std::string& path)
         throw std::runtime_error("save bundle contains too many files");
     }
     const auto root = writable_directory();
-    for (std::uint32_t i = 0; i < file_count; ++i) {
-        const auto path_size = read_u16(payload, read_offset);
-        if (read_offset + path_size > payload.size()) {
-            throw std::runtime_error("truncated save bundle path");
+    persistent_state_.close();
+    try {
+        for (std::uint32_t i = 0; i < file_count; ++i) {
+            const auto path_size = read_u16(payload, read_offset);
+            if (read_offset + path_size > payload.size()) {
+                throw std::runtime_error("truncated save bundle path");
+            }
+            const std::string relative(
+                reinterpret_cast<const char*>(payload.data() + read_offset),
+                path_size);
+            read_offset += path_size;
+            if (!safe_bundle_path(relative)) {
+                throw std::runtime_error(
+                    "unsafe path in save bundle: " + relative);
+            }
+            const auto file_size = read_u64(payload, read_offset);
+            if (file_size > 64ull * 1024ull * 1024ull
+                || read_offset + file_size > payload.size()) {
+                throw std::runtime_error("invalid file size in save bundle");
+            }
+            std::vector<std::uint8_t> bytes(
+                payload.begin() + static_cast<std::ptrdiff_t>(read_offset),
+                payload.begin()
+                    + static_cast<std::ptrdiff_t>(read_offset + file_size));
+            read_offset += static_cast<std::size_t>(file_size);
+            write_local_file(root / relative, bytes);
         }
-        const std::string relative(
-            reinterpret_cast<const char*>(payload.data() + read_offset),
-            path_size);
-        read_offset += path_size;
-        if (!safe_bundle_path(relative)) {
-            throw std::runtime_error("unsafe path in save bundle: " + relative);
+        if (read_offset != payload.size()) {
+            throw std::runtime_error("trailing data in save bundle");
         }
-        const auto file_size = read_u64(payload, read_offset);
-        if (file_size > 64ull * 1024ull * 1024ull
-            || read_offset + file_size > payload.size()) {
-            throw std::runtime_error("invalid file size in save bundle");
-        }
-        std::vector<std::uint8_t> bytes(
-            payload.begin() + static_cast<std::ptrdiff_t>(read_offset),
-            payload.begin()
-                + static_cast<std::ptrdiff_t>(read_offset + file_size));
-        read_offset += static_cast<std::size_t>(file_size);
-        write_local_file(root / relative, bytes);
-    }
-    if (read_offset != payload.size()) {
-        throw std::runtime_error("trailing data in save bundle");
+    } catch (...) {
+        persistent_state_.reopen(state_path_);
+        throw;
     }
 
     config_ = th2::load_config(config_path_);
-    if (config_.player_name.family.empty()) {
-        config_.player_name = default_player_name_;
-    }
-    for (std::size_t i = 0; i < config_.game_flags.size(); ++i) {
-        runtime_.set_game_flag(i, config_.game_flags[i]);
+    persistent_state_.reopen(state_path_);
+    persistent_game_flags_ = persistent_state_.load_game_flags();
+    unlocked_visual_cgs_ = persistent_state_.load_unlocks(
+        th2::PersistentState::UnlockKind::visual_cg);
+    unlocked_h_cgs_ = persistent_state_.load_unlocks(
+        th2::PersistentState::UnlockKind::h_cg);
+    unlocked_replays_ = persistent_state_.load_unlocks(
+        th2::PersistentState::UnlockKind::replay);
+    for (std::size_t i = 0; i < persistent_game_flags_.size(); ++i) {
+        runtime_.set_game_flag(i, persistent_game_flags_[i]);
     }
     apply_audio_gains();
     refresh_save_page();

@@ -96,18 +96,6 @@ GameConfig load_config(const std::filesystem::path& path)
             config.show_script_position = parse_bool(value);
         } else if (key == "dump_transition_frames") {
             config.dump_transition_frames = parse_bool(value);
-        } else if (key == "name_family") {
-            config.player_name.family = value;
-        } else if (key == "name_given") {
-            config.player_name.given = value;
-        } else if (key == "name_family_reading") {
-            config.player_name.family_reading = value;
-        } else if (key == "name_given_reading") {
-            config.player_name.given_reading = value;
-        } else if (key == "name_nickname") {
-            config.player_name.nickname = value;
-        } else if (key == "name_nickname_reading") {
-            config.player_name.nickname_reading = value;
         } else if (key.starts_with("character_voice_volume_")) {
             const auto index = parse_int(
                 key.substr(std::string_view("character_voice_volume_").size()),
@@ -122,34 +110,6 @@ GameConfig load_config(const std::filesystem::path& path)
                 -1, -1, 10);
             if (index >= 0) {
                 config.character_voice_muted[index] = parse_bool(value);
-            }
-        } else if (key == "read") {
-            config.read_lines.emplace(value);
-        } else if (key.starts_with("game_flag_")) {
-            const auto index = parse_int(
-                key.substr(std::string_view("game_flag_").size()),
-                -1, -1, static_cast<int>(config.game_flags.size() - 1));
-            if (index >= 0) {
-                config.game_flags[static_cast<std::size_t>(index)] =
-                    parse_int(
-                        value, 0,
-                        std::numeric_limits<std::int32_t>::min(),
-                        std::numeric_limits<std::int32_t>::max());
-            }
-        } else if (key == "visual_cg") {
-            const auto cg = parse_int(value, -1, -1, 99999);
-            if (cg >= 0) {
-                config.unlocked_visual_cgs.emplace(cg);
-            }
-        } else if (key == "h_cg") {
-            const auto cg = parse_int(value, -1, -1, 99999);
-            if (cg >= 0) {
-                config.unlocked_h_cgs.emplace(cg);
-            }
-        } else if (key == "replay") {
-            const auto replay = parse_int(value, -1, -1, 255);
-            if (replay >= 0) {
-                config.unlocked_replays.emplace(replay);
             }
         }
     }
@@ -188,36 +148,12 @@ void save_config(const std::filesystem::path& path, const GameConfig& config)
            << "font_family=" << config.font_family << '\n'
            << "font_size=" << config.font_size << '\n'
            << "show_script_position=" << config.show_script_position << '\n'
-           << "dump_transition_frames=" << config.dump_transition_frames << '\n'
-           << "name_family=" << config.player_name.family << '\n'
-           << "name_given=" << config.player_name.given << '\n'
-           << "name_family_reading=" << config.player_name.family_reading << '\n'
-           << "name_given_reading=" << config.player_name.given_reading << '\n'
-           << "name_nickname=" << config.player_name.nickname << '\n'
-           << "name_nickname_reading="
-           << config.player_name.nickname_reading << '\n';
+           << "dump_transition_frames=" << config.dump_transition_frames << '\n';
     for (std::size_t i = 0; i < config.character_voice_volume.size(); ++i) {
         output << "character_voice_volume_" << i << '='
                << config.character_voice_volume[i] << '\n'
                << "character_voice_muted_" << i << '='
                << config.character_voice_muted[i] << '\n';
-    }
-    for (const auto& key : config.read_lines) {
-        output << "read=" << key << '\n';
-    }
-    for (std::size_t i = 0; i < config.game_flags.size(); ++i) {
-        if (config.game_flags[i] != 0) {
-            output << "game_flag_" << i << '=' << config.game_flags[i] << '\n';
-        }
-    }
-    for (const auto cg : config.unlocked_visual_cgs) {
-        output << "visual_cg=" << cg << '\n';
-    }
-    for (const auto cg : config.unlocked_h_cgs) {
-        output << "h_cg=" << cg << '\n';
-    }
-    for (const auto replay : config.unlocked_replays) {
-        output << "replay=" << replay << '\n';
     }
     }
     std::filesystem::rename(temp_path, path);

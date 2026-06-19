@@ -22,13 +22,6 @@ int main()
     source.font_size = 31;
     source.character_voice_volume[3] = 17;
     source.character_voice_muted[3] = true;
-    source.player_name.family = "Smith";
-    source.read_lines.insert("010301000.sdt:42");
-    source.game_flags[80] = 7;
-    source.game_flags[128] = 1;
-    source.unlocked_visual_cgs.insert(1010);
-    source.unlocked_h_cgs.insert(1000);
-    source.unlocked_replays.insert(7);
     th2::save_config(path, source);
 
     const auto loaded = th2::load_config(path);
@@ -46,14 +39,7 @@ int main()
         || loaded.font_family != "Test Sans"
         || loaded.font_size != 31
         || loaded.character_voice_volume[3] != 17
-        || !loaded.character_voice_muted[3]
-        || loaded.player_name.family != "Smith"
-        || !loaded.read_lines.contains("010301000.sdt:42")
-        || loaded.game_flags[80] != 7
-        || loaded.game_flags[128] != 1
-        || !loaded.unlocked_visual_cgs.contains(1010)
-        || !loaded.unlocked_h_cgs.contains(1000)
-        || !loaded.unlocked_replays.contains(7)) {
+        || !loaded.character_voice_muted[3]) {
         return 1;
     }
     if (th2::auto_delay_ms(loaded, false, true, true)

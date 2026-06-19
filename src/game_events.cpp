@@ -145,8 +145,11 @@ bool Game::handle(const th2::Event& event)
         demo_delay_frames_ = std::max(0, number(event, 1));
         auto_next_time_.reset();
     } else if (name == "SetReplayNo") {
-        config_.unlocked_replays.emplace(number(event, 0));
-        th2::save_config(config_path_, config_);
+        const int replay = number(event, 0);
+        if (unlocked_replays_.emplace(replay).second) {
+            persistent_state_.unlock(
+                th2::PersistentState::UnlockKind::replay, replay);
+        }
     } else if (name == "ViewClock") {
         begin_clock(number(event, 0));
     } else if (name == "ViewCalender") {
@@ -277,7 +280,7 @@ bool Game::handle(const th2::Event& event)
     } else if (name == "SetMessage2") {
         push_backlog();
         message_.set(th2::substitute_player_name(
-            text(event, 0), config_.player_name,
+            text(event, 0), player_name_,
             runtime_.flag(213) != 0));
         current_backlog_voices_.clear();
         if (pending_backlog_voice_) {
@@ -296,7 +299,7 @@ bool Game::handle(const th2::Event& event)
     } else if (name == "AddMessage2") {
         const auto reveal_start = message_.visible().size();
         message_.append(th2::substitute_player_name(
-            text(event, 0), config_.player_name,
+            text(event, 0), player_name_,
             runtime_.flag(213) != 0));
         if (pending_backlog_voice_) {
             pending_backlog_voice_->start = reveal_start;
@@ -413,7 +416,7 @@ bool Game::handle(const th2::Event& event)
     } else if (name == "SetSelectMes") {
         choices_.push_back(Choice{
             interpret_newlines(th2::substitute_player_name(
-                text(event, 0), config_.player_name,
+                text(event, 0), player_name_,
                 runtime_.flag(213) != 0)),
             number(event, 1),
             number(event, 2),
@@ -446,7 +449,7 @@ bool Game::handle(const th2::Event& event)
     } else if (name == "SetSelectMes") {
         choices_.push_back(Choice{
             interpret_newlines(th2::substitute_player_name(
-                text(event, 0), config_.player_name,
+                text(event, 0), player_name_,
                 runtime_.flag(213) != 0)),
             number(event, 1),
             number(event, 2),

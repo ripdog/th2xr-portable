@@ -71,8 +71,8 @@ void Game::open_cg_gallery()
             }
             const int cg = encoded_cg % 100000;
             const auto& unlocked = entry.hcg
-                ? config_.unlocked_h_cgs
-                : config_.unlocked_visual_cgs;
+                ? unlocked_h_cgs_
+                : unlocked_visual_cgs_;
             if (unlocked.contains(cg)) {
                 entry.variants.push_back(cg);
             }
@@ -118,7 +118,7 @@ void Game::open_replay_gallery()
     begin_transition(1, 30, 128, false);
     for (int slot = 0; slot < 9; ++slot) {
         omake_replay_thumbnails_[slot].reset();
-        if (!config_.unlocked_replays.contains(replay_flags[slot])) {
+        if (!unlocked_replays_.contains(replay_flags[slot])) {
             continue;
         }
         const auto name =
@@ -405,7 +405,7 @@ void Game::draw_replay_gallery()
             55.0f + 177.0f * (slot % 4),
             114.0f + 128.0f * (slot / 4), 160.0f, 120.0f};
         const bool unlocked =
-            config_.unlocked_replays.contains(replay_flags[slot]);
+            unlocked_replays_.contains(replay_flags[slot]);
         if (unlocked && omake_replay_thumbnails_[slot]) {
             SDL_SetTextureAlphaMod(
                 omake_replay_thumbnails_[slot].get(),

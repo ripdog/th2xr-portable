@@ -311,11 +311,11 @@ void Game::play_se(int channel, int sound, bool loop, int volume, int fade,
 void Game::sync_game_flags()
 {
     const auto flags = runtime_.all_game_flags();
-    if (std::ranges::equal(flags, config_.game_flags)) {
+    if (std::ranges::equal(flags, persistent_game_flags_)) {
         return;
     }
-    std::ranges::copy(flags, config_.game_flags.begin());
-    th2::save_config(config_path_, config_);
+    std::ranges::copy(flags, persistent_game_flags_.begin());
+    persistent_state_.save_game_flags(persistent_game_flags_);
 }
 
 void Game::play_bgm(int music, bool loop, int volume)
@@ -533,9 +533,13 @@ void Game::set_cg(
         renderer_, graphics_, std::format("{}{:06d}.tga", prefix, visual),
         graphics_, background_tone_curves());
     auto& unlocked = kind == BackgroundKind::visual
-        ? config_.unlocked_visual_cgs : config_.unlocked_h_cgs;
+        ? unlocked_visual_cgs_ : unlocked_h_cgs_;
     if (unlocked.emplace(visual).second) {
-        th2::save_config(config_path_, config_);
+        persistent_state_.unlock(
+            kind == BackgroundKind::visual
+                ? th2::PersistentState::UnlockKind::visual_cg
+                : th2::PersistentState::UnlockKind::h_cg,
+            visual);
     }
     const bool keep_characters = number(event, 4) > 0;
     if (keep_characters) {

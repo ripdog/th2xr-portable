@@ -309,6 +309,19 @@ jobs:
           export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
           bash third_party/build-zstd-android.sh
 
+      - name: Cache SQLite
+        id: cache-sqlite
+        uses: actions/cache@v4
+        with:
+          path: third_party/sqlite-android
+          key: sqlite-android-3530200-ndk29-arm64-v8a
+
+      - name: Build SQLite
+        if: steps.cache-sqlite.outputs.cache-hit != 'true'
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
+          bash third_party/build-sqlite-android.sh
+
       - name: Build APK
         run: |
           mkdir -p keys

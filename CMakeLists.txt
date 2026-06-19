@@ -35,6 +35,22 @@ if(ANDROID)
 else()
     find_package(Iconv REQUIRED)
 endif()
+if(ANDROID)
+    set(SQLITE_ROOT "${CMAKE_SOURCE_DIR}/third_party/sqlite-android")
+    set(SQLITE_LIBRARY "${SQLITE_ROOT}/lib/libsqlite3.a")
+    set(SQLITE_INCLUDE_DIR "${SQLITE_ROOT}/include")
+    if(NOT EXISTS "${SQLITE_LIBRARY}")
+        message(FATAL_ERROR
+            "SQLite not found at ${SQLITE_LIBRARY}. "
+            "Run third_party/build-sqlite-android.sh first.")
+    endif()
+    add_library(SQLite3::SQLite3 STATIC IMPORTED GLOBAL)
+    set_target_properties(SQLite3::SQLite3 PROPERTIES
+        IMPORTED_LOCATION "${SQLITE_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${SQLITE_INCLUDE_DIR}")
+else()
+    find_package(SQLite3 REQUIRED)
+endif()
 if(WIN32)
     find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED
         HINTS "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/tools/glslang")
@@ -117,9 +133,11 @@ target_compile_options(th2_character PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,Apple
 
 add_library(th2_config
     src/config.cpp
+    src/persistent_state.cpp
     src/player_name.cpp
 )
 target_include_directories(th2_config PUBLIC src)
+target_link_libraries(th2_config PUBLIC SQLite3::SQLite3)
 target_compile_options(th2_config PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
 
 add_library(th2_soak
@@ -416,6 +434,12 @@ if(BUILD_TESTING)
     )
     target_link_libraries(th2-config-test PRIVATE th2_config)
     add_test(NAME config-roundtrip COMMAND th2-config-test)
+
+    add_executable(th2-persistent-state-test
+        src/persistent_state_test.cpp
+    )
+    target_link_libraries(th2-persistent-state-test PRIVATE th2_config)
+    add_test(NAME persistent-state COMMAND th2-persistent-state-test)
 
     add_executable(th2-icon-test
         src/icon.cpp

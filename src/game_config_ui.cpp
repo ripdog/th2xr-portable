@@ -394,7 +394,7 @@ void Game::draw_name_input()
             || name_nickname_[0] == '\0') {
             name_error_ = "Every field must contain a name.";
         } else {
-            config_.player_name = {
+            player_name_ = {
                 name_family_.data(),
                 name_given_.data(),
                 name_family_reading_.data(),
@@ -402,13 +402,11 @@ void Game::draw_name_input()
                 name_nickname_.data(),
                 name_nickname_.data(),
             };
-            th2::save_config(config_path_, config_);
             name_input_open_ = false;
             start_new_game();
         }
     }
     if (ImGui::Button("Reset Defaults", ImVec2(-FLT_MIN, 0.0f))) {
-        config_.player_name = default_player_name_;
         open_name_input();
     }
     if (ImGui::Button("Cancel", ImVec2(-FLT_MIN, 0.0f))) {
@@ -424,7 +422,7 @@ void Game::draw_name_input()
             || name_nickname_[0] == '\0') {
             name_error_ = "Every field must contain a name.";
         } else {
-            config_.player_name = {
+            player_name_ = {
                 name_family_.data(),
                 name_given_.data(),
                 name_family_reading_.data(),
@@ -432,14 +430,12 @@ void Game::draw_name_input()
                 name_nickname_.data(),
                 name_nickname_.data(),
             };
-            th2::save_config(config_path_, config_);
             name_input_open_ = false;
             start_new_game();
         }
     }
     ImGui::SameLine();
     if (ImGui::Button("Reset Defaults", ImVec2(130.0f, 0.0f))) {
-        config_.player_name = default_player_name_;
         open_name_input();
     }
     ImGui::SameLine();

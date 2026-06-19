@@ -146,8 +146,9 @@ private:
         game_.retire_soak_gpu_work(true);
         for (std::size_t i = 0; i < game_flags_.size(); ++i) {
             game_.runtime_.set_game_flag(i, game_flags_[i]);
-            game_.config_.game_flags[i] = game_flags_[i];
+            game_.persistent_game_flags_[i] = game_flags_[i];
         }
+        game_.persistent_state_.save_game_flags(game_.persistent_game_flags_);
         route_finished_ = false;
         terminal_script_.clear();
         terminal_offset_ = 0;

@@ -134,22 +134,29 @@ bool Game::voice_playing() const
 
 void Game::update_playback_modes()
 {
-    if (config_open_ || ui_mode_ != UiMode::game || choosing_
-        || transition_ || background_fade_ || screen_flash_
-        || (shake_ && shake_->frames > 0)
-        || background_scroll_ || character_animation_active()
-        || clock_state_ || calendar_state_
-        || wake_time_ || audio_wait_) {
+    if (config_open_ || ui_mode_ != UiMode::game || choosing_) {
         auto_next_time_.reset();
         return;
     }
     const auto now = std::chrono::steady_clock::now();
     if (skip_mode_) {
-        if (now >= skip_next_time_
-            && (config_.skip_unread || current_text_is_read())) {
-            skip();
+        if (now >= skip_next_time_) {
+            if (waiting_for_input_ && !config_.skip_unread
+                && !current_text_is_read()) {
+                skip_mode_ = false;
+                return;
+            }
+            skip(true);
             skip_next_time_ = now + std::chrono::milliseconds(40);
         }
+        return;
+    }
+    if (transition_ || background_fade_ || screen_flash_
+        || (shake_ && shake_->frames > 0)
+        || background_scroll_ || character_animation_active()
+        || clock_state_ || calendar_state_
+        || wake_time_ || audio_wait_) {
+        auto_next_time_.reset();
         return;
     }
     if ((!auto_mode_ && !demo_mode_)

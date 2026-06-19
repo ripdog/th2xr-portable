@@ -1,12 +1,8 @@
 #pragma once
 
 #include <array>
-#include <cstdint>
 #include <filesystem>
 #include <string>
-#include <unordered_set>
-
-#include "player_name.hpp"
 
 namespace th2 {
 
@@ -43,12 +39,6 @@ struct GameConfig {
     int font_size = 24;
     bool show_script_position = false;
     bool dump_transition_frames = false;
-    PlayerName player_name;
-    std::unordered_set<std::string> read_lines;
-    std::array<std::int32_t, 1024> game_flags{};
-    std::unordered_set<int> unlocked_visual_cgs;
-    std::unordered_set<int> unlocked_h_cgs;
-    std::unordered_set<int> unlocked_replays;
 };
 
 GameConfig load_config(const std::filesystem::path& path);

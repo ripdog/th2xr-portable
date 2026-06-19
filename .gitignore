@@ -6,10 +6,12 @@
 /conformance/*.SDT
 /.agents/skills
 toheart2-config.ini
+toheart2-state.sqlite3
 CMakeUserPresets.json
 
 # Save files
 /save/
+/profile/
 
 # Downloaded binaries
 ffmpeg-*.7z

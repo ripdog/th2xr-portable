@@ -452,19 +452,13 @@ void Game::save_body(std::ostream& out) const
               static_cast<std::streamsize>(current_line_key_.size()));
     write_i32(out, auto_mode_ ? 1 : 0);
     write_i32(out, skip_mode_ ? 1 : 0);
-    write_u32(
-        out, static_cast<std::uint32_t>(config_.read_lines.size()));
-    for (const auto& key : config_.read_lines) {
-        write_u32(out, static_cast<std::uint32_t>(key.size()));
-        out.write(key.data(), static_cast<std::streamsize>(key.size()));
-    }
     const std::array saved_names{
-        &config_.player_name.family,
-        &config_.player_name.given,
-        &config_.player_name.family_reading,
-        &config_.player_name.given_reading,
-        &config_.player_name.nickname,
-        &config_.player_name.nickname_reading,
+        &player_name_.family,
+        &player_name_.given,
+        &player_name_.family_reading,
+        &player_name_.given_reading,
+        &player_name_.nickname,
+        &player_name_.nickname_reading,
     };
     for (const auto* value : saved_names) {
         write_u32(out, static_cast<std::uint32_t>(value->size()));
@@ -758,26 +752,21 @@ bool Game::load_body(std::istream& in)
             static_cast<std::streamsize>(key_size));
     auto_mode_ = read_i32(in) != 0;
     skip_mode_ = read_i32(in) != 0;
-    const auto read_count = read_u32(in);
-    for (std::uint32_t i = 0; i < read_count; ++i) {
-        const auto size = read_u32(in);
-        std::string key(size, '\0');
-        in.read(key.data(), static_cast<std::streamsize>(size));
-        config_.read_lines.insert(std::move(key));
-    }
     const auto read_name = [&]() {
         const auto size = read_u32(in);
         std::string value(size, '\0');
         in.read(value.data(), static_cast<std::streamsize>(size));
         return value;
     };
-    config_.player_name.family = read_name();
-    config_.player_name.given = read_name();
-    config_.player_name.family_reading = read_name();
-    config_.player_name.given_reading = read_name();
-    config_.player_name.nickname = read_name();
-    config_.player_name.nickname_reading = read_name();
-    th2::save_config(config_path_, config_);
+    player_name_.family = read_name();
+    player_name_.given = read_name();
+    player_name_.family_reading = read_name();
+    player_name_.given_reading = read_name();
+    player_name_.nickname = read_name();
+    player_name_.nickname_reading = read_name();
+    if (player_name_.family.empty()) {
+        player_name_ = default_player_name_;
+    }
     return true;
 }
 

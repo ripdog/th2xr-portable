@@ -23,6 +23,16 @@ extern "C" {
 
 namespace th2app {
 
+namespace {
+
+std::filesystem::path ensure_parent_directory(std::filesystem::path path)
+{
+    std::filesystem::create_directories(path.parent_path());
+    return path;
+}
+
+}  // namespace
+
 struct SdlSubsystem {
     SdlSubsystem()
     {
@@ -47,26 +57,36 @@ Game::Game(
       bgm_archive_(data / "bgm.PAK"), se_archive_(data / "SE.PAK"),
       voice_archive_(data / "voice.pak"), movie_archive_(data / "mov.pak"),
       runtime_(scripts_),
-      config_path_(soak_directory
+      config_path_(ensure_parent_directory(soak_directory
           ? *soak_directory / "config.ini"
-          : writable_directory() / "toheart2-config.ini"),
+          : profile_directory() / "toheart2-config.ini")),
+      state_path_(ensure_parent_directory(soak_directory
+          ? *soak_directory / "state.sqlite3"
+          : profile_directory() / "toheart2-state.sqlite3")),
       config_(th2::load_config(config_path_)),
+      persistent_state_(state_path_),
       suppress_audio_output_(soak_directory.has_value()),
       font_(fonts_)
 {
     SDL_Log("Config path: %s", config_path_.string().c_str());
+    SDL_Log("State path: %s", state_path_.string().c_str());
+    persistent_game_flags_ = persistent_state_.load_game_flags();
+    unlocked_visual_cgs_ = persistent_state_.load_unlocks(
+        th2::PersistentState::UnlockKind::visual_cg);
+    unlocked_h_cgs_ = persistent_state_.load_unlocks(
+        th2::PersistentState::UnlockKind::h_cg);
+    unlocked_replays_ = persistent_state_.load_unlocks(
+        th2::PersistentState::UnlockKind::replay);
     const auto non_zero_flags = std::ranges::count_if(
-        config_.game_flags, [](std::int32_t v) { return v != 0; });
+        persistent_game_flags_, [](std::int32_t v) { return v != 0; });
     SDL_Log(
         "Loaded %zu non-zero game flags (flag98=%d)",
-        static_cast<std::size_t>(non_zero_flags), config_.game_flags[98]);
+        static_cast<std::size_t>(non_zero_flags), persistent_game_flags_[98]);
     default_player_name_ =
         th2::load_default_player_name(data / "TOHEART2.EXE");
-    if (config_.player_name.family.empty()) {
-        config_.player_name = default_player_name_;
-    }
-    for (std::size_t i = 0; i < config_.game_flags.size(); ++i) {
-        runtime_.set_game_flag(i, config_.game_flags[i]);
+    player_name_ = default_player_name_;
+    for (std::size_t i = 0; i < persistent_game_flags_.size(); ++i) {
+        runtime_.set_game_flag(i, persistent_game_flags_[i]);
     }
     window_ = SDL_CreateWindow(
         "ToHeart2 XRATED", config_.window_width, config_.window_height,
@@ -441,11 +461,17 @@ int Game::run_loop()
                 } else if (event.button.button == SDL_BUTTON_LEFT) {
                     if (event.button.which != SDL_TOUCH_MOUSEID
                         && handle_sidebar_click(event.button.x, event.button.y)) {
+                        suppress_sidebar_mouse_up_ = true;
                         continue;
                     }
                 }
             } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
                 if (event.button.button == SDL_BUTTON_LEFT) {
+                    if (suppress_sidebar_mouse_up_) {
+                        suppress_sidebar_mouse_up_ = false;
+                        backlog_handle_dragging_ = false;
+                        continue;
+                    }
                     if (choosing_) {
                         const float mouse_y = event.button.y;
                         float y = choice_y_start();

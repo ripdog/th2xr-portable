@@ -31,13 +31,13 @@
 
 namespace th2app {
 
-std::string Game::current_read_key() const
+std::optional<th2::ReadMarker> Game::current_read_marker() const
 {
     if (current_line_key_.empty() || message_.empty()) {
-        return {};
+        return std::nullopt;
     }
-    return current_line_key_ + ':'
-        + std::to_string(message_.revealed_count());
+    return th2::parse_read_marker(
+        current_line_key_ + ':' + std::to_string(message_.revealed_count()));
 }
 
 bool Game::current_text_is_read() const
@@ -45,8 +45,8 @@ bool Game::current_text_is_read() const
     if (replay_mode_) {
         return true;
     }
-    const auto key = current_read_key();
-    return !key.empty() && config_.read_lines.contains(key);
+    const auto marker = current_read_marker();
+    return marker && persistent_state_.is_line_read(*marker);
 }
 
 void Game::mark_current_text_read()
@@ -54,9 +54,9 @@ void Game::mark_current_text_read()
     if (replay_mode_) {
         return;
     }
-    const auto key = current_read_key();
-    if (!key.empty() && config_.read_lines.insert(key).second) {
-        th2::save_config(config_path_, config_);
+    const auto marker = current_read_marker();
+    if (marker) {
+        persistent_state_.mark_line_read(*marker);
     }
 }
 

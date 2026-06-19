@@ -374,7 +374,7 @@ void Game::activate_replay_gallery_item()
         return;
     }
     if (omake_highlight_ < 0 || omake_highlight_ >= 9
-        || !config_.unlocked_replays.contains(
+        || !unlocked_replays_.contains(
             replay_flags[omake_highlight_])) {
         return;
     }

@@ -6,6 +6,7 @@
 #include "font.hpp"
 #include "imgui_layer.hpp"
 #include "message.hpp"
+#include "persistent_state.hpp"
 #include "player_name.hpp"
 #include "script_runtime.hpp"
 #include "soak.hpp"
@@ -26,6 +27,7 @@
 #include <istream>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 namespace th2app {
@@ -50,6 +52,7 @@ using WindowPtr = std::unique_ptr<SDL_Window, WindowDeleter>;
 using RendererPtr = std::unique_ptr<SDL_Renderer, RendererDeleter>;
 using IoPtr = std::unique_ptr<SDL_IOStream, IoDeleter>;
 std::filesystem::path writable_directory();
+std::filesystem::path profile_directory();
 std::optional<std::filesystem::path> discover_game_data_path(
     const std::filesystem::path& default_path, bool explicit_path);
 std::pair<float, float> logical_coordinates(
@@ -91,9 +94,9 @@ public:
     int run();
     int run_loop();
 private:
-    static constexpr std::uint32_t save_version_ = 25;
+    static constexpr std::uint32_t save_version_ = 26;
     static constexpr std::uint32_t first_backlog_voice_save_version_ = 25;
-    static constexpr std::uint32_t oldest_supported_save_version_ = 24;
+    static constexpr std::uint32_t oldest_supported_save_version_ = 26;
     enum class AudioWaitKind {
         bgm,
         sound_effect,
@@ -302,7 +305,13 @@ private:
     th2::Archive movie_archive_;
     th2::ScriptRuntime runtime_;
     const std::filesystem::path config_path_;
+    const std::filesystem::path state_path_;
     th2::GameConfig config_;
+    th2::PersistentState persistent_state_;
+    std::array<std::int32_t, 1024> persistent_game_flags_{};
+    std::unordered_set<int> unlocked_visual_cgs_;
+    std::unordered_set<int> unlocked_h_cgs_;
+    std::unordered_set<int> unlocked_replays_;
     const bool suppress_audio_output_;
     std::unique_ptr<th2::SoakGameDriver<Game>> soak_;
     std::size_t soak_renderer_ticks_ = 0;
@@ -526,6 +535,7 @@ private:
     int sidebar_hover_ = -1;
     float sidebar_alpha_ = 0.0f;
     bool sidebar_mouse_near_ = false;
+    bool suppress_sidebar_mouse_up_ = false;
     bool message_visible_ = true;
     int save_page_ = 0;
     int save_hover_ = -1;
@@ -556,6 +566,7 @@ private:
     std::string name_error_;
     std::string load_error_;
     th2::PlayerName default_player_name_;
+    th2::PlayerName player_name_;
     std::array<char, 64> name_family_{};
     std::array<char, 64> name_given_{};
     std::array<char, 64> name_family_reading_{};
@@ -575,7 +586,7 @@ private:
     int map_selected_ = -1;
     std::chrono::steady_clock::time_point map_tick_{};
     std::chrono::steady_clock::time_point map_started_{};
-    std::string current_read_key() const;
+    std::optional<th2::ReadMarker> current_read_marker() const;
     bool current_text_is_read() const;
     void mark_current_text_read();
     void manual_advance();

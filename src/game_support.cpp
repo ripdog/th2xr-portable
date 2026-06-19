@@ -36,6 +36,11 @@ std::filesystem::path writable_directory()
 #endif
 }
 
+std::filesystem::path profile_directory()
+{
+    return writable_directory() / "profile";
+}
+
 std::filesystem::path app_config_directory()
 {
 #ifdef __ANDROID__
