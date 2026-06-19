@@ -18,11 +18,13 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_dialog.h>
+#include <SDL3/SDL_iostream.h>
 #include <SDL3/SDL_log.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL_system.h>
 #include <SDL3/SDL_video.h>
 #include <imgui.h>
+#include <zstd.h>
 
 extern "C" {
     #include <libavutil/log.h>
@@ -55,6 +57,7 @@ extern "C" {
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -93,8 +96,18 @@ struct RendererDeleter {
     }
 };
 
+struct IoDeleter {
+    void operator()(SDL_IOStream* stream) const
+    {
+        if (stream) {
+            SDL_CloseIO(stream);
+        }
+    }
+};
+
 using WindowPtr = std::unique_ptr<SDL_Window, WindowDeleter>;
 using RendererPtr = std::unique_ptr<SDL_Renderer, RendererDeleter>;
+using IoPtr = std::unique_ptr<SDL_IOStream, IoDeleter>;
 
 // Directory for writable files (config, saves, logs). On Android the current
 // working directory is not writable, so use the app-internal storage path.
@@ -916,6 +929,7 @@ public:
                 }
             }
             handle_touch_actions();
+            process_save_bundle_dialog();
 
             if (!app_active_) {
                 // Pause the loop while the app is in the background so we
@@ -1650,6 +1664,21 @@ private:
     bool just_advanced_past_block_end_ = false;
     bool config_open_ = false;
     bool confirm_return_title_ = false;
+    enum class SaveBundleAction {
+        none,
+        export_bundle,
+        import_bundle,
+    };
+    struct SaveBundleDialog {
+        std::mutex mutex;
+        SaveBundleAction action = SaveBundleAction::none;
+        bool active = false;
+        bool done = false;
+        std::optional<std::string> path;
+        std::string error;
+    };
+    SaveBundleDialog save_bundle_dialog_;
+    std::string save_bundle_status_;
     bool name_input_open_ = false;
     std::string name_error_;
     std::string load_error_;
@@ -5971,6 +6000,432 @@ private:
         th2::save_config(config_path_, config_);
     }
 
+    static void append_u16(
+        std::vector<std::uint8_t>& data, std::uint16_t value)
+    {
+        data.push_back(static_cast<std::uint8_t>(value & 0xff));
+        data.push_back(static_cast<std::uint8_t>((value >> 8) & 0xff));
+    }
+
+    static void append_u32(
+        std::vector<std::uint8_t>& data, std::uint32_t value)
+    {
+        for (int i = 0; i < 4; ++i) {
+            data.push_back(static_cast<std::uint8_t>((value >> (i * 8)) & 0xff));
+        }
+    }
+
+    static void append_u64(
+        std::vector<std::uint8_t>& data, std::uint64_t value)
+    {
+        for (int i = 0; i < 8; ++i) {
+            data.push_back(static_cast<std::uint8_t>((value >> (i * 8)) & 0xff));
+        }
+    }
+
+    static std::uint16_t read_u16(
+        const std::vector<std::uint8_t>& data, std::size_t& offset)
+    {
+        if (offset + 2 > data.size()) {
+            throw std::runtime_error("truncated save bundle");
+        }
+        const auto value = static_cast<std::uint16_t>(
+            data[offset] | (data[offset + 1] << 8));
+        offset += 2;
+        return value;
+    }
+
+    static std::uint32_t read_u32(
+        const std::vector<std::uint8_t>& data, std::size_t& offset)
+    {
+        if (offset + 4 > data.size()) {
+            throw std::runtime_error("truncated save bundle");
+        }
+        std::uint32_t value = 0;
+        for (int i = 0; i < 4; ++i) {
+            value |= static_cast<std::uint32_t>(data[offset + i]) << (i * 8);
+        }
+        offset += 4;
+        return value;
+    }
+
+    static std::uint64_t read_u64(
+        const std::vector<std::uint8_t>& data, std::size_t& offset)
+    {
+        if (offset + 8 > data.size()) {
+            throw std::runtime_error("truncated save bundle");
+        }
+        std::uint64_t value = 0;
+        for (int i = 0; i < 8; ++i) {
+            value |= static_cast<std::uint64_t>(data[offset + i]) << (i * 8);
+        }
+        offset += 8;
+        return value;
+    }
+
+    static std::vector<std::uint8_t> read_local_file(
+        const std::filesystem::path& path)
+    {
+        std::ifstream input(path, std::ios::binary);
+        if (!input) {
+            throw std::runtime_error("could not read " + path.string());
+        }
+        return {
+            std::istreambuf_iterator<char>(input),
+            std::istreambuf_iterator<char>()};
+    }
+
+    static void write_local_file(
+        const std::filesystem::path& path,
+        const std::vector<std::uint8_t>& bytes)
+    {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream output(path, std::ios::binary);
+        if (!output) {
+            throw std::runtime_error("could not write " + path.string());
+        }
+        output.write(
+            reinterpret_cast<const char*>(bytes.data()),
+            static_cast<std::streamsize>(bytes.size()));
+        if (!output) {
+            throw std::runtime_error("could not finish writing " + path.string());
+        }
+    }
+
+    static std::vector<std::uint8_t> read_sdl_file(const std::string& path)
+    {
+        IoPtr stream(SDL_IOFromFile(path.c_str(), "rb"));
+        if (!stream) {
+            throw std::runtime_error(
+                "could not open bundle: " + std::string(SDL_GetError()));
+        }
+        std::vector<std::uint8_t> bytes;
+        const Sint64 size = SDL_GetIOSize(stream.get());
+        if (size > 0) {
+            bytes.resize(static_cast<std::size_t>(size));
+            std::size_t read = 0;
+            while (read < bytes.size()) {
+                const auto n = SDL_ReadIO(
+                    stream.get(), bytes.data() + read, bytes.size() - read);
+                if (n == 0) {
+                    throw std::runtime_error("could not read complete bundle");
+                }
+                read += n;
+            }
+            return bytes;
+        }
+        std::array<std::uint8_t, 64 * 1024> buffer{};
+        for (;;) {
+            const auto n = SDL_ReadIO(stream.get(), buffer.data(), buffer.size());
+            if (n == 0) {
+                break;
+            }
+            bytes.insert(bytes.end(), buffer.begin(), buffer.begin() + n);
+        }
+        return bytes;
+    }
+
+    static void write_sdl_file(
+        const std::string& path, const std::vector<std::uint8_t>& bytes)
+    {
+        IoPtr stream(SDL_IOFromFile(path.c_str(), "wb"));
+        if (!stream) {
+            throw std::runtime_error(
+                "could not create bundle: " + std::string(SDL_GetError()));
+        }
+        std::size_t written = 0;
+        while (written < bytes.size()) {
+            const auto n = SDL_WriteIO(
+                stream.get(), bytes.data() + written, bytes.size() - written);
+            if (n == 0) {
+                throw std::runtime_error("could not write complete bundle");
+            }
+            written += n;
+        }
+    }
+
+    static bool safe_bundle_path(std::string_view path)
+    {
+        if (path.empty() || path.starts_with('/') || path.starts_with('\\')
+            || path.find(':') != std::string_view::npos
+            || path.find('\\') != std::string_view::npos) {
+            return false;
+        }
+        const std::filesystem::path parsed(path);
+        for (const auto& part : parsed) {
+            if (part == "." || part == "..") {
+                return false;
+            }
+        }
+        if (path.starts_with("save/")) {
+            return true;
+        }
+        return parsed.parent_path().empty() && parsed.extension() == ".ini";
+    }
+
+    std::vector<std::pair<std::string, std::filesystem::path>>
+    save_bundle_files() const
+    {
+        std::vector<std::pair<std::string, std::filesystem::path>> files;
+        std::unordered_set<std::string> seen;
+        const auto root = writable_directory();
+        const auto add_file =
+            [&](std::string relative, const std::filesystem::path& path) {
+                if (!std::filesystem::is_regular_file(path)
+                    || !seen.insert(relative).second) {
+                    return;
+                }
+                files.emplace_back(std::move(relative), path);
+            };
+
+        if (std::filesystem::is_directory(root)) {
+            for (const auto& entry : std::filesystem::directory_iterator(root)) {
+                if (entry.is_regular_file()
+                    && entry.path().extension() == ".ini") {
+                    add_file(entry.path().filename().generic_string(), entry.path());
+                }
+            }
+        }
+        add_file(config_path_.filename().generic_string(), config_path_);
+
+        const auto save_dir = root / "save";
+        if (std::filesystem::is_directory(save_dir)) {
+            for (const auto& entry :
+                 std::filesystem::recursive_directory_iterator(save_dir)) {
+                if (!entry.is_regular_file()) {
+                    continue;
+                }
+                const auto relative =
+                    std::filesystem::relative(entry.path(), root)
+                        .generic_string();
+                if (safe_bundle_path(relative)) {
+                    add_file(relative, entry.path());
+                }
+            }
+        }
+        std::ranges::sort(
+            files, {},
+            &std::pair<std::string, std::filesystem::path>::first);
+        return files;
+    }
+
+    std::vector<std::uint8_t> build_save_bundle()
+    {
+        sync_window_config();
+        th2::save_config(config_path_, config_);
+
+        const auto files = save_bundle_files();
+        std::vector<std::uint8_t> payload;
+        append_u32(payload, static_cast<std::uint32_t>(files.size()));
+        for (const auto& [relative, path] : files) {
+            const auto bytes = read_local_file(path);
+            if (relative.size() > std::numeric_limits<std::uint16_t>::max()) {
+                throw std::runtime_error("save bundle path is too long");
+            }
+            append_u16(payload, static_cast<std::uint16_t>(relative.size()));
+            payload.insert(payload.end(), relative.begin(), relative.end());
+            append_u64(payload, static_cast<std::uint64_t>(bytes.size()));
+            payload.insert(payload.end(), bytes.begin(), bytes.end());
+        }
+
+        const auto bound = ZSTD_compressBound(payload.size());
+        std::vector<std::uint8_t> compressed(bound);
+        const auto compressed_size = ZSTD_compress(
+            compressed.data(), compressed.size(),
+            payload.data(), payload.size(), 10);
+        if (ZSTD_isError(compressed_size)) {
+            throw std::runtime_error(ZSTD_getErrorName(compressed_size));
+        }
+        compressed.resize(compressed_size);
+
+        std::vector<std::uint8_t> bundle;
+        constexpr std::string_view magic = "TH2SAVES";
+        bundle.insert(bundle.end(), magic.begin(), magic.end());
+        append_u32(bundle, 1);
+        append_u64(bundle, static_cast<std::uint64_t>(payload.size()));
+        bundle.insert(bundle.end(), compressed.begin(), compressed.end());
+        return bundle;
+    }
+
+    void export_save_bundle(const std::string& selected_path)
+    {
+        std::string path = selected_path;
+        if (!path.starts_with("content://")
+            && std::filesystem::path(path).extension() != ".th2saves") {
+            path += ".th2saves";
+        }
+        const auto bundle = build_save_bundle();
+        write_sdl_file(path, bundle);
+        save_bundle_status_ =
+            std::format("Exported save bundle ({} bytes).", bundle.size());
+    }
+
+    void import_save_bundle(const std::string& path)
+    {
+        const auto bundle = read_sdl_file(path);
+        constexpr std::string_view magic = "TH2SAVES";
+        if (bundle.size() < magic.size() + 12
+            || !std::equal(magic.begin(), magic.end(), bundle.begin())) {
+            throw std::runtime_error("not a ToHeart2 save bundle");
+        }
+        std::size_t offset = magic.size();
+        const auto version = read_u32(bundle, offset);
+        if (version != 1) {
+            throw std::runtime_error("unsupported save bundle version");
+        }
+        const auto payload_size = read_u64(bundle, offset);
+        if (payload_size > 512ull * 1024ull * 1024ull) {
+            throw std::runtime_error("save bundle is too large");
+        }
+        std::vector<std::uint8_t> payload(static_cast<std::size_t>(payload_size));
+        const auto result = ZSTD_decompress(
+            payload.data(), payload.size(),
+            bundle.data() + offset, bundle.size() - offset);
+        if (ZSTD_isError(result) || result != payload.size()) {
+            throw std::runtime_error("could not decompress save bundle");
+        }
+
+        std::size_t read_offset = 0;
+        const auto file_count = read_u32(payload, read_offset);
+        if (file_count > 1000) {
+            throw std::runtime_error("save bundle contains too many files");
+        }
+        const auto root = writable_directory();
+        for (std::uint32_t i = 0; i < file_count; ++i) {
+            const auto path_size = read_u16(payload, read_offset);
+            if (read_offset + path_size > payload.size()) {
+                throw std::runtime_error("truncated save bundle path");
+            }
+            const std::string relative(
+                reinterpret_cast<const char*>(payload.data() + read_offset),
+                path_size);
+            read_offset += path_size;
+            if (!safe_bundle_path(relative)) {
+                throw std::runtime_error("unsafe path in save bundle: " + relative);
+            }
+            const auto file_size = read_u64(payload, read_offset);
+            if (file_size > 64ull * 1024ull * 1024ull
+                || read_offset + file_size > payload.size()) {
+                throw std::runtime_error("invalid file size in save bundle");
+            }
+            std::vector<std::uint8_t> bytes(
+                payload.begin() + static_cast<std::ptrdiff_t>(read_offset),
+                payload.begin()
+                    + static_cast<std::ptrdiff_t>(read_offset + file_size));
+            read_offset += static_cast<std::size_t>(file_size);
+            write_local_file(root / relative, bytes);
+        }
+        if (read_offset != payload.size()) {
+            throw std::runtime_error("trailing data in save bundle");
+        }
+
+        config_ = th2::load_config(config_path_);
+        if (config_.player_name.family.empty()) {
+            config_.player_name = default_player_name_;
+        }
+        for (std::size_t i = 0; i < config_.game_flags.size(); ++i) {
+            runtime_.set_game_flag(i, config_.game_flags[i]);
+        }
+        apply_audio_gains();
+        refresh_save_page();
+        save_bundle_status_ =
+            std::format("Imported {} file{}.", file_count, file_count == 1 ? "" : "s");
+    }
+
+    static void save_bundle_dialog_callback(
+        void* userdata, const char* const* filelist, int)
+    {
+        auto* dialog = static_cast<SaveBundleDialog*>(userdata);
+        std::lock_guard lock(dialog->mutex);
+        if (!filelist) {
+            dialog->error = SDL_GetError();
+        } else if (filelist[0]) {
+            dialog->path = filelist[0];
+        }
+        dialog->done = true;
+    }
+
+    void show_save_bundle_export_dialog()
+    {
+        std::lock_guard lock(save_bundle_dialog_.mutex);
+        if (save_bundle_dialog_.active) {
+            return;
+        }
+        save_bundle_dialog_.active = true;
+        save_bundle_dialog_.done = false;
+        save_bundle_dialog_.path.reset();
+        save_bundle_dialog_.error.clear();
+        save_bundle_dialog_.action = SaveBundleAction::export_bundle;
+        save_bundle_status_ = "Waiting for export location...";
+        const SDL_DialogFileFilter filters[] = {
+            {"ToHeart2 saves", "th2saves"},
+            {"All files", "*"},
+        };
+        SDL_ShowSaveFileDialog(
+            save_bundle_dialog_callback, &save_bundle_dialog_, window_,
+            filters, std::size(filters), "toheart2-saves.th2saves");
+    }
+
+    void show_save_bundle_import_dialog()
+    {
+        std::lock_guard lock(save_bundle_dialog_.mutex);
+        if (save_bundle_dialog_.active) {
+            return;
+        }
+        save_bundle_dialog_.active = true;
+        save_bundle_dialog_.done = false;
+        save_bundle_dialog_.path.reset();
+        save_bundle_dialog_.error.clear();
+        save_bundle_dialog_.action = SaveBundleAction::import_bundle;
+        save_bundle_status_ = "Waiting for bundle selection...";
+        const SDL_DialogFileFilter filters[] = {
+            {"ToHeart2 saves", "th2saves"},
+            {"All files", "*"},
+        };
+        SDL_ShowOpenFileDialog(
+            save_bundle_dialog_callback, &save_bundle_dialog_, window_,
+            filters, std::size(filters), nullptr, false);
+    }
+
+    void process_save_bundle_dialog()
+    {
+        SaveBundleAction action = SaveBundleAction::none;
+        std::optional<std::string> path;
+        std::string error;
+        {
+            std::lock_guard lock(save_bundle_dialog_.mutex);
+            if (!save_bundle_dialog_.active || !save_bundle_dialog_.done) {
+                return;
+            }
+            action = save_bundle_dialog_.action;
+            path = save_bundle_dialog_.path;
+            error = save_bundle_dialog_.error;
+            save_bundle_dialog_.action = SaveBundleAction::none;
+            save_bundle_dialog_.active = false;
+            save_bundle_dialog_.done = false;
+            save_bundle_dialog_.path.reset();
+            save_bundle_dialog_.error.clear();
+        }
+        if (!error.empty()) {
+            save_bundle_status_ = "File dialog failed: " + error;
+            return;
+        }
+        if (!path) {
+            save_bundle_status_ = "Save bundle operation cancelled.";
+            return;
+        }
+        try {
+            if (action == SaveBundleAction::export_bundle) {
+                export_save_bundle(*path);
+            } else if (action == SaveBundleAction::import_bundle) {
+                import_save_bundle(*path);
+            }
+        } catch (const std::exception& exception) {
+            save_bundle_status_ =
+                std::string("Save bundle failed: ") + exception.what();
+        }
+    }
+
     bool volume_control(const char* label, int& volume, bool& muted)
     {
         bool volume_changed = false;
@@ -6066,6 +6521,28 @@ private:
                     option_changed |= ImGui::Checkbox(
                         "Autosave after text block (2 min interval)",
                         &config_.autosave_enabled);
+                    ImGui::SeparatorText("Save transfer");
+                    const bool bundle_dialog_active = [&] {
+                        std::lock_guard lock(save_bundle_dialog_.mutex);
+                        return save_bundle_dialog_.active;
+                    }();
+                    ImGui::BeginDisabled(bundle_dialog_active);
+                    if (ImGui::Button("Export saves...", ImVec2(150.0f, 0.0f))) {
+                        play_se(-1, 9104, false, 255);
+                        show_save_bundle_export_dialog();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Import saves...", ImVec2(150.0f, 0.0f))) {
+                        play_se(-1, 9104, false, 255);
+                        show_save_bundle_import_dialog();
+                    }
+                    ImGui::EndDisabled();
+                    if (!save_bundle_status_.empty()) {
+                        ImGui::TextWrapped("%s", save_bundle_status_.c_str());
+                    } else {
+                        ImGui::TextDisabled(
+                            "Bundles include saves and config .ini files.");
+                    }
                     ImGui::EndTabItem();
                 }
                 if (ImGui::BeginTabItem("Audio")) {

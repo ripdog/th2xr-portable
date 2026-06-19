@@ -12,7 +12,8 @@ file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" TH2_VERSION)
 string(STRIP "${TH2_VERSION}" TH2_VERSION)
 
 if(ANDROID)
-    set(ENV{PKG_CONFIG_PATH} "${CMAKE_SOURCE_DIR}/third_party/ffmpeg-android/lib/pkgconfig")
+    set(ENV{PKG_CONFIG_PATH}
+        "${CMAKE_SOURCE_DIR}/third_party/ffmpeg-android/lib/pkgconfig:${CMAKE_SOURCE_DIR}/third_party/zstd-android/lib/pkgconfig")
 endif()
 
 find_package(SDL3 CONFIG REQUIRED)
@@ -50,6 +51,7 @@ else()
 endif()
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
     libavformat libavcodec libavutil libswscale libswresample)
+pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
 if(ANDROID)
     link_directories(${FFMPEG_LIBRARY_DIRS})
 endif()
@@ -321,7 +323,7 @@ else()
         SDL3::SDL3 PkgConfig::SDL3_TTF PkgConfig::FONTCONFIG th2_runtime th2_soak)
 endif()
 target_link_libraries(toheart2 PRIVATE th2_audio th2_character th2_config imgui)
-target_link_libraries(toheart2 PRIVATE PkgConfig::FFMPEG)
+target_link_libraries(toheart2 PRIVATE PkgConfig::FFMPEG PkgConfig::ZSTD)
 
 add_executable(th2-video-test
     src/video_test.cpp
