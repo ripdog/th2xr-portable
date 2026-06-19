@@ -131,15 +131,63 @@ jobs:
           </plist>
           PLIST
 
-          # Bundle Homebrew dependencies into the .app
-          mkdir -p "$APP/Contents/Frameworks"
-          for lib in SDL3 SDL3_ttf fontconfig avformat avcodec avutil swscale swresample; do
-            src=$(brew --prefix)/lib/lib${lib}.dylib 2>/dev/null || continue
-            if [ -f "$src" ]; then
-              cp "$src" "$APP/Contents/Frameworks/"
-              install_name_tool -change "$src" "@executable_path/../Frameworks/$(basename "$src")" \
-                "$APP/Contents/MacOS/toheart2" 2>/dev/null || true
+          # Bundle all Homebrew dylibs and fix up load commands.
+          # We walk the full transitive dependency tree so the .app is
+          # self-contained and does not require Homebrew on the target Mac.
+          BREW_PREFIX=$(brew --prefix)
+          FRAMEWORKS="$APP/Contents/Frameworks"
+          mkdir -p "$FRAMEWORKS"
+
+          # Enable nullglob so non-matching globs expand to nothing.
+          shopt -s nullglob
+
+          # --- Step 1: recursively copy every Homebrew dylib ---
+          CHANGED=1
+          while [ $CHANGED -eq 1 ]; do
+            CHANGED=0
+            for file in "$APP/Contents/MacOS/toheart2" "$FRAMEWORKS"/*.dylib; do
+              [ -f "$file" ] || continue
+              otool -L "$file" | awk '/^\t/ {print $1}' | grep "^$BREW_PREFIX" > /tmp/bundle-deps.txt || true
+              while read -r dep; do
+                [ -z "$dep" ] && continue
+                base=$(basename "$dep")
+                if [ ! -f "$FRAMEWORKS/$base" ] && [ -f "$dep" ]; then
+                  cp "$dep" "$FRAMEWORKS/$base"
+                  chmod u+w "$FRAMEWORKS/$base"
+                  CHANGED=1
+                fi
+              done < /tmp/bundle-deps.txt
+            done
+          done
+
+          # --- Step 2: fix the binary to use @executable_path ---
+          otool -L "$APP/Contents/MacOS/toheart2" | awk '/^\t/ {print $1}' | grep "^$BREW_PREFIX" > /tmp/bundle-deps.txt || true
+          while read -r dep; do
+            base=$(basename "$dep")
+            if [ -f "$FRAMEWORKS/$base" ]; then
+              install_name_tool -change "$dep" \
+                "@executable_path/../Frameworks/$base" \
+                "$APP/Contents/MacOS/toheart2"
             fi
+          done < /tmp/bundle-deps.txt
+
+          # --- Step 3: fix every dylib's install name and inter-dylib refs ---
+          for dylib in "$FRAMEWORKS"/*.dylib; do
+            [ -f "$dylib" ] || continue
+            # Fix the dylib's own identity (LC_ID_DYLIB).
+            install_name_tool -id \
+              "@executable_path/../Frameworks/$(basename "$dylib")" \
+              "$dylib" 2>/dev/null || true
+            # Fix references this dylib makes to other Homebrew dylibs.
+            otool -L "$dylib" | awk '/^\t/ {print $1}' | grep "^$BREW_PREFIX" > /tmp/bundle-deps.txt || true
+            while read -r dep; do
+              dep_base=$(basename "$dep")
+              if [ -f "$FRAMEWORKS/$dep_base" ]; then
+                install_name_tool -change "$dep" \
+                  "@executable_path/../Frameworks/$dep_base" \
+                  "$dylib"
+              fi
+            done < /tmp/bundle-deps.txt
           done
 
           hdiutil create -volname "ToHeart2" -srcfolder "$APP" -ov -format UDZO toheart2-macos.dmg

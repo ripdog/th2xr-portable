@@ -326,3 +326,9 @@ coordinator leases distinct paths, waits for the batch, then atomically merges
 new branches and results into `logs/soak/state.txt`. Only one coordinator or
 single-process soak should use a campaign directory at a time. Four workers is
 the conservative default because every process also owns SDL GPU resources.
+
+`tools/soak_parallel.py` is coverage-guided by default: it keeps routes that
+select new choice/map options or reach unknown script state, and drops routes
+that only recombine decision edges already covered elsewhere. Use `--exhaustive`
+only when deliberately debugging full route enumeration; the complete route
+space is combinatorial and is not practical to exhaust.
