@@ -213,7 +213,7 @@ int Game::run_loop()
         "Window size: %dx%d (points), %dx%d (pixels), display scale %.2f",
         dbg_w, dbg_h, dbg_pw, dbg_ph, SDL_GetWindowDisplayScale(window_));
     constexpr auto frame_duration = std::chrono::nanoseconds(
-        1'000'000'000 / 120);
+        1'000'000'000 / 60);
     auto next_frame = std::chrono::steady_clock::now();
     while (running_) {
         int window_width = 800;
@@ -512,9 +512,9 @@ int Game::run_loop()
         if (movie_) {
             movie_->set_speed(control_held ? 4.0 : 1.0);
         } else if (control_held && ui_mode_ == UiMode::title) {
-            title_started_ -= std::chrono::milliseconds(25);
+            title_started_ -= std::chrono::milliseconds(50);
             if (title_exit_started_) {
-                *title_exit_started_ -= std::chrono::milliseconds(25);
+                *title_exit_started_ -= std::chrono::milliseconds(50);
             }
         } else if (control_held && ui_mode_ == UiMode::game) {
             const auto now = std::chrono::steady_clock::now();
