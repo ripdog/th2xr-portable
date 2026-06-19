@@ -12,8 +12,7 @@ file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" TH2_VERSION)
 string(STRIP "${TH2_VERSION}" TH2_VERSION)
 
 if(ANDROID)
-    set(ENV{PKG_CONFIG_PATH}
-        "${CMAKE_SOURCE_DIR}/third_party/ffmpeg-android/lib/pkgconfig:${CMAKE_SOURCE_DIR}/third_party/zstd-android/lib/pkgconfig")
+    set(ENV{PKG_CONFIG_PATH} "${CMAKE_SOURCE_DIR}/third_party/ffmpeg-android/lib/pkgconfig")
 endif()
 
 find_package(SDL3 CONFIG REQUIRED)
@@ -51,7 +50,23 @@ else()
 endif()
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
     libavformat libavcodec libavutil libswscale libswresample)
-pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
+if(ANDROID)
+    set(ZSTD_ROOT "${CMAKE_SOURCE_DIR}/third_party/zstd-android")
+    set(ZSTD_LIBRARY "${ZSTD_ROOT}/lib/libzstd.a")
+    set(ZSTD_INCLUDE_DIR "${ZSTD_ROOT}/include")
+    if(NOT EXISTS "${ZSTD_LIBRARY}")
+        message(FATAL_ERROR
+            "zstd not found at ${ZSTD_LIBRARY}. "
+            "Run third_party/build-zstd-android.sh first.")
+    endif()
+    add_library(ZSTD::ZSTD STATIC IMPORTED GLOBAL)
+    set_target_properties(ZSTD::ZSTD PROPERTIES
+        IMPORTED_LOCATION "${ZSTD_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${ZSTD_INCLUDE_DIR}")
+else()
+    pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
+    add_library(ZSTD::ZSTD ALIAS PkgConfig::ZSTD)
+endif()
 if(ANDROID)
     link_directories(${FFMPEG_LIBRARY_DIRS})
 endif()
@@ -323,7 +338,7 @@ else()
         SDL3::SDL3 PkgConfig::SDL3_TTF PkgConfig::FONTCONFIG th2_runtime th2_soak)
 endif()
 target_link_libraries(toheart2 PRIVATE th2_audio th2_character th2_config imgui)
-target_link_libraries(toheart2 PRIVATE PkgConfig::FFMPEG PkgConfig::ZSTD)
+target_link_libraries(toheart2 PRIVATE PkgConfig::FFMPEG ZSTD::ZSTD)
 
 add_executable(th2-video-test
     src/video_test.cpp
