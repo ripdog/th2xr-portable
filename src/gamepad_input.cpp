@@ -3,6 +3,8 @@
 #include <SDL3/SDL_log.h>
 
 #include <algorithm>
+#include <array>
+#include <cstdlib>
 #include <optional>
 
 namespace th2app {
@@ -10,6 +12,7 @@ namespace th2app {
 namespace {
 
 constexpr Sint16 TriggerThreshold = 16000;
+constexpr Sint16 AxisLogThreshold = 8000;
 
 SDL_Scancode scancode_for_key(SDL_Keycode key)
 {
@@ -85,6 +88,22 @@ std::optional<SDL_Event> gamepad_button_as_key_event(
     return event;
 }
 
+bool should_log_axis(std::array<Sint16, SDL_GAMEPAD_AXIS_COUNT>& last_values,
+    Uint8 axis, Sint16 value)
+{
+    if (axis >= last_values.size()) {
+        return false;
+    }
+    const Sint16 previous = last_values[axis];
+    const bool was_active = std::abs(previous) >= AxisLogThreshold;
+    const bool is_active = std::abs(value) >= AxisLogThreshold;
+    if (was_active == is_active && std::abs(value - previous) < AxisLogThreshold) {
+        return false;
+    }
+    last_values[axis] = value;
+    return is_active || value == 0;
+}
+
 }  // namespace
 
 void GamepadDeleter::operator()(SDL_Gamepad* gamepad) const
@@ -119,6 +138,12 @@ bool GamepadInput::process_event(SDL_Event& event)
     if (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
         if (event.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
             right_trigger_held_ = event.gaxis.value >= TriggerThreshold;
+        } else if (should_log_axis(
+                       last_unhandled_gamepad_axes_, event.gaxis.axis,
+                       event.gaxis.value)) {
+            SDL_Log(
+                "Unhandled input: gamepad axis which=%u axis=%u value=%d",
+                event.gaxis.which, event.gaxis.axis, event.gaxis.value);
         }
         return false;
     }
@@ -127,9 +152,40 @@ bool GamepadInput::process_event(SDL_Event& event)
         || event.type == SDL_EVENT_GAMEPAD_BUTTON_UP) {
         const auto key_event = gamepad_button_as_key_event(event.gbutton);
         if (!key_event) {
+            SDL_Log(
+                "Unhandled input: gamepad button type=%u which=%u button=%u down=%d",
+                event.type, event.gbutton.which, event.gbutton.button,
+                event.gbutton.down);
             return false;
         }
         event = *key_event;
+    }
+
+    if (event.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN
+        || event.type == SDL_EVENT_JOYSTICK_BUTTON_UP) {
+        SDL_Log(
+            "Unhandled input: joystick button type=%u which=%u button=%u down=%d",
+            event.type, event.jbutton.which, event.jbutton.button,
+            event.jbutton.down);
+        return false;
+    }
+
+    if (event.type == SDL_EVENT_JOYSTICK_AXIS_MOTION) {
+        if (should_log_axis(
+                last_unhandled_joystick_axes_, event.jaxis.axis,
+                event.jaxis.value)) {
+            SDL_Log(
+                "Unhandled input: joystick axis which=%u axis=%u value=%d",
+                event.jaxis.which, event.jaxis.axis, event.jaxis.value);
+        }
+        return false;
+    }
+
+    if (event.type == SDL_EVENT_JOYSTICK_HAT_MOTION) {
+        SDL_Log(
+            "Unhandled input: joystick hat which=%u hat=%u value=%u",
+            event.jhat.which, event.jhat.hat, event.jhat.value);
+        return false;
     }
 
     return true;

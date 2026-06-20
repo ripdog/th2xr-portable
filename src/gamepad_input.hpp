@@ -1,6 +1,7 @@
 #pragma once
 
 #include <SDL3/SDL.h>
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -19,6 +20,8 @@ public:
 
 private:
     bool right_trigger_held_ = false;
+    std::array<Sint16, SDL_GAMEPAD_AXIS_COUNT> last_unhandled_gamepad_axes_{};
+    std::array<Sint16, SDL_GAMEPAD_AXIS_COUNT> last_unhandled_joystick_axes_{};
     std::vector<GamepadPtr> gamepads_;
 };
 
