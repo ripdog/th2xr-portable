@@ -36,7 +36,7 @@ std::filesystem::path ensure_parent_directory(std::filesystem::path path)
 struct SdlSubsystem {
     SdlSubsystem()
     {
-        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
+        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
             throw std::runtime_error(SDL_GetError());
         }
     }
@@ -254,6 +254,9 @@ int Game::run_loop()
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_EVENT_QUIT) {
                 running_ = false;
+                continue;
+            }
+            if (!gamepad_input_.process_event(event)) {
                 continue;
             }
             if (event.type == SDL_EVENT_WILL_ENTER_BACKGROUND) {

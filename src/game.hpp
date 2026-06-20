@@ -4,6 +4,7 @@
 #include "character.hpp"
 #include "config.hpp"
 #include "font.hpp"
+#include "gamepad_input.hpp"
 #include "imgui_layer.hpp"
 #include "message.hpp"
 #include "persistent_state.hpp"
@@ -327,6 +328,7 @@ private:
     std::unique_ptr<th2::ImGuiLayer> imgui_;
     std::unique_ptr<th2::Upscaler> upscaler_;
     th2::TouchInput touch_input_;
+    GamepadInput gamepad_input_;
     th2::GameFont font_;
     bool anime4k_available_ = false;
     bool last_anime4k_wanted_ = false;

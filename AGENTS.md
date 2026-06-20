@@ -46,7 +46,6 @@ guess. Do not assume. The original engines are right there in the repo.
 - Images: `.tga` and `.bmp` via `th2::load_image()`, converted to SDL textures
 - Audio: `.wav`, `.ogg` via `th2::decode_audio()`, played through SDL audio streams
 - Avoid creating over-long files. 1000 lines is the limit. Once over that, break into new cpp files.
-- 
 
 ## Save file format
 
