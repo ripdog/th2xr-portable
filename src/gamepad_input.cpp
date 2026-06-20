@@ -9,6 +9,8 @@ namespace th2app {
 
 namespace {
 
+constexpr Sint16 TriggerThreshold = 16000;
+
 SDL_Scancode scancode_for_key(SDL_Keycode key)
 {
     switch (key) {
@@ -20,6 +22,9 @@ SDL_Scancode scancode_for_key(SDL_Keycode key)
     case SDLK_DOWN: return SDL_SCANCODE_DOWN;
     case SDLK_LEFT: return SDL_SCANCODE_LEFT;
     case SDLK_RIGHT: return SDL_SCANCODE_RIGHT;
+    case SDLK_F8: return SDL_SCANCODE_F8;
+    case SDLK_F9: return SDL_SCANCODE_F9;
+    case SDLK_F10: return SDL_SCANCODE_F10;
     default: return SDL_SCANCODE_UNKNOWN;
     }
 }
@@ -33,15 +38,21 @@ std::optional<SDL_Event> gamepad_button_as_key_event(
         key = SDLK_RETURN;
         break;
     case SDL_GAMEPAD_BUTTON_EAST:
-    case SDL_GAMEPAD_BUTTON_BACK:
     case SDL_GAMEPAD_BUTTON_START:
         key = SDLK_ESCAPE;
         break;
+    case SDL_GAMEPAD_BUTTON_BACK:
+        key = SDLK_F8;
+        break;
     case SDL_GAMEPAD_BUTTON_WEST:
+        key = SDLK_F9;
+        break;
     case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER:
         key = SDLK_PAGEUP;
         break;
     case SDL_GAMEPAD_BUTTON_NORTH:
+        key = SDLK_F10;
+        break;
     case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:
         key = SDLK_PAGEDOWN;
         break;
@@ -102,6 +113,13 @@ bool GamepadInput::process_event(SDL_Event& event)
             return SDL_GetGamepadID(gamepad.get()) == event.gdevice.which;
         });
         SDL_Log("Gamepad disconnected: %d", event.gdevice.which);
+        return false;
+    }
+
+    if (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
+        if (event.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
+            right_trigger_held_ = event.gaxis.value >= TriggerThreshold;
+        }
         return false;
     }
 

@@ -15,8 +15,10 @@ using GamepadPtr = std::unique_ptr<SDL_Gamepad, GamepadDeleter>;
 class GamepadInput {
 public:
     bool process_event(SDL_Event& event);
+    bool ctrl_skip_held() const { return right_trigger_held_; }
 
 private:
+    bool right_trigger_held_ = false;
     std::vector<GamepadPtr> gamepads_;
 };
 

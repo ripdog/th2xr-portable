@@ -902,6 +902,9 @@ private:
     void handle_replay_gallery_input(const SDL_Event& event);
     void draw_save_load();
     int save_load_hit(float x, float y) const;
+    bool save_load_item_enabled(int item) const;
+    void ensure_save_load_focus();
+    void move_save_load_focus(SDL_Keycode key);
     void activate_save_load_item(int item);
     void handle_save_load_input(const SDL_Event& event);
     void handle_system_menu_input(const SDL_Event& event);

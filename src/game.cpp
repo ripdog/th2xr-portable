@@ -450,6 +450,14 @@ int Game::run_loop()
                 } else {
                     if (event.key.key == SDLK_ESCAPE) {
                         open_system_menu();
+                    } else if (event.key.key == SDLK_F8) {
+                        skip_mode_ = !skip_mode_;
+                        if (skip_mode_) auto_mode_ = false;
+                    } else if (event.key.key == SDLK_F9) {
+                        auto_mode_ = !auto_mode_;
+                        if (auto_mode_) skip_mode_ = false;
+                    } else if (event.key.key == SDLK_F10) {
+                        message_visible_ = !message_visible_;
                     } else if (event.key.key == SDLK_F5
                                && !replay_mode_) {
                         save_snapshot_ = capture_frame_pixels();
@@ -543,7 +551,8 @@ int Game::run_loop()
         }
         const bool control_held =
             (SDL_GetModState() & SDL_KMOD_CTRL) != 0
-            || touch_input_.skip_held();
+            || touch_input_.skip_held()
+            || gamepad_input_.ctrl_skip_held();
         if (movie_) {
             movie_->set_speed(control_held ? 4.0 : 1.0);
         } else if (control_held && ui_mode_ == UiMode::title) {

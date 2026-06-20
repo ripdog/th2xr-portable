@@ -195,6 +195,7 @@ void Game::open_save_load(UiMode mode)
             ? 10 : newest_save_slot_ / 10;
         refresh_save_page();
     }
+    ensure_save_load_focus();
 }
 
 void Game::close_save_load()

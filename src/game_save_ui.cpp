@@ -213,6 +213,129 @@ int Game::save_load_hit(float x, float y) const
     return -1;
 }
 
+bool Game::save_load_item_enabled(int item) const
+{
+    if (save_confirm_slot_ >= 0) {
+        return item == 13 || item == 14;
+    }
+    if (item >= 0 && item < 10) {
+        return ui_mode_ == UiMode::save || visible_saves_[item].exists;
+    }
+    return item == 10 || item == 11 || item == 12;
+}
+
+void Game::ensure_save_load_focus()
+{
+    if (save_load_item_enabled(save_hover_)) {
+        return;
+    }
+    if (save_confirm_slot_ >= 0) {
+        save_hover_ = 14;
+        return;
+    }
+    if (newest_save_slot_ >= 0) {
+        const int visible_slot = save_page_ == 10
+            ? newest_save_slot_ - 100
+            : newest_save_slot_ - save_page_ * 10;
+        if (visible_slot >= 0 && visible_slot < 10
+            && save_load_item_enabled(visible_slot)) {
+            save_hover_ = visible_slot;
+            return;
+        }
+    }
+    for (int item = 0; item < 13; ++item) {
+        if (save_load_item_enabled(item)) {
+            save_hover_ = item;
+            return;
+        }
+    }
+    save_hover_ = -1;
+}
+
+void Game::move_save_load_focus(SDL_Keycode key)
+{
+    const int previous = save_hover_;
+    ensure_save_load_focus();
+
+    if (save_confirm_slot_ >= 0) {
+        if (key == SDLK_LEFT) {
+            save_hover_ = 13;
+        } else if (key == SDLK_RIGHT) {
+            save_hover_ = 14;
+        }
+    } else if (save_hover_ >= 0 && save_hover_ < 10) {
+        const int column = save_hover_ / 5;
+        const int row = save_hover_ % 5;
+        auto focus_slot = [&](int candidate) {
+            if (candidate >= 0 && candidate < 10
+                && save_load_item_enabled(candidate)) {
+                save_hover_ = candidate;
+                return true;
+            }
+            return false;
+        };
+        if (key == SDLK_UP) {
+            for (int r = row - 1; r >= 0; --r) {
+                if (focus_slot(column * 5 + r)) break;
+            }
+            if (save_hover_ == previous) {
+                save_hover_ = column == 0 ? 10 : 11;
+            }
+        } else if (key == SDLK_DOWN) {
+            for (int r = row + 1; r < 5; ++r) {
+                if (focus_slot(column * 5 + r)) break;
+            }
+            if (save_hover_ == previous) {
+                save_hover_ = 12;
+            }
+        } else if (key == SDLK_LEFT) {
+            if (column == 1 && !focus_slot(row)) {
+                save_hover_ = 10;
+            } else if (column == 0) {
+                save_hover_ = 10;
+            }
+        } else if (key == SDLK_RIGHT) {
+            if (column == 0 && !focus_slot(5 + row)) {
+                save_hover_ = 11;
+            } else if (column == 1) {
+                save_hover_ = 11;
+            }
+        }
+    } else {
+        if (key == SDLK_LEFT) {
+            save_hover_ = 10;
+        } else if (key == SDLK_RIGHT) {
+            save_hover_ = 11;
+        } else if (key == SDLK_DOWN) {
+            const int column = save_hover_ == 11 ? 1 : 0;
+            for (int r = 0; r < 5; ++r) {
+                const int candidate = column * 5 + r;
+                if (save_load_item_enabled(candidate)) {
+                    save_hover_ = candidate;
+                    break;
+                }
+            }
+        } else if (key == SDLK_UP) {
+            for (int r = 4; r >= 0; --r) {
+                const int left = r;
+                const int right = 5 + r;
+                if (save_load_item_enabled(left)) {
+                    save_hover_ = left;
+                    break;
+                }
+                if (save_load_item_enabled(right)) {
+                    save_hover_ = right;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (save_hover_ != previous && save_hover_ >= 0) {
+        play_se(-1, 9108, false, 255);
+    }
+}
+
 void Game::activate_save_load_item(int item)
 {
     load_error_.clear();
@@ -283,18 +406,23 @@ void Game::handle_save_load_input(const SDL_Event& event)
             play_se(-1, 9107, false, 255);
             if (save_confirm_slot_ >= 0) {
                 save_confirm_slot_ = -1;
+                ensure_save_load_focus();
             } else {
                 close_save_load();
             }
+        } else if (event.key.key == SDLK_UP
+                   || event.key.key == SDLK_DOWN
+                   || event.key.key == SDLK_LEFT
+                   || event.key.key == SDLK_RIGHT) {
+            move_save_load_focus(event.key.key);
         } else if (event.key.key == SDLK_PAGEUP) {
             activate_save_load_item(10);
+            ensure_save_load_focus();
         } else if (event.key.key == SDLK_PAGEDOWN) {
             activate_save_load_item(11);
+            ensure_save_load_focus();
         } else if (is_confirm_key(event.key.key)) {
-            // When a save slot has been clicked and the confirmation
-            // dialog is showing, save_hover_ points at the yes/no buttons
-            // (13/14).  Enter/Space activates whatever save_hover_ is
-            // currently set to.
+            ensure_save_load_focus();
             activate_save_load_item(save_hover_);
         }
     }

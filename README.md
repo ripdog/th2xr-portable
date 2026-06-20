@@ -125,6 +125,24 @@ and game advance.
 | Swipe right (hold) | Hold to ctrl-skip, release to stop |
 | Android back button | Open the system menu in-game; close save/load menus |
 
+### Gamepad controls
+
+SDL-recognized gamepads work on Android and desktop on v0.1.1 and later. Buttons are mapped to
+the same actions as the keyboard controls:
+
+| Gamepad input | Action |
+|---|---|
+| D-pad | Navigate menus, choices, backlog, and map selections |
+| South face button (A / Cross) | Confirm, advance text |
+| East face button (B / Circle) | Cancel, open/close the system menu |
+| West face button (X / Square) | Toggle auto mode |
+| North face button (Y / Triangle) | Hide/show the textbox |
+| Back / Select | Toggle auto-skip mode |
+| Start | Cancel, open/close the system menu |
+| Left shoulder | open backlog, backlog up |
+| Right shoulder | backlog down, close backlog |
+| Right trigger | Hold for ctrl-skip |
+
 ### Configuration panel
 
 Open with the android back button, then "Side Bar Configuration". 
