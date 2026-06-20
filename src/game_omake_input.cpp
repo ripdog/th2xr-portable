@@ -51,8 +51,7 @@ void Game::handle_title_input(const SDL_Event& event)
             do {
                 title_highlight_ = (title_highlight_ + 1) % 5;
             } while (title_item_disabled(title_highlight_));
-        } else if (event.key.key == SDLK_RETURN
-                   || event.key.key == SDLK_SPACE) {
+        } else if (is_confirm_key(event.key.key)) {
             activate_title_item();
         } else if (event.key.key == SDLK_ESCAPE) {
             if (title_extras_) {
@@ -145,8 +144,7 @@ void Game::handle_cg_gallery_input(const SDL_Event& event)
             || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
                 && event.button.button == SDL_BUTTON_RIGHT;
         const bool advance = event.type == SDL_EVENT_KEY_DOWN
-                && (event.key.key == SDLK_RETURN
-                    || event.key.key == SDLK_SPACE
+                && (is_confirm_key(event.key.key)
                     || event.key.key == SDLK_RIGHT)
             || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
                 && event.button.button == SDL_BUTTON_LEFT;
@@ -231,8 +229,7 @@ void Game::handle_cg_gallery_input(const SDL_Event& event)
             } else if (omake_highlight_ < 8) {
                 omake_highlight_ += 4;
             }
-        } else if (event.key.key == SDLK_RETURN
-                   || event.key.key == SDLK_SPACE) {
+        } else if (is_confirm_key(event.key.key)) {
             activate_cg_gallery_item();
         }
     } else if (event.type == SDL_EVENT_MOUSE_MOTION
@@ -318,8 +315,7 @@ void Game::handle_music_room_input(const SDL_Event& event)
         } else if (event.key.key == SDLK_RIGHT) {
             omake_highlight_ =
                 omake_highlight_ >= 30 ? 40 : omake_highlight_ + 10;
-        } else if (event.key.key == SDLK_RETURN
-                   || event.key.key == SDLK_SPACE) {
+        } else if (is_confirm_key(event.key.key)) {
             activate_music_room_item();
         }
     } else if (event.type == SDL_EVENT_MOUSE_MOTION
@@ -411,8 +407,7 @@ void Game::handle_replay_gallery_input(const SDL_Event& event)
             } else if (omake_highlight_ < 4) {
                 omake_highlight_ += 4;
             }
-        } else if (event.key.key == SDLK_RETURN
-                   || event.key.key == SDLK_SPACE) {
+        } else if (is_confirm_key(event.key.key)) {
             activate_replay_gallery_item();
         }
     } else if (event.type == SDL_EVENT_MOUSE_MOTION

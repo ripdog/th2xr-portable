@@ -175,8 +175,7 @@ void Game::draw_config()
             if (ImGui::BeginTabItem("Display & Input")) {
 #ifndef __ANDROID__
                 if (ImGui::Checkbox("Fullscreen", &config_.fullscreen)) {
-                    SDL_SetWindowFullscreen(window_, config_.fullscreen);
-                    sync_window_config();
+                    toggle_fullscreen();
                     option_changed = true;
                 }
 #endif

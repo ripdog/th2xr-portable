@@ -290,8 +290,7 @@ void Game::handle_save_load_input(const SDL_Event& event)
             activate_save_load_item(10);
         } else if (event.key.key == SDLK_PAGEDOWN) {
             activate_save_load_item(11);
-        } else if (event.key.key == SDLK_RETURN
-                   || event.key.key == SDLK_SPACE) {
+        } else if (is_confirm_key(event.key.key)) {
             // When a save slot has been clicked and the confirmation
             // dialog is showing, save_hover_ points at the yes/no buttons
             // (13/14).  Enter/Space activates whatever save_hover_ is
@@ -322,7 +321,7 @@ void Game::handle_system_menu_input(const SDL_Event& event)
         if (event.key.key == SDLK_ESCAPE) {
             play_se(-1, 9107, false, 255);
             close_system_menu();
-        } else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_SPACE) {
+        } else if (is_confirm_key(event.key.key)) {
             const int item = menu_highlight_;
             if (enabled(item)) {
                 play_se(-1, 9014, false, 255);
@@ -440,9 +439,7 @@ void Game::handle_map_input(const SDL_Event& event)
         } else if (event.key.key == SDLK_PAGEDOWN
                    || event.key.key == SDLK_LEFT) {
             change_map_field(-1);
-        } else if ((event.key.key == SDLK_RETURN
-                    || event.key.key == SDLK_SPACE)
-                   && map_hover_ >= 0) {
+        } else if (is_confirm_key(event.key.key) && map_hover_ >= 0) {
             finish_map_selection(map_hover_);
         }
     }

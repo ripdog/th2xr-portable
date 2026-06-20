@@ -97,6 +97,8 @@ private:
     static constexpr std::uint32_t save_version_ = 26;
     static constexpr std::uint32_t first_backlog_voice_save_version_ = 25;
     static constexpr std::uint32_t oldest_supported_save_version_ = 26;
+    static bool is_confirm_key(SDL_Keycode key);
+    static bool is_alt_enter(const SDL_KeyboardEvent& key);
     enum class AudioWaitKind {
         bgm,
         sound_effect,
@@ -370,6 +372,7 @@ private:
     float voice_gain(int volume, int character) const;
     void apply_audio_gains();
     void sync_window_config();
+    void toggle_fullscreen();
     void start_movie(int mode, int number, bool resume_script);
     void update_movie();
     void complete_movie();

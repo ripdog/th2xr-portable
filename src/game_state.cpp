@@ -129,6 +129,17 @@ void Game::sync_window_config()
 #endif
 }
 
+void Game::toggle_fullscreen()
+{
+#ifndef __ANDROID__
+    config_.fullscreen =
+        (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) == 0;
+    SDL_SetWindowFullscreen(window_, config_.fullscreen);
+    sync_window_config();
+    th2::save_config(config_path_, config_);
+#endif
+}
+
 void Game::start_movie(int mode, int number, bool resume_script)
 {
     std::string name;

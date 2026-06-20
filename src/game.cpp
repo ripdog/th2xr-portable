@@ -223,6 +223,17 @@ int Game::run()
     }
 }
 
+bool Game::is_confirm_key(SDL_Keycode key)
+{
+    return key == SDLK_RETURN || key == SDLK_KP_ENTER || key == SDLK_SPACE;
+}
+
+bool Game::is_alt_enter(const SDL_KeyboardEvent& key)
+{
+    return (key.mod & SDL_KMOD_ALT) != 0
+        && (key.key == SDLK_RETURN || key.key == SDLK_KP_ENTER);
+}
+
 int Game::run_loop()
 {
     SDL_Log("Entering main loop");
@@ -305,6 +316,10 @@ int Game::run_loop()
                     || event.type == SDL_EVENT_MOUSE_WHEEL)) {
                 continue;
             }
+            if (event.type == SDL_EVENT_KEY_DOWN && is_alt_enter(event.key)) {
+                toggle_fullscreen();
+                continue;
+            }
             if (clock_state_) {
                 continue;
             }
@@ -327,8 +342,7 @@ int Game::run_loop()
             if (movie_) {
                 const bool skip_key = event.type == SDL_EVENT_KEY_DOWN
                     && (event.key.key == SDLK_ESCAPE
-                        || event.key.key == SDLK_SPACE
-                        || event.key.key == SDLK_RETURN);
+                        || is_confirm_key(event.key.key));
                 const bool skip_mouse = event.type
                     == SDL_EVENT_MOUSE_BUTTON_DOWN;
                 const bool locked = (movie_mode_ == 0
@@ -417,8 +431,7 @@ int Game::run_loop()
                 if (event.key.key == SDLK_PAGEUP) {
                     open_backlog();
                 } else if (choosing_) {
-                    if (event.key.key == SDLK_RETURN
-                        || event.key.key == SDLK_SPACE) {
+                    if (is_confirm_key(event.key.key)) {
                         choice_selected_ = choice_highlight_;
                         manual_advance();
                     } else if (event.key.key == SDLK_UP) {
@@ -443,15 +456,8 @@ int Game::run_loop()
                         save_snapshot_ = capture_frame_pixels();
                         open_save_load(UiMode::load);
                     } else if (event.key.key == SDLK_F11) {
-                        config_.fullscreen =
-                            !(SDL_GetWindowFlags(window_)
-                              & SDL_WINDOW_FULLSCREEN);
-                        SDL_SetWindowFullscreen(
-                            window_, config_.fullscreen);
-                        sync_window_config();
-                        th2::save_config(config_path_, config_);
-                    } else if (event.key.key == SDLK_RETURN
-                               || event.key.key == SDLK_SPACE) {
+                        toggle_fullscreen();
+                    } else if (is_confirm_key(event.key.key)) {
                         manual_advance();
                     }
                 }
