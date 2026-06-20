@@ -77,6 +77,7 @@ jobs:
         with:
           name: toheart2-linux-x86_64.AppImage
           path: toheart2-linux-x86_64.AppImage
+          archive: false
 
   macos:
     runs-on: macos-latest
@@ -208,6 +209,7 @@ jobs:
         with:
           name: toheart2-macos.dmg
           path: toheart2-macos.dmg
+          archive: false
 
   windows:
     runs-on: windows-latest
@@ -407,3 +409,4 @@ jobs:
         with:
           name: th2xr-portable-debug.apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          archive: false
