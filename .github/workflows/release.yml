@@ -81,10 +81,10 @@ jobs:
           chmod +x linuxdeploy-x86_64.AppImage
           ./linuxdeploy-x86_64.AppImage --appimage-extract-and-run \
             --appdir AppDir --output appimage
-          mv ToHeart2_XRATED-*.AppImage toheart2-linux-x86_64.AppImage
+          mv ToHeart2_XRATED-*.AppImage "toheart2-${{ github.ref_name }}-linux-x86_64.AppImage"
 
       - name: Upload AppImage
-        run: gh release upload ${{ github.ref_name }} toheart2-linux-x86_64.AppImage
+        run: gh release upload ${{ github.ref_name }} "toheart2-${{ github.ref_name }}-linux-x86_64.AppImage"
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -207,10 +207,10 @@ jobs:
             done < /tmp/bundle-deps.txt
           done
 
-          hdiutil create -volname "ToHeart2" -srcfolder "$APP" -ov -format UDZO toheart2-macos.dmg
+          hdiutil create -volname "ToHeart2" -srcfolder "$APP" -ov -format UDZO "toheart2-${{ github.ref_name }}-macos.dmg"
 
       - name: Upload DMG
-        run: gh release upload ${{ github.ref_name }} toheart2-macos.dmg
+        run: gh release upload ${{ github.ref_name }} "toheart2-${{ github.ref_name }}-macos.dmg"
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -254,10 +254,10 @@ jobs:
 
       - name: Create zip
         shell: pwsh
-        run: Compress-Archive -Path dist/* -DestinationPath toheart2-windows-x64.zip
+        run: Compress-Archive -Path dist/* -DestinationPath "toheart2-${{ github.ref_name }}-windows-x64.zip"
 
       - name: Upload zip
-        run: gh release upload ${{ github.ref_name }} toheart2-windows-x64.zip
+        run: gh release upload ${{ github.ref_name }} "toheart2-${{ github.ref_name }}-windows-x64.zip"
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -395,6 +395,9 @@ jobs:
           RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
 
       - name: Upload APK
-        run: gh release upload ${{ github.ref_name }} android/app/build/outputs/apk/release/app-release.apk
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk \
+            "toheart2-${{ github.ref_name }}-android-arm64.apk"
+          gh release upload ${{ github.ref_name }} "toheart2-${{ github.ref_name }}-android-arm64.apk"
         env:
           GH_TOKEN: ${{ github.token }}
