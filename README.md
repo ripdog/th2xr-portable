@@ -30,13 +30,13 @@ Compared to the original engine, we have:
 
  ## Status
 
- On Linux, Windows, and Android, I've tested that the game runs acceptibly, and
+ On Linux, Windows, and Android, I've tested that the game runs acceptably, and
  spent considerable time ensuring the engine is accurate and correctly implemented. 
  However, I am not familiar with To Heart 2, this is my first time playing,
  so proper testing from anyone familiar with the game would be appreciated.
 
- I do not own a mac, so I have not tested the .app. If the .app does not run, please
- run the actual binary (inside the .app bundle) in the terminal, and file an issue
+ I do not own a Mac, so I have not tested the .app. If the .app does not run, please
+ run the actual binary inside the .app bundle in the terminal, and file an issue
  with whatever error you see. Thanks!
 
  ## Known Issues
@@ -51,7 +51,7 @@ Grab your platform's build from [releases](https://github.com/ripdog/th2xr-porta
 
 ## Desktop
 
-You need the original game files from the To Heart 2 XRATED english patch. This engine has not been tested with the japanese release, and probably won't work. (PRs accepted!)
+You need the original game files from the To Heart 2 XRATED English patch. This engine has not been tested with the Japanese release, and probably won't work. (PRs accepted!)
 
 Simply run the engine (.exe/.app/.AppImage), and a file picker will appear. Select the toheart2.exe from the game files, and the game will launch.
 
@@ -87,7 +87,7 @@ load panel, and click the left arrow from page 1. They're on page 11.
 
 ### Warning
 
-The APKs I'm generated are unverified. That means Android will kick up a fuss when
+The APKs I generate are unverified. That means Android will kick up a fuss when
 you try to install them. If your device has been infected by "Android Developer Verification",
 you'll need to enable the so-called ["Advanced Flow"](https://android-developers.googleblog.com/2026/03/android-developer-verification.html) to install the engine. 
 
