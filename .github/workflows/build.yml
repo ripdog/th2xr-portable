@@ -18,17 +18,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install apt dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            cmake g++ libfontconfig-dev \
-            libavformat-dev libavcodec-dev libavutil-dev \
-            libswscale-dev libswresample-dev glslang-tools \
-            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
-            libxfixes-dev libxi-dev libxss-dev libxtst-dev \
-            libxkbcommon-dev libdrm-dev libgbm-dev \
-            libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
-            libasound2-dev libpulse-dev libfuse2 libsqlite3-dev
+        run: ci/install-linux-deps.sh
 
       - uses: libsdl-org/setup-sdl@main
         id: sdl
@@ -48,30 +38,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: Package AppImage
-        run: |
-          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
-          cp build/toheart2 AppDir/usr/bin/
-          mkdir -p AppDir/usr/bin/shaders/anime4k
-          cp build/shaders/anime4k/apply.frag.spv AppDir/usr/bin/shaders/anime4k/
-
-          cat > AppDir/usr/share/applications/toheart2.desktop << 'EOF'
-          [Desktop Entry]
-          Name=ToHeart2 XRATED
-          Exec=toheart2
-          Icon=toheart2
-          Type=Application
-          Categories=Game;AdventureGame;
-          EOF
-
-          # use repo icon
-          cp toheart2.png AppDir/usr/share/icons/hicolor/256x256/apps/toheart2.png
-          ln -s usr/share/icons/hicolor/256x256/apps/toheart2.png AppDir/toheart2.png
-
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage
-          ./linuxdeploy-x86_64.AppImage --appimage-extract-and-run \
-            --appdir AppDir --output appimage
-          mv ToHeart2_XRATED-*.AppImage toheart2-linux-x86_64.AppImage
+        run: ci/package-linux-appimage.sh toheart2-linux-x86_64.AppImage
 
       - uses: actions/upload-artifact@v7
         with:
@@ -100,110 +67,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure -E 'script-runtime-loose-lookup'
 
       - name: Package .app bundle
-        run: |
-          VERSION=$(cat VERSION)
-          APP="toheart2.app"
-          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-
-          cp build/toheart2 "$APP/Contents/MacOS/"
-          mkdir -p "$APP/Contents/MacOS/shaders/anime4k"
-          cp build/shaders/anime4k/apply.frag.spv "$APP/Contents/MacOS/shaders/anime4k/"
-
-          # Create app icon from the repo PNG.
-          ICONSET="$APP/Contents/Resources/icon.iconset"
-          mkdir -p "$ICONSET"
-          for size in 16 32 128 256 512; do
-            sips -z $size $size toheart2.png --out "$ICONSET/icon_${size}x${size}.png" > /dev/null
-            sips -z $((size * 2)) $((size * 2)) toheart2.png --out "$ICONSET/icon_${size}x${size}@2x.png" > /dev/null
-          done
-          iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/icon.icns"
-          rm -rf "$ICONSET"
-
-          cat > "$APP/Contents/Info.plist" << PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>toheart2</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.th2xr-portable.toheart2</string>
-              <key>CFBundleName</key>
-              <string>ToHeart2 XRATED</string>
-              <key>CFBundleIconFile</key>
-              <string>icon</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleShortVersionString</key>
-              <string>${VERSION}</string>
-              <key>CFBundleVersion</key>
-              <string>${VERSION}</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>13.0</string>
-          </dict>
-          </plist>
-          PLIST
-
-          # Bundle all Homebrew dylibs and fix up load commands.
-          # We walk the full transitive dependency tree so the .app is
-          # self-contained and does not require Homebrew on the target Mac.
-          BREW_PREFIX=$(brew --prefix)
-          FRAMEWORKS="$APP/Contents/Frameworks"
-          mkdir -p "$FRAMEWORKS"
-
-          # Enable nullglob so non-matching globs expand to nothing.
-          shopt -s nullglob
-
-          # --- Step 1: recursively copy every Homebrew dylib ---
-          CHANGED=1
-          while [ $CHANGED -eq 1 ]; do
-            CHANGED=0
-            for file in "$APP/Contents/MacOS/toheart2" "$FRAMEWORKS"/*.dylib; do
-              [ -f "$file" ] || continue
-              otool -L "$file" | awk '/^\t/ {print $1}' | grep "^$BREW_PREFIX" > /tmp/bundle-deps.txt || true
-              while read -r dep; do
-                [ -z "$dep" ] && continue
-                base=$(basename "$dep")
-                if [ ! -f "$FRAMEWORKS/$base" ] && [ -f "$dep" ]; then
-                  cp "$dep" "$FRAMEWORKS/$base"
-                  chmod u+w "$FRAMEWORKS/$base"
-                  CHANGED=1
-                fi
-              done < /tmp/bundle-deps.txt
-            done
-          done
-
-          # --- Step 2: fix the binary to use @executable_path ---
-          otool -L "$APP/Contents/MacOS/toheart2" | awk '/^\t/ {print $1}' | grep "^$BREW_PREFIX" > /tmp/bundle-deps.txt || true
-          while read -r dep; do
-            base=$(basename "$dep")
-            if [ -f "$FRAMEWORKS/$base" ]; then
-              install_name_tool -change "$dep" \
-                "@executable_path/../Frameworks/$base" \
-                "$APP/Contents/MacOS/toheart2"
-            fi
-          done < /tmp/bundle-deps.txt
-
-          # --- Step 3: fix every dylib's install name and inter-dylib refs ---
-          for dylib in "$FRAMEWORKS"/*.dylib; do
-            [ -f "$dylib" ] || continue
-            # Fix the dylib's own identity (LC_ID_DYLIB).
-            install_name_tool -id \
-              "@executable_path/../Frameworks/$(basename "$dylib")" \
-              "$dylib" 2>/dev/null || true
-            # Fix references this dylib makes to other Homebrew dylibs.
-            otool -L "$dylib" | awk '/^\t/ {print $1}' | grep "^$BREW_PREFIX" > /tmp/bundle-deps.txt || true
-            while read -r dep; do
-              dep_base=$(basename "$dep")
-              if [ -f "$FRAMEWORKS/$dep_base" ]; then
-                install_name_tool -change "$dep" \
-                  "@executable_path/../Frameworks/$dep_base" \
-                  "$dylib"
-              fi
-            done < /tmp/bundle-deps.txt
-          done
-
-          hdiutil create -volname "ToHeart2" -srcfolder "$APP" -ov -format UDZO toheart2-macos.dmg
+        run: ci/package-macos-app.sh toheart2-macos.dmg
 
       - uses: actions/upload-artifact@v7
         with:
@@ -244,19 +108,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure -E 'script-runtime-loose-lookup'
 
       - name: Package zip
-        run: |
-          mkdir dist
-          cp build/toheart2.exe dist/
-          mkdir -p dist/shaders/anime4k
-          cp build/shaders/anime4k/apply.frag.spv dist/shaders/anime4k/
-          # copy required DLLs
-          ldd build/toheart2.exe 2>/dev/null | grep '/ucrt64/bin/' | awk '{print $3}' | while read dll; do
-            cp "$dll" dist/ 2>/dev/null || true
-          done
-          # also grab common transitive deps
-          find /ucrt64/bin/ -name '*.dll' | while read dll; do
-            cp "$dll" dist/ 2>/dev/null || true
-          done
+        run: ci/package-windows-dist.sh full
 
       - name: Create zip
         shell: pwsh
@@ -280,33 +132,10 @@ jobs:
           java-version: '21'
 
       - name: Install system tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends glslang-tools
+        run: ci/install-android-system-tools.sh
 
       - name: Setup Android SDK
-        run: |
-          ANDROID_SDK_ROOT="$HOME/android-sdk"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-
-          # Download command-line tools
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          curl -fsSL -o /tmp/cmdline-tools.zip \
-            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"
-          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" \
-             "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-
-          # Accept licenses and install packages
-          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          yes 2>/dev/null | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-          "$SDKMANAGER" --install \
-            "platforms;android-37.0" \
-            "build-tools;37.0.0" \
-            "ndk;29.0.14206865" \
-            "cmake;3.22.1" \
-            "platform-tools"
+        run: ci/setup-android-sdk.sh
 
       - name: Cache SDL3 AAR
         id: cache-sdl3-aar
@@ -317,13 +146,7 @@ jobs:
 
       - name: Download SDL3 AAR
         if: steps.cache-sdl3-aar.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p android/app/libs
-          curl -fsSL -o /tmp/sdl3-android.zip \
-            https://github.com/libsdl-org/SDL/releases/download/release-3.4.10/SDL3-devel-3.4.10-android.zip
-          unzip -jo /tmp/sdl3-android.zip '*.aar' -d android/app/libs/
-          test -f android/app/libs/SDL3-3.4.10.aar || \
-            (echo "ERROR: SDL3 AAR not found in archive" && unzip -l /tmp/sdl3-android.zip && exit 1)
+        run: ci/download-sdl3-aar.sh
 
       - name: Cache SDL3_ttf AAR (16KB-aligned)
         id: cache-sdl3-ttf-aar
@@ -334,13 +157,7 @@ jobs:
 
       - name: Build SDL3_ttf from source (16KB-aligned)
         if: steps.cache-sdl3-ttf-aar.outputs.cache-hit != 'true'
-        run: |
-          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
-          export PATH="$ANDROID_SDK_ROOT/cmake/3.22.1/bin:$PATH"
-          curl -fsSL -o /tmp/sdl3-ttf-aar.zip \
-            https://github.com/libsdl-org/SDL_ttf/releases/download/release-3.2.2/SDL3_ttf-devel-3.2.2-android.zip
-          unzip -jo /tmp/sdl3-ttf-aar.zip '*.aar' -d android/app/libs/
-          bash third_party/build-sdl3-ttf-aar.sh
+        run: ci/download-or-build-sdl3-ttf-aar.sh
 
       - name: Cache FFmpeg
         id: cache-ffmpeg
@@ -351,9 +168,7 @@ jobs:
 
       - name: Build FFmpeg
         if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
-        run: |
-          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
-          bash third_party/build-ffmpeg-android.sh
+        run: ci/build-android-third-party.sh ffmpeg
 
       - name: Cache libiconv
         id: cache-libiconv
@@ -364,9 +179,7 @@ jobs:
 
       - name: Build libiconv
         if: steps.cache-libiconv.outputs.cache-hit != 'true'
-        run: |
-          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
-          bash third_party/build-libiconv-android.sh
+        run: ci/build-android-third-party.sh libiconv
 
       - name: Cache zstd
         id: cache-zstd
@@ -377,9 +190,7 @@ jobs:
 
       - name: Build zstd
         if: steps.cache-zstd.outputs.cache-hit != 'true'
-        run: |
-          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
-          bash third_party/build-zstd-android.sh
+        run: ci/build-android-third-party.sh zstd
 
       - name: Cache SQLite
         id: cache-sqlite
@@ -390,9 +201,7 @@ jobs:
 
       - name: Build SQLite
         if: steps.cache-sqlite.outputs.cache-hit != 'true'
-        run: |
-          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/29.0.14206865"
-          bash third_party/build-sqlite-android.sh
+        run: ci/build-android-third-party.sh sqlite
 
       - name: Build APK
         run: |
