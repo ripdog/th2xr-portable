@@ -85,6 +85,8 @@ load panel, and click the left arrow from page 1. They're on page 11.
 
 ## Android
 
+I highly recommend the use of [Obtainium](https://obtainium.imranr.dev) to install the app. It gives automatic update notifications when future versions appear. Simply add https://github.com/ripdog/th2xr-portable as an app source in Obtainium. Then tap "Install" at the bottom of the window.
+
 ### Warning
 
 The APKs I generate are unverified. That means Android will kick up a fuss when
@@ -105,23 +107,7 @@ folder that contains `TOHEART2.EXE`
 data is imported into internal storage.
 Be patient, the copy takes a few seconds.
 
-### Save and config location
-
-On desktop, saves, config, and profiles are stored in your system user data directory:
-
-| Platform | Path |
-|---|---|
-| Linux | `~/.local/share/ripdog/ToHeart2XR/` |
-| macOS | `~/Library/Application Support/ripdog/ToHeart2XR/` |
-| Windows | `%APPDATA%\ripdog\ToHeart2XR\` |
-
-The engine creates `save/`, `profile/`, and `logs/` subdirectories there.
-You can copy these folders between machines or desktop installs to transfer your progress.
-
-On Android these are stored in private app data.
-To get saves in and out, use the import/export saves function in 
-the game config panel. For example, export saves from your desktop install,
-copy the resulting file to your android device, and import it from a user-accessible folder.
+## In-Game
 
 ### Touch controls
 
@@ -145,11 +131,27 @@ Open with the android back button, then "Side Bar Configuration".
 On small screens the panel and the player-name entry
 screen are full-size with drag-to-scroll. 
 
+### Save and config location
+
+On desktop, saves, config, and profiles are stored in your system user data directory:
+
+| Platform | Path |
+|---|---|
+| Linux | `~/.local/share/ripdog/ToHeart2XR/` |
+| macOS | `~/Library/Application Support/ripdog/ToHeart2XR/` |
+| Windows | `%APPDATA%\ripdog\ToHeart2XR\` |
+
+The engine creates `save/`, `profile/`, and `logs/` subdirectories there.
+You can copy these folders between machines or desktop installs to transfer your progress.
+
+On Android these are stored in private app data.
+To get saves in and out, use the import/export saves function in 
+the game config panel. For example, export saves from your desktop install,
+copy the resulting file to your android device, and import it from a user-accessible folder.
+
 ## Development
 
-See [HACKING.md](HACKING.md#desktop-build) for platform-specific
-dependency installation and [HACKING.md](HACKING.md#android-build)
-for the Android build.
+See [HACKING.md](HACKING.md) for information on developing or debugging the engine.
 
 
 ## License
