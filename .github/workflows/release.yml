@@ -261,6 +261,7 @@ jobs:
         run: Compress-Archive -Path dist/* -DestinationPath "th2xr-portable-${{ github.ref_name }}-windows-x64.zip"
 
       - name: Upload zip
+        shell: pwsh
         run: gh release upload ${{ github.ref_name }} "th2xr-portable-${{ github.ref_name }}-windows-x64.zip"
         env:
           GH_TOKEN: ${{ github.token }}
