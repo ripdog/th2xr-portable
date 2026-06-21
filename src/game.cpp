@@ -121,10 +121,8 @@ Game::Game(
         SDL_SetWindowFullscreen(window_, true);
     }
 #endif
-    const auto shader_dir =
-        std::filesystem::path(SDL_GetBasePath()) / TH2_ANIME4K_SHADER_DIR;
     upscaler_ = th2::create_upscaler(
-        renderer_, shader_dir, config_.anime4k,
+        renderer_, anime4k_shader_dir(), config_.anime4k,
         &anime4k_available_);
     last_anime4k_wanted_ = config_.anime4k;
     imgui_ = std::make_unique<th2::ImGuiLayer>(window_, renderer_);

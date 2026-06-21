@@ -734,6 +734,7 @@ private:
     std::filesystem::path save_path(int slot) const;
     std::filesystem::path thumbnail_path(int slot) const;
     std::filesystem::path metadata_path(int slot) const;
+    std::filesystem::path anime4k_shader_dir() const;
     void save_preview(int slot);
     SaveMetadata read_save_metadata(int slot) const;
     void perform_autosave();

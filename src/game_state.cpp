@@ -49,16 +49,24 @@ float Game::se_gain(int volume) const
         * config_.se_volume / 256.0f;
 }
 
+std::filesystem::path Game::anime4k_shader_dir() const
+{
+    const auto base = std::filesystem::path(SDL_GetBasePath());
+    const auto executable_relative = base / TH2_ANIME4K_SHADER_DIR;
+    if (std::filesystem::exists(executable_relative)) {
+        return executable_relative;
+    }
+    return base / ".." / "Resources" / TH2_ANIME4K_SHADER_DIR;
+}
+
 void Game::ensure_upscaler()
 {
     if (last_anime4k_wanted_ == config_.anime4k) {
         return;
     }
     last_anime4k_wanted_ = config_.anime4k;
-    const auto shader_dir =
-        std::filesystem::path(SDL_GetBasePath()) / TH2_ANIME4K_SHADER_DIR;
     upscaler_ = th2::create_upscaler(
-        renderer_, shader_dir, config_.anime4k,
+        renderer_, anime4k_shader_dir(), config_.anime4k,
         &anime4k_available_);
 }
 
