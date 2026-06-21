@@ -92,6 +92,8 @@ void TouchInput::remove_finger(int index)
     if (horizontal_state_ != HorizontalState::none) {
         if (horizontal_state_ == HorizontalState::right && !skip_held_) {
             pending_ = TouchAction::SkipToggle;
+        } else if (horizontal_state_ == HorizontalState::left) {
+            pending_ = TouchAction::AutoModeToggle;
         }
         skip_held_ = false;
         horizontal_state_ = HorizontalState::none;
@@ -192,14 +194,18 @@ void TouchInput::evaluate_horizontal_swipe(const Finger& finger)
     const float dy = finger.y - finger.start_y;
 
     if (horizontal_state_ == HorizontalState::none) {
-        if (emitted_scroll_ || dx <= SwipeDistance) {
+        if (emitted_scroll_ || std::abs(dx) <= SwipeDistance) {
             return;
         }
         if (std::abs(dx) < SwipeMinRatio * std::abs(dy)) {
             return;
         }
-        horizontal_state_ = HorizontalState::right;
-        horizontal_cross_time_ = std::chrono::steady_clock::now();
+        if (dx > 0.0f) {
+            horizontal_state_ = HorizontalState::right;
+            horizontal_cross_time_ = std::chrono::steady_clock::now();
+        } else {
+            horizontal_state_ = HorizontalState::left;
+        }
         return;
     }
 
@@ -212,7 +218,7 @@ void TouchInput::evaluate_horizontal_swipe(const Finger& finger)
         }
         if (dx <= -SwipeDistance) {
             // Pulled back to the left: stop the held skip.
-            horizontal_state_ = HorizontalState::left;
+            horizontal_state_ = HorizontalState::cancelled;
             skip_held_ = false;
         }
     }

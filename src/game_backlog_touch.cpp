@@ -96,6 +96,15 @@ void Game::handle_touch_actions()
             play_se(-1, 9104, false, 255);
         }
         break;
+    case Action::AutoModeToggle:
+        if (ui_mode_ == UiMode::game) {
+            auto_mode_ = !auto_mode_;
+            if (auto_mode_) {
+                skip_mode_ = false;
+            }
+            play_se(-1, 9104, false, 255);
+        }
+        break;
     case Action::Tap: {
         // Re-inject the tap as a full left-button click.  Many handlers
         // (movie skip, menus, title) act on mouse-down, while the normal
@@ -112,6 +121,28 @@ void Game::handle_touch_actions()
         // Sidebar buttons need to work on touch too, but we must not
         // double-handle them for desktop mice (they fire on mouse-down).
         if (handle_sidebar_click(logical_x, logical_y)) {
+            break;
+        }
+        if (ui_mode_ == UiMode::backlog) {
+            if (backlog_depth_ > 0
+                && backlog_depth_ <= static_cast<int>(backlog_.size())) {
+                const auto& entry = backlog_[
+                    backlog_.size()
+                    - static_cast<std::size_t>(backlog_depth_)];
+                for (int i = 0;
+                     i < static_cast<int>(entry.voices.size()); ++i) {
+                    for (const auto& rect : backlog_voice_rects(entry, i)) {
+                        if (logical_x >= rect.x
+                            && logical_x < rect.x + rect.w
+                            && logical_y >= rect.y
+                            && logical_y < rect.y + rect.h) {
+                            replay_backlog_voice(entry.voices[i]);
+                            backlog_voice_hover_ = i;
+                            return;
+                        }
+                    }
+                }
+            }
             break;
         }
         SDL_Event down{};

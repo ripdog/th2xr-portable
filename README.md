@@ -123,6 +123,7 @@ and game advance.
 | Two-finger tap | Close the backlog; if not in backlog, hide/show the textbox |
 | Swipe right (quick) | Toggle skip mode (respects the "skip-unread" setting) |
 | Swipe right (hold) | Hold to ctrl-skip, release to stop |
+| Swipe left | Toggle auto mode |
 | Android back button | Open the system menu in-game; close save/load menus |
 
 ### Gamepad controls

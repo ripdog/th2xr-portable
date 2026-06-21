@@ -27,6 +27,8 @@ enum class TouchAction {
     // Swipe right and release while in-game: toggle skip mode (respects the
     // skip-unread option just like the sidebar skip button).
     SkipToggle,
+    // Swipe left and release while in-game: toggle auto mode.
+    AutoModeToggle,
 };
 
 // Interprets touch and Android back-button events as high-level game actions.
@@ -85,7 +87,7 @@ private:
     float tap_x_ = 0.0f;
     float tap_y_ = 0.0f;
 
-    enum class HorizontalState { none, right, left };
+    enum class HorizontalState { none, right, left, cancelled };
     HorizontalState horizontal_state_ = HorizontalState::none;
     std::chrono::steady_clock::time_point horizontal_cross_time_;
     bool skip_held_ = false;
