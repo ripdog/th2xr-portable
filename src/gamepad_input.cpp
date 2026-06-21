@@ -94,6 +94,8 @@ void GamepadDeleter::operator()(SDL_Gamepad* gamepad) const
 
 bool GamepadInput::process_event(SDL_Event& event)
 {
+    last_event_was_gamepad_ = false;
+
     if (event.type == SDL_EVENT_GAMEPAD_ADDED) {
         GamepadPtr gamepad(SDL_OpenGamepad(event.gdevice.which));
         if (gamepad) {
@@ -130,6 +132,7 @@ bool GamepadInput::process_event(SDL_Event& event)
             return false;
         }
         event = *key_event;
+        last_event_was_gamepad_ = true;
     }
 
     return true;

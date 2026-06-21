@@ -376,6 +376,10 @@ int Game::run_loop()
                 continue;
             }
             if (config_open_ || name_input_open_) {
+                if (config_open_ && event.type == SDL_EVENT_KEY_DOWN
+                    && gamepad_input_.last_event_was_gamepad()) {
+                    config_gamepad_focus_requested_ = true;
+                }
                 if (event.type == SDL_EVENT_KEY_DOWN
                     && event.key.key == SDLK_ESCAPE && config_open_) {
                     play_se(-1, 9107, false, 255);
@@ -450,13 +454,16 @@ int Game::run_loop()
                 } else {
                     if (event.key.key == SDLK_ESCAPE) {
                         open_system_menu();
-                    } else if (event.key.key == SDLK_F8) {
+                    } else if (event.key.key == SDLK_F8
+                               && gamepad_input_.last_event_was_gamepad()) {
                         skip_mode_ = !skip_mode_;
                         if (skip_mode_) auto_mode_ = false;
-                    } else if (event.key.key == SDLK_F9) {
+                    } else if (event.key.key == SDLK_F9
+                               && gamepad_input_.last_event_was_gamepad()) {
                         auto_mode_ = !auto_mode_;
                         if (auto_mode_) skip_mode_ = false;
-                    } else if (event.key.key == SDLK_F10) {
+                    } else if (event.key.key == SDLK_F10
+                               && gamepad_input_.last_event_was_gamepad()) {
                         message_visible_ = !message_visible_;
                     } else if (event.key.key == SDLK_F5
                                && !replay_mode_) {
@@ -550,9 +557,10 @@ int Game::run_loop()
             continue;
         }
         const bool control_held =
-            (SDL_GetModState() & SDL_KMOD_CTRL) != 0
-            || touch_input_.skip_held()
-            || gamepad_input_.ctrl_skip_held();
+            !config_open_ && !name_input_open_
+            && ((SDL_GetModState() & SDL_KMOD_CTRL) != 0
+                || touch_input_.skip_held()
+                || gamepad_input_.ctrl_skip_held());
         if (movie_) {
             movie_->set_speed(control_held ? 4.0 : 1.0);
         } else if (control_held && ui_mode_ == UiMode::title) {
