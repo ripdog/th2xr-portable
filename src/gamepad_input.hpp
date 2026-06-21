@@ -16,9 +16,13 @@ class GamepadInput {
 public:
     bool process_event(SDL_Event& event);
     bool ctrl_skip_held() const { return right_trigger_held_; }
+    bool last_event_was_gamepad() const { return last_event_was_gamepad_; }
 
 private:
     bool right_trigger_held_ = false;
+    bool last_event_was_gamepad_ = false;
+    std::array<Sint16, SDL_GAMEPAD_AXIS_COUNT> last_unhandled_gamepad_axes_{};
+    std::array<Sint16, SDL_GAMEPAD_AXIS_COUNT> last_unhandled_joystick_axes_{};
     std::vector<GamepadPtr> gamepads_;
 };
 

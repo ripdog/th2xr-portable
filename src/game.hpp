@@ -551,6 +551,7 @@ private:
     std::chrono::steady_clock::time_point last_save_time_{};
     bool just_advanced_past_block_end_ = false;
     bool config_open_ = false;
+    bool config_gamepad_focus_requested_ = false;
     bool confirm_return_title_ = false;
     enum class SaveBundleAction {
         none,

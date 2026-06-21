@@ -104,8 +104,15 @@ void Game::draw_config()
             ImGuiWindowFlags_NoMove);
 #endif
         bool option_changed = false;
+        const auto focus_next_for_gamepad = [&] {
+            if (config_gamepad_focus_requested_) {
+                ImGui::SetKeyboardFocusHere();
+                config_gamepad_focus_requested_ = false;
+            }
+        };
         if (ImGui::BeginTabBar("config-tabs")) {
             if (ImGui::BeginTabItem("Playback")) {
+                focus_next_for_gamepad();
                 option_changed |= ImGui::Checkbox(
                     "Auto mode skips previously read text",
                     &config_.auto_skip_read);
@@ -151,6 +158,7 @@ void Game::draw_config()
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Audio")) {
+                focus_next_for_gamepad();
                 bool audio_changed = volume_control(
                     "Music", config_.bgm_volume, config_.bgm_muted);
                 audio_changed |= volume_control(
@@ -173,6 +181,7 @@ void Game::draw_config()
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Display & Input")) {
+                focus_next_for_gamepad();
 #ifndef __ANDROID__
                 if (ImGui::Checkbox("Fullscreen", &config_.fullscreen)) {
                     toggle_fullscreen();

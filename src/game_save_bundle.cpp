@@ -233,11 +233,13 @@ void Game::close_system_menu()
 void Game::open_config()
 {
     config_open_ = true;
+    config_gamepad_focus_requested_ = false;
 }
 
 void Game::close_config()
 {
     config_open_ = false;
+    config_gamepad_focus_requested_ = false;
     th2::save_config(config_path_, config_);
 }
 
