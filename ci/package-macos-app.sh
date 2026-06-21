@@ -99,4 +99,10 @@ for dylib in "$frameworks"/*.dylib; do
   done < /tmp/bundle-deps.txt
 done
 
+find "$app" -type f \( -name '*.dylib' -o -perm -111 \) -print0 | while IFS= read -r -d '' file; do
+  codesign --force --sign - "$file"
+done
+codesign --force --deep --sign - "$app"
+codesign --verify --deep --strict --verbose=4 "$app"
+
 hdiutil create -volname "ToHeart2" -srcfolder "$app" -ov -format UDZO "$output"
