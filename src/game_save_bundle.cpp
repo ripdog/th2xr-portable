@@ -615,13 +615,15 @@ void Game::show_save_bundle_export_dialog()
     save_bundle_dialog_.error.clear();
     save_bundle_dialog_.action = SaveBundleAction::export_bundle;
     save_bundle_status_ = "Waiting for export location...";
-    const SDL_DialogFileFilter filters[] = {
+    static constexpr SDL_DialogFileFilter filters[] = {
         {"ToHeart2 saves", "th2saves"},
         {"All files", "*"},
     };
+    const auto default_path =
+        (writable_directory() / "toheart2-saves.th2saves").string();
     SDL_ShowSaveFileDialog(
         save_bundle_dialog_callback, &save_bundle_dialog_, window_,
-        filters, std::size(filters), "toheart2-saves.th2saves");
+        filters, std::size(filters), default_path.c_str());
 }
 
 void Game::show_save_bundle_import_dialog()
@@ -636,7 +638,7 @@ void Game::show_save_bundle_import_dialog()
     save_bundle_dialog_.error.clear();
     save_bundle_dialog_.action = SaveBundleAction::import_bundle;
     save_bundle_status_ = "Waiting for bundle selection...";
-    const SDL_DialogFileFilter filters[] = {
+    static constexpr SDL_DialogFileFilter filters[] = {
         {"ToHeart2 saves", "th2saves"},
         {"All files", "*"},
     };
