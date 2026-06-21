@@ -92,6 +92,10 @@ public:
         const std::optional<std::filesystem::path>& soak_directory,
         std::size_t soak_runs);
     ~Game();
+#ifdef __ANDROID__
+    static void handle_android_save_bundle_export_result(
+        const char* uri, const char* error);
+#endif
     int run();
     int run_loop();
 private:
@@ -567,6 +571,9 @@ private:
         std::string error;
     };
     SaveBundleDialog save_bundle_dialog_;
+#ifdef __ANDROID__
+    static SaveBundleDialog* android_save_bundle_export_dialog_;
+#endif
     std::string save_bundle_status_;
     bool name_input_open_ = false;
     std::string name_error_;

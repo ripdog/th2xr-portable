@@ -8,6 +8,9 @@
 #include <SDL3/SDL_system.h>
 #include <imgui.h>
 #include <zstd.h>
+#ifdef __ANDROID__
+#include <jni.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -30,6 +33,10 @@
 #endif
 
 namespace th2app {
+
+#ifdef __ANDROID__
+Game::SaveBundleDialog* Game::android_save_bundle_export_dialog_ = nullptr;
+#endif
 
 void Game::push_backlog()
 {
@@ -615,6 +622,35 @@ void Game::show_save_bundle_export_dialog()
     save_bundle_dialog_.error.clear();
     save_bundle_dialog_.action = SaveBundleAction::export_bundle;
     save_bundle_status_ = "Waiting for export location...";
+#ifdef __ANDROID__
+    android_save_bundle_export_dialog_ = &save_bundle_dialog_;
+    auto* env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+    jclass activity_class =
+        env ? env->FindClass("io/github/ripdog/th2xr_portable/GameActivity")
+            : nullptr;
+    jmethodID show_dialog = activity_class
+        ? env->GetStaticMethodID(
+              activity_class, "showSaveBundleExportDialog",
+              "(Ljava/lang/String;)Z")
+        : nullptr;
+    jstring default_filename =
+        env ? env->NewStringUTF("toheart2-saves.th2saves") : nullptr;
+    const bool started = env && activity_class && show_dialog && default_filename
+        && env->CallStaticBooleanMethod(
+            activity_class, show_dialog, default_filename);
+    if (default_filename) {
+        env->DeleteLocalRef(default_filename);
+    }
+    if (activity_class) {
+        env->DeleteLocalRef(activity_class);
+    }
+    if (!started) {
+        android_save_bundle_export_dialog_ = nullptr;
+        save_bundle_dialog_.error =
+            "Android save dialog did not start";
+        save_bundle_dialog_.done = true;
+    }
+#else
     static constexpr SDL_DialogFileFilter filters[] = {
         {"ToHeart2 saves", "th2saves"},
         {"All files", "*"},
@@ -624,6 +660,7 @@ void Game::show_save_bundle_export_dialog()
     SDL_ShowSaveFileDialog(
         save_bundle_dialog_callback, &save_bundle_dialog_, window_,
         filters, std::size(filters), default_path.c_str());
+#endif
 }
 
 void Game::show_save_bundle_import_dialog()
@@ -686,5 +723,50 @@ void Game::process_save_bundle_dialog()
     }
 }
 
+#ifdef __ANDROID__
+void Game::handle_android_save_bundle_export_result(
+    const char* uri, const char* error)
+{
+    auto* dialog = android_save_bundle_export_dialog_;
+    if (!dialog) {
+        return;
+    }
+    std::lock_guard lock(dialog->mutex);
+    if (error) {
+        dialog->error = error;
+    } else if (uri) {
+        dialog->path = uri;
+    }
+    dialog->done = true;
+    android_save_bundle_export_dialog_ = nullptr;
+}
+#endif
+
 
 }  // namespace th2app
+
+#ifdef __ANDROID__
+extern "C" JNIEXPORT void JNICALL
+Java_io_github_ripdog_th2xr_1portable_GameActivity_nativeSaveBundleExportResult(
+    JNIEnv* env, jclass, jstring uri, jstring error)
+{
+    std::string uri_string;
+    std::string error_string;
+    if (error) {
+        const char* chars = env->GetStringUTFChars(error, nullptr);
+        if (chars) {
+            error_string = chars;
+            env->ReleaseStringUTFChars(error, chars);
+        }
+    } else if (uri) {
+        const char* chars = env->GetStringUTFChars(uri, nullptr);
+        if (chars) {
+            uri_string = chars;
+            env->ReleaseStringUTFChars(uri, chars);
+        }
+    }
+    th2app::Game::handle_android_save_bundle_export_result(
+        uri_string.empty() ? nullptr : uri_string.c_str(),
+        error_string.empty() ? nullptr : error_string.c_str());
+}
+#endif
