@@ -5,6 +5,12 @@ plugins {
 def buildWithCMake = true
 
 def isCi = project.hasProperty('ci')
+def repoVersion = rootProject.file('../VERSION').text.trim()
+def numericVersion = repoVersion.split('-', 2)[0]
+def versionParts = numericVersion.tokenize('.').collect { it as int }
+def repoVersionCode = versionParts.withIndex().sum { part, index ->
+    part * Math.pow(100, versionParts.size() - index - 1).toInteger()
+}
 
 android {
     namespace = "io.github.ripdog.th2xr_portable"
@@ -16,8 +22,8 @@ android {
     defaultConfig {
         minSdkVersion 28
         targetSdkVersion 37
-        versionCode 1
-        versionName "1.0"
+        versionCode repoVersionCode
+        versionName repoVersion
         externalNativeBuild {
             ndkBuild {
                 arguments "APP_PLATFORM=android-21"
