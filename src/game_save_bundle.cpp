@@ -165,7 +165,7 @@ void Game::start_new_game()
     reset_play_state();
     initialize_scenario_flags();
     direct_scenario_ = false;
-    load_script("010301000.sdt");
+    load_script("EV_0301MORNING.SDT");
     ui_mode_ = UiMode::game;
     advance();
 }
