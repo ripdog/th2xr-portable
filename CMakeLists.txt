@@ -340,6 +340,16 @@ foreach(SHADER IN LISTS ANIME4K_SHADERS)
         VERBATIM)
     list(APPEND ANIME4K_SHADER_OUTPUTS
         "${ANIME4K_SHADER_DIR}/${SHADER}.frag.spv")
+    list(APPEND ANIME4K_SHADER_OUTPUTS
+        "${CMAKE_CURRENT_BINARY_DIR}/${ANIME4K_SHADER_DIR}/${SHADER}.frag.msl")
+    add_custom_command(
+        OUTPUT "${ANIME4K_SHADER_DIR}/${SHADER}.frag.msl"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${ANIME4K_SHADER_DIR}"
+        COMMAND "${CMAKE_COMMAND}" -E copy
+            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/anime4k/${SHADER}.frag.msl"
+            "${ANIME4K_SHADER_DIR}/${SHADER}.frag.msl"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/anime4k/${SHADER}.frag.msl"
+        VERBATIM)
     if(ANDROID)
         set(ANDROID_SHADER_ASSET
             "${CMAKE_CURRENT_SOURCE_DIR}/android/app/src/main/assets/${ANIME4K_SHADER_DIR}/${SHADER}.frag.spv")

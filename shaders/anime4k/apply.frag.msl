@@ -1,0 +1,48 @@
+#include <metal_stdlib>
+using namespace metal;
+
+struct FragmentInput {
+    float4 color [[user(locn0)]];
+    float2 uv [[user(locn1)]];
+};
+
+static float luma(texture2d<float> source_image, sampler source_sampler,
+                  float2 position)
+{
+    return dot(source_image.sample(source_sampler, position).rgb,
+               float3(0.299, 0.587, 0.114));
+}
+
+fragment float4 main0(
+    FragmentInput in [[stage_in]],
+    texture2d<float> source_image [[texture(0)]],
+    sampler source_sampler [[sampler(0)]])
+{
+    const float strength = 0.8;
+    const float w0 = 0.38774;
+    const float w1 = 0.24477;
+    const float w2 = 0.06136;
+    const float2 pixel = 1.0 / float2(source_image.get_width(),
+                                      source_image.get_height());
+    const float center = luma(source_image, source_sampler, in.uv);
+    float minimum = 1.0;
+    float maximum = 0.0;
+    float gaussian = 0.0;
+    for (int y = -2; y <= 2; ++y) {
+        const float wy = y == 0 ? w0 : abs(y) == 1 ? w1 : w2;
+        for (int x = -2; x <= 2; ++x) {
+            const float wx = x == 0 ? w0 : abs(x) == 1 ? w1 : w2;
+            const float sample_luma = luma(
+                source_image, source_sampler, in.uv + float2(x, y) * pixel);
+            gaussian += sample_luma * wx * wy;
+            if (abs(x) <= 1 && abs(y) <= 1) {
+                minimum = min(minimum, sample_luma);
+                maximum = max(maximum, sample_luma);
+            }
+        }
+    }
+    float correction = (center - gaussian) * strength;
+    correction = clamp(correction + center, minimum, maximum) - center;
+    return source_image.sample(source_sampler, in.uv) * in.color
+        + float4(float3(correction), 0.0);
+}

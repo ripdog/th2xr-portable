@@ -28,6 +28,9 @@ int main(int argc, char** argv)
         SDL_SetBooleanProperty(
             properties, SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN,
             true);
+        SDL_SetBooleanProperty(
+            properties, SDL_PROP_RENDERER_CREATE_GPU_SHADERS_MSL_BOOLEAN,
+            true);
         SDL_Renderer* renderer =
             SDL_CreateRendererWithProperties(properties);
         SDL_DestroyProperties(properties);

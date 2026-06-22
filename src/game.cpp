@@ -95,20 +95,31 @@ Game::Game(
     if (window_ && config_.window_x >= 0 && config_.window_y >= 0) {
         SDL_SetWindowPosition(window_, config_.window_x, config_.window_y);
     }
-    SDL_PropertiesID renderer_properties = SDL_CreateProperties();
-    SDL_SetStringProperty(
-        renderer_properties, SDL_PROP_RENDERER_CREATE_NAME_STRING,
-        SDL_GPU_RENDERER);
-    SDL_SetPointerProperty(
-        renderer_properties, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER,
-        window_);
-    SDL_SetBooleanProperty(
-        renderer_properties,
-        SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true);
-    renderer_ = window_
-        ? SDL_CreateRendererWithProperties(renderer_properties) : nullptr;
+    if (window_) {
+        SDL_PropertiesID renderer_properties = SDL_CreateProperties();
+        SDL_SetStringProperty(
+            renderer_properties, SDL_PROP_RENDERER_CREATE_NAME_STRING,
+            SDL_GPU_RENDERER);
+        SDL_SetPointerProperty(
+            renderer_properties, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER,
+            window_);
+        SDL_SetBooleanProperty(
+            renderer_properties,
+            SDL_PROP_RENDERER_CREATE_GPU_SHADERS_SPIRV_BOOLEAN, true);
+        SDL_SetBooleanProperty(
+            renderer_properties,
+            SDL_PROP_RENDERER_CREATE_GPU_SHADERS_MSL_BOOLEAN, true);
+        renderer_ = SDL_CreateRendererWithProperties(renderer_properties);
+        const char* gpu_error = renderer_ ? nullptr : SDL_GetError();
+        SDL_DestroyProperties(renderer_properties);
+        if (!renderer_) {
+            SDL_Log(
+                "GPU renderer unavailable, falling back to default renderer: %s",
+                gpu_error ? gpu_error : "unknown error");
+            renderer_ = SDL_CreateRenderer(window_, nullptr);
+        }
+    }
     renderer_holder_.reset(renderer_);
-    SDL_DestroyProperties(renderer_properties);
     if (!window_ || !renderer_) {
         throw std::runtime_error(SDL_GetError());
     }

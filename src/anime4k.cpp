@@ -53,15 +53,18 @@ struct Anime4K::Impl {
     std::vector<SDL_GPURenderState*> states;
     bool ready = false;
 
-    SDL_GPUShader* load_shader(const std::filesystem::path& path,
-                               int samplers)
+    SDL_GPUShader* load_shader(
+        const std::filesystem::path& path,
+        SDL_GPUShaderFormat format,
+        const char* entrypoint,
+        int samplers)
     {
         const auto code = read_file(path);
         SDL_GPUShaderCreateInfo info{};
         info.code = code.data();
         info.code_size = code.size();
-        info.entrypoint = "main";
-        info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+        info.entrypoint = entrypoint;
+        info.format = format;
         info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
         info.num_samplers = samplers;
         auto* shader = SDL_CreateGPUShader(device, &info);
@@ -100,13 +103,25 @@ struct Anime4K::Impl {
     void init()
     {
         device = SDL_GetGPURendererDevice(renderer);
-        if (!device
-            || !(SDL_GetGPUShaderFormats(device) & SDL_GPU_SHADERFORMAT_SPIRV)) {
+        if (!device) {
             return;
         }
+        const auto formats = SDL_GetGPUShaderFormats(device);
         art = target(800, 600);
         authentic_text = target(800, 600);
-        make_state(load_shader(shader_dir / "apply.frag.spv", 1));
+        if (formats & SDL_GPU_SHADERFORMAT_SPIRV) {
+            make_state(load_shader(
+                shader_dir / "apply.frag.spv",
+                SDL_GPU_SHADERFORMAT_SPIRV, "main", 1));
+        } else if (formats & SDL_GPU_SHADERFORMAT_MSL) {
+            make_state(load_shader(
+                shader_dir / "apply.frag.msl",
+                SDL_GPU_SHADERFORMAT_MSL, "main0", 1));
+        } else {
+            art.reset();
+            authentic_text.reset();
+            return;
+        }
         ready = true;
     }
 

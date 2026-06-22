@@ -13,6 +13,7 @@ mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hic
 cp build/toheart2 AppDir/usr/bin/
 mkdir -p AppDir/usr/bin/shaders/anime4k
 cp build/shaders/anime4k/apply.frag.spv AppDir/usr/bin/shaders/anime4k/
+cp build/shaders/anime4k/apply.frag.msl AppDir/usr/bin/shaders/anime4k/
 
 cat > AppDir/usr/share/applications/toheart2.desktop << 'EOF'
 [Desktop Entry]
